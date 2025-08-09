@@ -1,4 +1,4 @@
-import { dbConnection, startDatabase } from "@mutualzz/database*";
+import { dbConnection, startDatabase } from "@mutualzz/database";
 import { Server } from "./Server";
 
 if (!dbConnection) startDatabase();

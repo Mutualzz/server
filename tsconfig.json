@@ -28,11 +28,11 @@
         "baseUrl": "./src",
 
         "paths": {
-            "@mutualzz/rest*": ["./rest"],
-            "@mutualzz/database*": ["./database"],
-            "@mutualzz/gateway*": ["./gateway"],
-            "@mutualzz/cdn*": ["./cdn"],
-            "@mutualzz/util*": ["./util"]
+            "@mutualzz/rest": ["./rest"],
+            "@mutualzz/database": ["./database"],
+            "@mutualzz/gateway": ["./gateway"],
+            "@mutualzz/cdn": ["./cdn"],
+            "@mutualzz/util": ["./util"]
         }
     }
 }
