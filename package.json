@@ -44,6 +44,7 @@
     "scripts": {
         "build": "pnpm typecheck && tsup",
         "dev": "tsup --watch --env.NODE_ENV development --onSuccess \"tsx -r dotenv/config ./dist/bundle/index.mjs\"",
+        "prestart": "pnpm build",
         "start": "node dist/bundle/start.js",
         "start:api": "node dist/api/start.js",
         "start:cdn": "node dist/cdn/start.js",
