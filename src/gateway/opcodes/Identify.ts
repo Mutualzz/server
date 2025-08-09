@@ -48,6 +48,8 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     }
 
     this.userId = user.id;
+    this.sequence = 0;
+
     await saveSession({
         sessionId: this.sessionId,
         userId: user.id,

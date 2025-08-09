@@ -1,36 +1,42 @@
-import { GatewayCloseCodes } from "@mutualzz/types";
+import { GatewayCloseCodes, type GatewayPayload } from "@mutualzz/types";
 import { logger } from "../../util/Logger";
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
 import type { WebSocket } from "../util/WebSocket";
 
-export async function onResume(this: WebSocket, data: { sessionId: string }) {
-    const existing = await getSession(data.sessionId);
-    if (!existing) {
-        logger.error(`Session not found for resume: ${data.sessionId}`);
+export async function onResume(this: WebSocket, data: GatewayPayload) {
+    const resume = data.d;
+
+    const session = await getSession(resume.sessionId);
+
+    if (!session) {
+        logger.error(`Session not found for resume: ${resume.sessionId}`);
         await Send(this, {
             op: "InvalidSession",
-            d: {
-                reason: "Session not found",
-            },
+            d: false,
         });
 
         return this.close(GatewayCloseCodes.InvalidSession, "Invalid session");
     }
 
-    this.userId = existing.userId;
-    this.sequence = existing.seq;
-    this.sessionId = data.sessionId;
+    this.sessionId = resume.sessionId;
+    this.userId = session.userId;
+    this.sequence = session.seq;
+
+    await saveSession({
+        sessionId: this.sessionId,
+        userId: this.userId,
+        seq: this.sequence,
+    });
 
     await Send(this, {
         op: "Dispatch",
         t: "Resume",
         d: {
             sessionId: this.sessionId,
+            seq: this.sequence,
         },
     });
-
-    await saveSession(this.sessionId, this.userId, this.sequence);
 
     logger.info(`Session resumed: ${this.sessionId}`);
 }
