@@ -91,8 +91,6 @@ export default class AuthController {
             // Destructure and validate request body
             const { username, email, password } = validateLogin.parse(req.body);
 
-            console.log(req.body);
-
             // Find user by username or email
             const user = await UserModel.findOne({
                 $or: [{ username }, { email }],
