@@ -45,10 +45,9 @@
         "build": "pnpm typecheck && tsup",
         "dev": "tsup --watch --env.NODE_ENV development --onSuccess \"tsx -r dotenv/config ./dist/bundle/index.mjs\"",
         "prestart": "pnpm build",
-        "start": "node dist/bundle/start.js",
-        "start:api": "node dist/api/start.js",
-        "start:cdn": "node dist/cdn/start.js",
-        "start:gateway": "node dist/gateway/start.js",
+        "start": "node ./dist/bundle/index.js",
+        "start:api": "node ./dist/api/start.js",
+        "start:gateway": "node ./dist/gateway/start.js",
         "typecheck": "tsc --noEmit"
     },
     "version": "1.3.0"
