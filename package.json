@@ -39,13 +39,8 @@
         "tsx": "^4.20.3"
     },
     "keywords": [],
-    "license": "ISC",
     "name": "@mutualzz/server",
     "private": true,
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/spacebarchat/server.git"
-    },
     "scripts": {
         "build": "pnpm typecheck && tsup",
         "dev": "tsup --watch --env.NODE_ENV development --onSuccess \"tsx -r dotenv/config ./dist/bundle/index.mjs\"",
