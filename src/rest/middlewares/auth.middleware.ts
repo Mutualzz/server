@@ -1,7 +1,8 @@
 import { UserModel } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { verifySessionToken } from "@mutualzz/util";
+
 import type { NextFunction, Request, Response } from "express";
+import { verifySessionToken } from "../utils";
 
 const { JWT_SECRET } = process.env;
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined");

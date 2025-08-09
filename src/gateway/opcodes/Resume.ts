@@ -1,7 +1,7 @@
 import { GatewayCloseCodes } from "@mutualzz/types";
 import { logger } from "../../util/Logger";
-import { getSession, saveSession } from "../../util/Session";
 import { Send } from "../util/Send";
+import { getSession, saveSession } from "../util/Session";
 import type { WebSocket } from "../util/WebSocket";
 
 export async function onResume(this: WebSocket, data: { sessionId: string }) {

@@ -1,17 +1,26 @@
-import { GatewayCloseCodes, type GatewaySession } from "@mutualzz/types";
-import { saveSession } from "util/Session";
+import { UserModel } from "@mutualzz/database";
+import {
+    GatewayCloseCodes,
+    type GatewayPayload,
+    type RESTSession,
+} from "@mutualzz/types";
 import { logger } from "../../util/Logger";
 import { redis } from "../../util/Redis";
+import { saveSession } from "../util";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
 
-export async function onIdentify(this: WebSocket, data: { token: string }) {
+export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     if (this.userId) return;
 
-    const rawSession = await redis.get(`rest:sessions:${data.token}`);
+    clearTimeout(this.readyTimeout);
+
+    const identify = data.d;
+
+    const rawSession = await redis.get(`rest:sessions:${identify.token}`);
     if (!rawSession) {
         logger.error(
-            `Invalid token for session ${this.sessionId}: ${data.token}`,
+            `Invalid token for session ${this.sessionId}: ${identify.token}`,
         );
         await Send(this, {
             op: "InvalidSession",
@@ -22,15 +31,32 @@ export async function onIdentify(this: WebSocket, data: { token: string }) {
         return this.close(GatewayCloseCodes.InvalidSession, "Invalid token");
     }
 
-    clearTimeout(this.readyTimeout);
+    const session: RESTSession = JSON.parse(rawSession);
 
-    const session: GatewaySession = JSON.parse(rawSession);
+    this.sessionId = session.sessionId;
 
-    this.userId = session.userId;
+    const user = await UserModel.findById(session.userId);
+    if (!user) {
+        logger.error(`User not found for session ${this.sessionId}`);
+        await Send(this, {
+            op: "InvalidSession",
+            d: {
+                reason: "Invalid user",
+            },
+        });
+        return this.close(GatewayCloseCodes.InvalidSession, "Invalid user");
+    }
+
+    this.userId = user.id;
+    await saveSession({
+        sessionId: this.sessionId,
+        userId: user.id,
+        seq: this.sequence,
+    });
 
     const d = {
         sessionId: this.sessionId,
-        user: { id: this.userId },
+        user: user.toJSON(),
     };
 
     await Send(this, {
@@ -39,8 +65,6 @@ export async function onIdentify(this: WebSocket, data: { token: string }) {
         s: this.sequence++,
         d,
     });
-
-    await saveSession(this.sessionId, this.userId, this.sequence);
 
     logger.info(
         `Session authenticated: ${this.sessionId} (user: ${this.userId})`,

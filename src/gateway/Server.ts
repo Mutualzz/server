@@ -2,6 +2,7 @@ import { closeDatabase } from "@mutualzz/database";
 import http, { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
 import { logger } from "../util/Logger";
+import Connection from "./events/Connection";
 import { DEFAULT_PORT } from "./util/Constants";
 
 export class Server {
@@ -38,6 +39,11 @@ export class Server {
                 threshold: 1024,
             },
             maxPayload: 4096,
+        });
+
+        this.ws.on("connection", Connection);
+        this.ws.on("error", (err) => {
+            logger.error(`[Gateway] WebSocket error: ${err}`);
         });
     }
 

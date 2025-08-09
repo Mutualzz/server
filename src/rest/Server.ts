@@ -101,7 +101,7 @@ export class Server {
                 continue;
             }
 
-            const rawPath = routeFile.replace(/\.routes\.(ts|js)$/, "");
+            const rawPath = routeFile.replace(/\.routes\.(ts|js|mjs)$/, "");
             const cleanedPath = rawPath
                 .replace(/\/index$/, "") // remove trailing /index
                 .split(path.sep)

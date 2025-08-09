@@ -2,14 +2,14 @@ import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { validateLogin, validateRegister } from "@mutualzz/validators";
 
 import { UserModel } from "@mutualzz/database";
-import {
-    createSession,
-    generateSessionToken,
-    genSnowflake,
-} from "@mutualzz/util";
+import { generateSessionId, genSnowflake } from "@mutualzz/util";
 import bcrypt from "bcrypt";
 import { type NextFunction, type Request, type Response } from "express";
-import { BCRYPT_SALT_ROUNDS } from "../utils/Constants";
+import {
+    BCRYPT_SALT_ROUNDS,
+    createSession,
+    generateSessionToken,
+} from "../utils";
 
 // TODO: Add default avatars from Furxus (it will work lol)
 export default class AuthController {
@@ -64,7 +64,8 @@ export default class AuthController {
             });
 
             const token = generateSessionToken(newUser.id);
-            await createSession(token, newUser.id);
+            const sessionId = generateSessionId();
+            await createSession(token, newUser.id, sessionId);
 
             const jsonToReturn = {
                 id: newUser.id,
@@ -89,6 +90,8 @@ export default class AuthController {
         try {
             // Destructure and validate request body
             const { username, email, password } = validateLogin.parse(req.body);
+
+            console.log(req.body);
 
             // Find user by username or email
             const user = await UserModel.findOne({
@@ -125,7 +128,8 @@ export default class AuthController {
                 );
 
             const token = generateSessionToken(user.id);
-            await createSession(token, user.id);
+            const sessionId = generateSessionId();
+            await createSession(token, user.id, sessionId);
 
             // Respond with success and token and user data
             res.status(HttpStatusCode.Success).json({

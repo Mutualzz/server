@@ -11,7 +11,7 @@ export async function Message(this: WebSocket, buffer: Data) {
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!OPCodeHandler) {
-        logger.error(`[Gateway] Unknown OPCode: ${data.op}`);
+        logger.error(`[Gateway] Unknown Opcode: ${data.op}`);
         return;
     }
 
@@ -19,7 +19,7 @@ export async function Message(this: WebSocket, buffer: Data) {
         await OPCodeHandler.call(this, data);
     } catch (error) {
         logger.error(
-            `[Gateway] Error while handling OPCode ${data.op}: ${error}`,
+            `[Gateway] Error while handling Opcode ${data.op}: ${error}`,
         );
     }
 }

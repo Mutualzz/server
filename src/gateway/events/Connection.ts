@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import { GatewayCloseCodes } from "@mutualzz/types";
 import type { IncomingMessage } from "http";
 import type { WebSocketServer } from "ws";
 import { logger } from "../../util/Logger";
@@ -15,19 +15,20 @@ export default async function Connection(
 ) {
     const ipAddress = request.socket.remoteAddress;
 
-    if (!ipAddress) {
-        return socket.close(1008, "Invalid IP address");
-    }
+    if (!ipAddress)
+        return socket.close(
+            GatewayCloseCodes.InvalidConnection,
+            "Invalid IP address",
+        );
 
     socket.ipAddress = ipAddress;
-    socket.userAgent = request.headers["user-agent"] as string;
+    socket.userAgent = request.headers["user-agent"];
 
-    if (!socket.userAgent) {
-        return socket.close(1008, "Invalid User-Agent");
-    }
-
-    const sessionId = crypto.randomBytes(16).toString("hex");
-    socket.sessionId = sessionId;
+    if (!socket.userAgent)
+        return socket.close(
+            GatewayCloseCodes.InvalidConnection,
+            "Invalid User-Agent",
+        );
 
     try {
         // @ts-expect-error The types errors do not matter in this case
@@ -51,6 +52,6 @@ export default async function Connection(
         }, HEARTBEAT_INTERVAL * 2);
     } catch (err) {
         logger.error(err);
-        socket.close(1008, "Internal Server Error");
+        socket.close(GatewayCloseCodes.UnknownError, "Internal Server Error");
     }
 }
