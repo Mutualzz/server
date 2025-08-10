@@ -67,19 +67,9 @@ export default class AuthController {
             const sessionId = generateSessionId();
             await createSession(token, newUser.id, sessionId);
 
-            const jsonToReturn = {
-                id: newUser.id,
-                username: newUser.username,
-                globalName: newUser.globalName,
-                email: newUser.email,
-                createdAt: newUser.createdAt,
-                createdTimestamp: newUser.createdTimestamp,
-            };
-
             // Respond with success
             res.status(HttpStatusCode.Created).json({
                 token,
-                ...jsonToReturn,
             });
         } catch (error) {
             next(error);
@@ -132,7 +122,6 @@ export default class AuthController {
             // Respond with success and token and user data
             res.status(HttpStatusCode.Success).json({
                 token,
-                ...user.toJSON(),
             });
         } catch (error) {
             next(error);
