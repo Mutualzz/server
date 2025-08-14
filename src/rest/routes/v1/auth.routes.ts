@@ -3,7 +3,7 @@ import { createRouter } from "../../utils";
 
 const router = createRouter();
 
-router.post(`/login`, (...args) => AuthController.login(...args));
-router.post(`/register`, (...args) => AuthController.register(...args));
+router.post(`/login`, AuthController.login);
+router.post(`/register`, AuthController.register);
 
 export default router;

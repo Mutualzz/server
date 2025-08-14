@@ -3,6 +3,6 @@ import { createRouter } from "../../utils";
 
 const router = createRouter();
 
-router.get(`/ack`, (...args) => MainController.ack(...args));
+router.get(`/ack`, MainController.ack);
 
 export default router;
