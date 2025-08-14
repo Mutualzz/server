@@ -50,7 +50,7 @@ export default class AuthController {
             const salt = bcrypt.genSaltSync(BCRYPT_SALT_ROUNDS);
             const hash = bcrypt.hashSync(password, salt);
 
-            const newUser = await UserModel.create({
+            const newUser = new UserModel({
                 _id: genSnowflake(),
                 username,
                 email,
@@ -62,6 +62,8 @@ export default class AuthController {
                 updatedAt: new Date(),
                 updatedTimestamp: Date.now(),
             });
+
+            await newUser.save();
 
             const token = generateSessionToken(newUser.id);
             const sessionId = generateSessionId();
