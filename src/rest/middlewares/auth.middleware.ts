@@ -37,9 +37,10 @@ const authMiddleware = async (
             );
 
         req.user = {
-            ...user,
+            ...user.toJSON(),
             token,
-        };
+        } as any;
+        // Sadly we have to do "as any" because for some odd reason mongodb types dont allow me to add user json, evne though it gets transformed during runtime
 
         next();
     } catch (err) {
