@@ -58,6 +58,8 @@ const userSchema = new Schema(
         },
     },
     {
+        _id: false,
+        id: false,
         virtuals: {
             id: {
                 get: function () {
