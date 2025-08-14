@@ -28,6 +28,18 @@ const userSchema = new Schema(
             type: String,
             required: true,
         },
+        themes: {
+            type: [String],
+            ref: "themes",
+            default: [],
+        },
+        settings: {
+            currentTheme: {
+                type: String,
+                ref: "themes",
+                default: "ashenDusk",
+            },
+        },
         createdTimestamp: {
             type: Number,
             required: true,
