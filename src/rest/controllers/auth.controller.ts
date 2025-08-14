@@ -51,7 +51,7 @@ export default class AuthController {
             const hash = bcrypt.hashSync(password, salt);
 
             const newUser = await UserModel.create({
-                id: genSnowflake(),
+                _id: genSnowflake(),
                 username,
                 email,
                 globalName,

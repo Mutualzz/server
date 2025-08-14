@@ -29,7 +29,7 @@ export default class MeThemesController {
                     : validatedTheme.name;
 
             const newTheme = new ThemeModel({
-                id: genSnowflake(),
+                _id: genSnowflake(),
                 ...validatedTheme,
                 name: newName,
                 createdBy: user.id,
