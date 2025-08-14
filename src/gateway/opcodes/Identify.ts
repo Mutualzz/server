@@ -35,7 +35,9 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
     this.sessionId = session.sessionId;
 
-    const user = await UserModel.findById(session.userId);
+    const user = await UserModel.findById(session.userId)
+        .populate("themes")
+        .populate("settings.currentTheme");
     if (!user) {
         logger.error(`User not found for session ${this.sessionId}`);
         await Send(this, {
