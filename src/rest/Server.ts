@@ -35,6 +35,20 @@ export class Server {
             : Number(process.env.REST_PORT);
     }
 
+    async start() {
+        await this.init();
+
+        this.http.listen(this.port, () => {
+            logger.info(`[REST] Server is running on port ${this.port}`);
+        });
+    }
+
+    async stop() {
+        this.http.close(() => {
+            logger.info(`[REST] Server is stopped`);
+        });
+    }
+
     private initHeadMiddlewares() {
         this.app.use(
             cors({
@@ -43,6 +57,7 @@ export class Server {
                     "http://localhost:5173",
                     "https://mutualzz.com",
                     "https://gateway.mutualzz.com",
+                    "tauri://localhost",
                 ],
                 credentials: true,
             }),
@@ -129,20 +144,6 @@ export class Server {
 
     private initErrorHandling() {
         this.app.use(errorMiddleware);
-    }
-
-    async start() {
-        await this.init();
-
-        this.http.listen(this.port, () => {
-            logger.info(`[REST] Server is running on port ${this.port}`);
-        });
-    }
-
-    async stop() {
-        this.http.close(() => {
-            logger.info(`[REST] Server is stopped`);
-        });
     }
 
     private async init() {
