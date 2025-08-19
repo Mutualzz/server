@@ -1,6 +1,7 @@
 {
     "author": "",
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.864.0",
         "@mutualzz/logger": "workspace:*",
         "@sentry/node": "^10.2.0",
         "@sentry/profiling-node": "^10.3.0",
@@ -15,9 +16,12 @@
         "fast-glob": "^3.3.3",
         "helmet": "^8.1.0",
         "ioredis": "^5.7.0",
+        "lru-cache": "^11.1.0",
         "mongoose": "^8.17.1",
         "morgan": "^1.10.1",
         "multer": "^2.0.2",
+        "node-cloudflare-r2": "^0.5.0",
+        "sharp": "^0.34.3",
         "ws": "^8.18.3",
         "zlib-sync": "^0.1.10",
         "zod": "^4.0.15"
