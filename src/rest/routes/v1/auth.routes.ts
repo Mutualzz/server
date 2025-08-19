@@ -1,5 +1,5 @@
+import { createRouter } from "@mutualzz/util";
 import AuthController from "../../controllers/auth.controller";
-import { createRouter } from "../../utils";
 
 const router = createRouter();
 

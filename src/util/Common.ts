@@ -1,4 +1,5 @@
 import { Snowflake } from "@theinternetfolks/snowflake";
+import express from "express";
 import { threadId } from "worker_threads";
 import { SNOWFLAKE_EPOCH_TIMESTAMP } from "./Constants";
 
@@ -14,3 +15,5 @@ export const base64UrlEncode = (input: Buffer | string) =>
         .replace(/=/g, "")
         .replace(/\+/g, "-")
         .replace(/\//g, "_");
+
+export const createRouter = () => express.Router({ mergeParams: true });
