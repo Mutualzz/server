@@ -1,9 +1,10 @@
-import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { defaultAvatars, HttpException, HttpStatusCode } from "@mutualzz/types";
 import { validateLogin, validateRegister } from "@mutualzz/validators";
 
 import { UserModel } from "@mutualzz/database";
 import { generateSessionId, genSnowflake } from "@mutualzz/util";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { type NextFunction, type Request, type Response } from "express";
 import {
     BCRYPT_SALT_ROUNDS,
@@ -50,12 +51,16 @@ export default class AuthController {
             const salt = bcrypt.genSaltSync(BCRYPT_SALT_ROUNDS);
             const hash = bcrypt.hashSync(password, salt);
 
+            const defaultAvatar =
+                defaultAvatars[crypto.randomInt(0, defaultAvatars.length)];
+
             const newUser = new UserModel({
                 _id: genSnowflake(),
                 username,
                 email,
                 globalName,
                 password: hash,
+                defaultAvatar,
                 dateOfBirth,
                 createdAt: new Date(),
                 createdTimestamp: Date.now(),
