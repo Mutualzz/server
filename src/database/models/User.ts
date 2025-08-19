@@ -20,6 +20,18 @@ const userSchema = new Schema(
             type: String,
             required: false,
         },
+        defaultAvatar: {
+            type: String,
+            required: true,
+        },
+        avatar: {
+            type: String,
+            required: false,
+        },
+        previousAvatars: {
+            type: [String],
+            default: [],
+        },
         dateOfBirth: {
             type: Date,
             required: true,
