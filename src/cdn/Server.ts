@@ -1,5 +1,6 @@
 import { logger } from "@mutualzz/util";
 import bodyParser from "body-parser";
+import cors from "cors";
 import express, { Router } from "express";
 import fg from "fast-glob";
 import { createServer } from "http";
@@ -35,6 +36,12 @@ export class Server {
     }
 
     private initHeadMiddlewares() {
+        this.app.use(
+            cors({
+                origin: "*",
+            }),
+        );
+
         this.app.use(
             morgan(process.env.NODE_ENV === "production" ? "tiny" : "dev"),
         );

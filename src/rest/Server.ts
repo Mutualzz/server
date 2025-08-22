@@ -58,6 +58,7 @@ export class Server {
                     "https://mutualzz.com",
                     "https://gateway.mutualzz.com",
                     "tauri://localhost",
+                    "http://tauri.localhost",
                 ],
                 credentials: true,
             }),
