@@ -15,6 +15,10 @@ const themeSchema = new Schema(
             type: String,
             required: true,
         },
+        mode: {
+            type: String,
+            required: true,
+        },
         colors: {
             common: {
                 white: String,
