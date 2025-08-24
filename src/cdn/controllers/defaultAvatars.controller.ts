@@ -1,11 +1,11 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { bucketName, s3Client } from "@mutualzz/util";
 import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
 import { LRUCache } from "lru-cache";
 import path from "path";
 import sharp, { type FormatEnum } from "sharp";
-import { bucketName, s3Client } from "util/S3";
 import { MIME_TYPES } from "../utils/Constants";
 
 const defaultAvatarCache = new LRUCache<string, Uint8Array>({
@@ -30,7 +30,6 @@ export default class DefaultAvatarsController {
             let cacheKey = `${name}:${finalFormat}`;
             if (size) cacheKey += `:${size}`;
 
-            // 🔹 Try cache first
             let outputBuffer = defaultAvatarCache.get(cacheKey);
 
             if (!outputBuffer) {
