@@ -12,7 +12,6 @@ import {
     generateSessionToken,
 } from "../utils";
 
-// TODO: Add default avatars from Furxus (it will work lol)
 export default class AuthController {
     static async register(req: Request, res: Response, next: NextFunction) {
         try {
