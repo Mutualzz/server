@@ -4,8 +4,6 @@ import MeController from "../../../controllers/@me/index.controller";
 
 const router = createRouter();
 
-router.patch("/", MeController.patchMe);
-
-export const middlewares = [upload.single("avatar")];
+router.patch("/", upload.single("avatar"), MeController.patchMe);
 
 export default router;

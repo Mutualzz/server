@@ -8,6 +8,7 @@ import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, dominantHex, s3Client } from "@mutualzz/util";
 import { validateMePatch } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
+import path from "path";
 import { generateHash } from "../../utils";
 
 export default class MeController {
@@ -62,25 +63,39 @@ export default class MeController {
                     }
                 }
 
+                const extName = path
+                    .extname(avatarFile.originalname)
+                    .replace(".", "");
+
                 const avatarHash = generateHash(
                     avatarFile.buffer,
                     avatarFile.mimetype.includes("gif"),
                 );
 
-                const { Body: existingAvatar } = await s3Client.send(
-                    new GetObjectCommand({
-                        Bucket: bucketName,
-                        Key: `avatars/${user.id}/${avatarHash}`,
-                    }),
-                );
+                let existingAvatar = null;
+
+                try {
+                    const { Body } = await s3Client.send(
+                        new GetObjectCommand({
+                            Bucket: bucketName,
+                            Key: `avatars/${user.id}/${avatarHash}.${extName}`,
+                        }),
+                    );
+
+                    existingAvatar = Body;
+                } catch {
+                    // Ignore since the avatar is already assigned null
+                }
 
                 if (!existingAvatar) {
-                    new PutObjectCommand({
-                        Bucket: bucketName,
-                        Body: avatarFile.buffer,
-                        Key: `avatars/${user.id}/${avatarHash}`,
-                        ContentType: avatarFile.mimetype,
-                    });
+                    await s3Client.send(
+                        new PutObjectCommand({
+                            Bucket: bucketName,
+                            Body: avatarFile.buffer,
+                            Key: `avatars/${user.id}/${avatarHash}.${extName}`,
+                            ContentType: avatarFile.mimetype,
+                        }),
+                    );
                 }
 
                 user.avatar = avatarHash;
@@ -88,12 +103,15 @@ export default class MeController {
             }
 
             if (avatar) {
-                user.avatar = avatar;
+                const extName = path.extname(avatar).replace(".", "");
+                const avatarHash = avatar.replace(/\.[^/.]+$/, "");
+
+                user.avatar = avatarHash;
 
                 const { Body: avatarObject } = await s3Client.send(
                     new GetObjectCommand({
                         Bucket: bucketName,
-                        Key: `avatars/${user.id}/${avatar}`,
+                        Key: `avatars/${user.id}/${avatar}.${extName}`,
                     }),
                 );
                 if (avatarObject) {
