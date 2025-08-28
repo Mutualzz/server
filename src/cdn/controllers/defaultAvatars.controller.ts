@@ -50,25 +50,29 @@ export default class DefaultAvatarsController {
 
                 const originalBuffer = await Body.transformToByteArray();
 
-                let image = sharp(originalBuffer);
+                if (!size && !formatQuery) {
+                    outputBuffer = originalBuffer;
+                } else {
+                    let image = sharp(originalBuffer);
 
-                if (formatQuery) {
-                    image = image.toFormat(formatQuery as keyof FormatEnum);
+                    if (formatQuery) {
+                        image = image.toFormat(formatQuery as keyof FormatEnum);
+                    }
+
+                    if (size && !isNaN(Number(size))) {
+                        const numericSize = Number(size);
+                        image = image.resize({
+                            width: numericSize,
+                            height: numericSize,
+                        });
+                    }
+
+                    // Single transformation → Buffer
+                    outputBuffer = await image.toBuffer();
+
+                    // Cache the transformed result
+                    defaultAvatarCache.set(cacheKey, outputBuffer);
                 }
-
-                if (size && !isNaN(Number(size))) {
-                    const numericSize = Number(size);
-                    image = image.resize({
-                        width: numericSize,
-                        height: numericSize,
-                    });
-                }
-
-                // 🔹 Single transformation → Buffer
-                outputBuffer = await image.toBuffer();
-
-                // Cache the transformed result
-                defaultAvatarCache.set(cacheKey, outputBuffer);
             }
 
             // Compute ETag from transformed buffer
