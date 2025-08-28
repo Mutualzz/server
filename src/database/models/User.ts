@@ -1,4 +1,3 @@
-import { genRandColor } from "@mutualzz/util";
 import { Schema, model } from "mongoose";
 
 const userSchema = new Schema(
@@ -19,8 +18,7 @@ const userSchema = new Schema(
         },
         accentColor: {
             type: String,
-            required: false,
-            default: genRandColor(),
+            required: true,
         },
         globalName: {
             type: String,
@@ -33,6 +31,7 @@ const userSchema = new Schema(
         avatar: {
             type: String,
             required: false,
+            default: null,
         },
         previousAvatars: {
             type: [String],

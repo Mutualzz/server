@@ -2,7 +2,7 @@ import { defaultAvatars, HttpException, HttpStatusCode } from "@mutualzz/types";
 import { validateLogin, validateRegister } from "@mutualzz/validators";
 
 import { UserModel } from "@mutualzz/database";
-import { generateSessionId, genSnowflake } from "@mutualzz/util";
+import { generateSessionId, genRandColor, genSnowflake } from "@mutualzz/util";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { type NextFunction, type Request, type Response } from "express";
@@ -53,12 +53,15 @@ export default class AuthController {
             const defaultAvatar =
                 defaultAvatars[crypto.randomInt(0, defaultAvatars.length)];
 
+            const accentColor = genRandColor();
+
             const newUser = new UserModel({
                 _id: genSnowflake(),
                 username,
                 email,
                 globalName,
                 password: hash,
+                accentColor: `#${accentColor}`,
                 defaultAvatar,
                 dateOfBirth,
                 createdAt: new Date(),
