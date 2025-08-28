@@ -140,7 +140,7 @@ export class Server {
 
             this.app.use(routePath, ...middlewares, route);
             logger.debug(
-                `[REST] Route "${routePath}" loaded from "${routeFile}"`,
+                `[REST] Route "${routePath}" loaded from "${routeFile}"${middlewares.length > 0 ? ` with middlewares: ${middlewares.map((m) => m.name).join(", ")}` : ""}`,
             );
         }
     }
