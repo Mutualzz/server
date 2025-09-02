@@ -87,6 +87,19 @@ const userSchema = new Schema(
                 },
             },
         },
+
+        methods: {
+            toPublicUser: function () {
+                const newUser = { ...this.toObject(), id: this._id };
+                delete (newUser as Partial<typeof newUser>)._id;
+                delete (newUser as Partial<typeof newUser>).email;
+                delete (newUser as Partial<typeof newUser>).password;
+                delete (newUser as Partial<typeof newUser>).previousAvatars;
+                delete (newUser as Partial<typeof newUser>).settings;
+                return newUser;
+            },
+        },
+
         // Making sure we remove sensitive data from the response
         toJSON: {
             virtuals: true,
