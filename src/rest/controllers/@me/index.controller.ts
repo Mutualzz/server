@@ -9,6 +9,7 @@ import { bucketName, dominantHex, s3Client } from "@mutualzz/util";
 import { validateMePatch } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 import path from "path";
+import sharp from "sharp";
 import { generateHash } from "../../utils";
 
 export default class MeController {
@@ -66,6 +67,26 @@ export default class MeController {
                 const extName = path
                     .extname(avatarFile.originalname)
                     .replace(".", "");
+
+                const crop = JSON.parse(req.body.crop);
+
+                const { x, y, width, height } = crop;
+
+                const isGif = avatarFile.mimetype === "image/gif";
+
+                let avatarSharp;
+                if (isGif)
+                    avatarSharp = sharp(avatarFile.buffer, { animated: true });
+                else avatarSharp = sharp(avatarFile.buffer);
+
+                avatarFile.buffer = await avatarSharp
+                    .extract({
+                        left: x,
+                        top: y,
+                        width,
+                        height,
+                    })
+                    .toBuffer();
 
                 const avatarHash = generateHash(
                     avatarFile.buffer,
