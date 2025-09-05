@@ -3,7 +3,7 @@ import { closeDatabase, startDatabase } from "@mutualzz/database";
 import * as CDN from "@mutualzz/cdn";
 import * as Gateway from "@mutualzz/gateway";
 import * as REST from "@mutualzz/rest";
-import { logger } from "@mutualzz/util";
+import { logger, RabbitMQ } from "@mutualzz/util";
 
 const rest = new REST.Server();
 const gateway = new Gateway.Server();
@@ -15,13 +15,19 @@ process.on("SIGTERM", async () => {
     await rest.stop();
     await cdn.stop();
 
+    await RabbitMQ.connection.close();
     await closeDatabase();
 });
 
 async function main() {
     await startDatabase();
 
-    await Promise.all([rest.start(), gateway.start(), cdn.start()]);
+    await Promise.all([
+        RabbitMQ.init(),
+        rest.start(),
+        gateway.start(),
+        cdn.start(),
+    ]);
 }
 
 main().catch((error) => {

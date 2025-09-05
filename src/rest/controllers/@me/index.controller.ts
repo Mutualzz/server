@@ -10,6 +10,7 @@ import { validateMePatch } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 import path from "path";
 import sharp from "sharp";
+import { emitEvent } from "util/Event";
 import { generateHash } from "../../utils";
 
 export default class MeController {
@@ -148,6 +149,12 @@ export default class MeController {
             }
 
             await user.save();
+
+            await emitEvent({
+                event: "UserUpdate",
+                user_id: user.id,
+                data: user,
+            });
 
             res.status(HttpStatusCode.Success).json(user);
         } catch (err) {
