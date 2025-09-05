@@ -40,7 +40,7 @@
         "@types/ws": "^8.18.1",
         "dotenv": "^17.2.1",
         "eslint": "^9.32.0",
-        "tsup": "^8.5.0",
+        "tsdown": "^0.14.2",
         "tsx": "^4.20.3"
     },
     "keywords": [],
@@ -48,7 +48,7 @@
     "private": true,
     "scripts": {
         "build": "pnpm typecheck && tsup",
-        "dev": "tsup --watch --env.NODE_ENV development --onSuccess \"tsx -r dotenv/config ./dist/bundle/index.mjs\"",
+        "dev": "tsdown --watch --env.NODE_ENV development --on-success \"tsx -r dotenv/config ./dist/bundle/index.mjs\"",
         "prestart": "pnpm build",
         "start": "tsx -r dotenv/config ./dist/bundle/index.mjs",
         "start:api": "tsx -r dotenv/config ./dist/api/start.mjs",
