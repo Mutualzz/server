@@ -4,6 +4,7 @@ import {
     type GatewayPayload,
     type RESTSession,
 } from "@mutualzz/types";
+import { setupListener } from "gateway/Listener";
 import { logger } from "../../util/Logger";
 import { redis } from "../../util/Redis";
 import { saveSession } from "../util";
@@ -73,4 +74,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     logger.info(
         `Session authenticated: ${this.sessionId} (user: ${this.userId})`,
     );
+
+    await setupListener.call(this);
 }
