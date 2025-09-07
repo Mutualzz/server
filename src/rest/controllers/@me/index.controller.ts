@@ -63,6 +63,8 @@ export default class MeController {
                             );
                         }
                     }
+
+                    user.markModified("previousAvatars");
                 }
 
                 const extName = path
@@ -78,7 +80,7 @@ export default class MeController {
                 let avatarSharp;
                 if (isGif)
                     avatarSharp = sharp(avatarFile.buffer, { animated: true });
-                else avatarSharp = sharp(avatarFile.buffer);
+                else avatarSharp = sharp(avatarFile.buffer).toFormat("png");
 
                 avatarFile.buffer = await avatarSharp
                     .extract({
@@ -114,8 +116,8 @@ export default class MeController {
                         new PutObjectCommand({
                             Bucket: bucketName,
                             Body: avatarFile.buffer,
-                            Key: `avatars/${user.id}/${avatarHash}.${extName}`,
-                            ContentType: avatarFile.mimetype,
+                            Key: `avatars/${user.id}/${avatarHash}.${isGif ? "gif" : "png"}`,
+                            ContentType: isGif ? "image/gif" : "image/png",
                         }),
                     );
                 }
