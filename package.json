@@ -53,9 +53,9 @@
         "build": "pnpm typecheck && tsdown",
         "dev": "tsdown --watch ./src --env.NODE_ENV development --on-success \"tsx -r dotenv/config ./dist/bundle/index.js\"",
         "prestart": "pnpm build",
-        "start": "tsx -r dotenv/config ./dist/bundle/index.mjs",
-        "start:api": "tsx -r dotenv/config ./dist/api/start.mjs",
-        "start:gateway": "tsx -r dotenv/config ./dist/gateway/start.mjs",
+        "start": "tsx -r dotenv/config ./dist/bundle/index.js",
+        "start:api": "tsx -r dotenv/config ./dist/api/start.js",
+        "start:gateway": "tsx -r dotenv/config ./dist/gateway/start.js",
         "typecheck": "tsc --noEmit"
     },
     "type": "module",
