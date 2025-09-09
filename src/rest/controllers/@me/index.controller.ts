@@ -4,8 +4,13 @@ import {
     PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { UserModel } from "@mutualzz/database";
-import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { bucketName, dominantHex, s3Client } from "@mutualzz/util";
+import { defaultAvatars, HttpException, HttpStatusCode } from "@mutualzz/types";
+import {
+    bucketName,
+    dominantHex,
+    genRandColor,
+    s3Client,
+} from "@mutualzz/util";
 import { validateMePatch } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 import path from "path";
@@ -126,26 +131,53 @@ export default class MeController {
                 user.accentColor = await dominantHex(avatarFile.buffer);
             }
 
-            if (avatar) {
-                const extName = path.extname(avatar).replace(".", "");
-                const avatarHash = avatar.replace(/\.[^/.]+$/, "");
+            if (avatar !== undefined && !avatarFile) {
+                if (avatar === null) {
+                    if (user.avatar) {
+                        user.previousAvatars.push(user.avatar);
+                        if (user.previousAvatars.length > 5) {
+                            const removedAvatar = user.previousAvatars.shift();
 
-                user.avatar = avatarHash;
+                            if (removedAvatar) {
+                                await s3Client.send(
+                                    new DeleteObjectCommand({
+                                        Bucket: bucketName,
+                                        Key: `avatars/${user.id}/${removedAvatar}`,
+                                    }),
+                                );
+                            }
+                        }
 
-                const { Body: avatarObject } = await s3Client.send(
-                    new GetObjectCommand({
-                        Bucket: bucketName,
-                        Key: `avatars/${user.id}/${avatar}.${extName}`,
-                    }),
-                );
-                if (avatarObject) {
-                    user.accentColor = await dominantHex(
-                        (await avatarObject.transformToByteArray()) as Buffer,
+                        user.markModified("previousAvatars");
+                    }
+
+                    user.avatar = null;
+                    user.accentColor = genRandColor();
+                } else if (avatar !== user.avatar) {
+                    const extName = path.extname(avatar).replace(".", "");
+                    const avatarHash = avatar.replace(/\.[^/.]+$/, "");
+
+                    user.avatar = avatarHash;
+
+                    const { Body: avatarObject } = await s3Client.send(
+                        new GetObjectCommand({
+                            Bucket: bucketName,
+                            Key: `avatars/${user.id}/${avatar}.${extName}`,
+                        }),
                     );
+                    if (avatarObject) {
+                        user.accentColor = await dominantHex(
+                            (await avatarObject.transformToByteArray()) as Buffer,
+                        );
+                    }
                 }
             }
 
-            if (defaultAvatar) {
+            if (
+                defaultAvatar &&
+                defaultAvatar !== user.defaultAvatar &&
+                defaultAvatars.includes(defaultAvatar)
+            ) {
                 user.avatar = null;
                 user.defaultAvatar = defaultAvatar;
             }
