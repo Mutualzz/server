@@ -154,15 +154,14 @@ export default class MeController {
                     user.avatar = null;
                     user.accentColor = genRandColor();
                 } else if (avatar !== user.avatar) {
-                    const extName = path.extname(avatar).replace(".", "");
-                    const avatarHash = avatar.replace(/\.[^/.]+$/, "");
+                    const isGif = avatar.startsWith("a_");
 
-                    user.avatar = avatarHash;
+                    user.avatar = avatar;
 
                     const { Body: avatarObject } = await s3Client.send(
                         new GetObjectCommand({
                             Bucket: bucketName,
-                            Key: `avatars/${user.id}/${avatar}.${extName}`,
+                            Key: `avatars/${user.id}/${avatar}.${isGif ? "gif" : "png"}`,
                         }),
                     );
                     if (avatarObject) {
