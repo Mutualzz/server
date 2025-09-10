@@ -4,8 +4,9 @@ import { bucketName, s3Client } from "@mutualzz/util";
 import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
 import { LRUCache } from "lru-cache";
+import os from "os";
 import path from "path";
-import sharp, { type FormatEnum } from "sharp";
+import sharp from "sharp";
 import { MIME_TYPES } from "../utils/Constants";
 
 const avatarCache = new LRUCache<string, Uint8Array>({
@@ -13,107 +14,196 @@ const avatarCache = new LRUCache<string, Uint8Array>({
     ttl: 1000 * 60 * 60 * 24, // 1 day
 });
 
+sharp.cache({ files: 0, items: 512, memory: 256 });
+sharp.concurrency(Math.max(2, Math.min(8, os.cpus().length - 1)));
+
+const ALLOWED_FORMATS = new Set(["png", "webp", "avif", "jpg", "jpeg", "gif"]);
+
+function normalizeFormat(fmt?: string | null) {
+    if (!fmt) return undefined;
+    const f = fmt.toLowerCase();
+    if (!ALLOWED_FORMATS.has(f)) return undefined;
+    return f === "jpeg" ? "jpg" : f;
+}
+
+function contentEtag(buf: Uint8Array) {
+    return 'W/"' + crypto.createHash("sha1").update(buf).digest("hex") + '"';
+}
+
 export default class AvatarsController {
     static async getAvatar(req: Request, res: Response, next: NextFunction) {
         try {
-            const { userId, avatar } = req.params;
-            const { format: formatQuery, size } = req.query;
+            const { userId, avatar } = req.params as {
+                userId: string;
+                avatar: string;
+            };
+            const {
+                format: formatQuery,
+                size: sizeQuery,
+                animated: animatedQueryRaw,
+            } = req.query as {
+                format?: string;
+                size?: string;
+                animated?: string;
+            };
 
-            const ext = path.extname(avatar).replace(".", "").toLowerCase();
-            const finalFormat = (formatQuery as string) || ext;
-            const hash = avatar.replace(/\.[^/.]+$/, "");
+            const baseName = path.basename(avatar, path.extname(avatar));
+            const urlExt = path.extname(avatar).replace(".", "").toLowerCase();
 
-            let cacheKey = `${userId}:${hash}:${finalFormat}`;
-            if (size) cacheKey += `:${size}`;
+            const isAnimatedHash = baseName.startsWith("a_");
 
-            let outputBuffer = avatarCache.get(cacheKey);
+            // Normalize caller intent: choose target format from ?format override or URL ext
+            let targetFormat =
+                normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
 
-            if (!outputBuffer) {
-                // Fetch original from S3
-                const { Body } = await s3Client.send(
-                    new GetObjectCommand({
-                        Bucket: bucketName,
-                        Key: `avatars/${userId}/${hash}.${ext}`,
-                    }),
-                );
+            const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
+            const explicitAnimated = ["true", "1", "on", "yes"].includes(
+                animatedQuery,
+            );
+            const explicitStatic = ["false", "0", "off", "no"].includes(
+                animatedQuery,
+            );
 
-                if (!Body) {
-                    throw new HttpException(
-                        HttpStatusCode.NotFound,
-                        "Avatar not found",
-                    );
-                }
-
-                const originalBuffer = await Body.transformToByteArray();
-
-                if (!size && !formatQuery) {
-                    outputBuffer = originalBuffer;
-                } else {
-                    const isGif = ext === "gif";
-                    const isStaticFormat =
-                        formatQuery &&
-                        ["png", "jpeg", "jpg", "webp"].includes(
-                            (formatQuery as string).toLowerCase(),
-                        );
-
-                    let image: sharp.Sharp;
-                    if (isGif && !isStaticFormat) {
-                        image = sharp(originalBuffer, { animated: true });
-                        if (size && !isNaN(Number(size))) {
-                            const numericSize = Number(size);
-                            image = image.resize({
-                                width: numericSize,
-                                height: numericSize,
-                            });
-                        }
-                        if (formatQuery) {
-                            image = image.toFormat(
-                                formatQuery as keyof FormatEnum,
-                            );
-                        }
-                        outputBuffer = await image.toBuffer();
-                    } else {
-                        image = sharp(originalBuffer);
-                        if (size && !isNaN(Number(size))) {
-                            const numericSize = Number(size);
-                            image = image.resize({
-                                width: numericSize,
-                                height: numericSize,
-                            });
-                        }
-                        if (formatQuery) {
-                            image = image.toFormat(
-                                formatQuery as keyof FormatEnum,
-                            );
-                        }
-                        outputBuffer = await image.toBuffer();
-                    }
-
-                    // Cache the transformed result
-                    avatarCache.set(cacheKey, outputBuffer);
-                }
+            if (!targetFormat) {
+                targetFormat =
+                    isAnimatedHash && explicitAnimated ? "webp" : "png";
             }
 
-            // Compute ETag from transformed buffer
-            const etag = crypto
-                .createHash("md5")
-                .update(outputBuffer)
-                .digest("hex");
+            let willAnimate = false;
+            if (targetFormat === "gif") {
+                willAnimate = isAnimatedHash && !explicitStatic;
+            } else if (targetFormat === "webp") {
+                willAnimate = isAnimatedHash && explicitAnimated;
+            } else {
+                willAnimate = false;
+            }
 
-            if (req.headers["if-none-match"] === etag) {
-                res.status(304).end();
+            if (!willAnimate && targetFormat === "gif") {
+                targetFormat = "png";
+            }
+
+            const boundedSize = (() => {
+                const n = Number(sizeQuery);
+                if (!Number.isFinite(n)) return undefined as number | undefined;
+                const clamped = Math.max(1, Math.min(4096, Math.floor(n)));
+                return clamped;
+            })();
+
+            let cacheKey = `${userId}:${baseName}:${targetFormat}`;
+            if (boundedSize) cacheKey += `:${boundedSize}`;
+            if (willAnimate) cacheKey += `:a`;
+
+            const cached = avatarCache.get(cacheKey);
+            if (cached) {
+                res.setHeader(
+                    "Cache-Control",
+                    "public, max-age=86400, immutable",
+                );
+                res.setHeader("ETag", contentEtag(cached));
+                res.setHeader(
+                    "Content-Type",
+                    MIME_TYPES[targetFormat] || "application/octet-stream",
+                );
+                res.status(HttpStatusCode.Success).end(Buffer.from(cached));
                 return;
             }
 
-            // Set headers
+            const sourceExt = isAnimatedHash ? "gif" : "png";
+            const sourceKey = `avatars/${userId}/${baseName}.${sourceExt}`;
+
+            let sourceBody: Uint8Array;
+            try {
+                const { Body } = await s3Client.send(
+                    new GetObjectCommand({
+                        Bucket: bucketName,
+                        Key: sourceKey,
+                    }),
+                );
+                if (!Body) throw new Error("Empty body");
+                sourceBody = await Body.transformToByteArray();
+            } catch {
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Avatar not found",
+                );
+            }
+
+            let image: sharp.Sharp;
+            if (willAnimate) image = sharp(sourceBody, { animated: true });
+            else image = sharp(sourceBody);
+
+            if (typeof image.toColourspace === "function")
+                image = image.toColourspace("srgb");
+
+            if (boundedSize)
+                image = image.resize(boundedSize, boundedSize, {
+                    fit: "cover",
+                });
+
+            let actualFormat: string = targetFormat;
+
+            if (willAnimate) {
+                // Animated branch
+                if (targetFormat === "webp") {
+                    image = image.webp({ quality: 80, loop: 0 });
+                } else if (targetFormat === "gif") {
+                    if (!boundedSize) {
+                        const etag = contentEtag(sourceBody);
+                        avatarCache.set(cacheKey, sourceBody);
+                        res.setHeader(
+                            "Cache-Control",
+                            "public, max-age=86400, immutable",
+                        );
+                        res.setHeader("ETag", etag);
+                        res.setHeader("Content-Type", MIME_TYPES["gif"]);
+                        res.status(HttpStatusCode.Success).end(sourceBody);
+                        return;
+                    } else {
+                        actualFormat = "webp";
+                        image = image.webp({ quality: 80, loop: 0 });
+                    }
+                } else {
+                    actualFormat = "webp";
+                    image = image.webp({ quality: 80, loop: 0 });
+                }
+            } else {
+                // Static branch
+                switch (targetFormat) {
+                    case "png":
+                        image = image.png({ compressionLevel: 9 });
+                        break;
+                    case "webp":
+                        image = image.webp({ quality: 80 });
+                        break;
+                    case "avif":
+                        image = image.avif({ quality: 50 });
+                        break;
+                    case "jpg":
+                        image = image.jpeg({ mozjpeg: true, quality: 82 });
+                        break;
+                    case "gif":
+                        // This shouldn't happen due to prior logic, but just in case
+                        actualFormat = "png";
+                        image = image.png({ compressionLevel: 9 });
+                        break;
+                    default:
+                        actualFormat = "png";
+                        image = image.png({ compressionLevel: 9 });
+                }
+            }
+
+            const outputBuffer = await image.toBuffer();
+
+            const etag = contentEtag(outputBuffer);
+            avatarCache.set(cacheKey, outputBuffer);
+
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");
             res.setHeader("ETag", etag);
             res.setHeader(
                 "Content-Type",
-                MIME_TYPES[finalFormat] || "application/octet-stream",
+                MIME_TYPES[actualFormat] || "application/octet-stream",
             );
 
-            // Send once
             res.status(HttpStatusCode.Success).end(outputBuffer);
         } catch (err) {
             next(err);
