@@ -58,9 +58,9 @@ export default class MeController {
                     user.avatar &&
                     !user.previousAvatars.includes(user.avatar)
                 ) {
-                    user.previousAvatars.push(user.avatar);
+                    user.previousAvatars.unshift(user.avatar);
                     if (user.previousAvatars.length > 5) {
-                        const removedAvatar = user.previousAvatars.shift();
+                        const removedAvatar = user.previousAvatars.pop();
 
                         if (removedAvatar) {
                             await s3Client.send(
@@ -140,9 +140,9 @@ export default class MeController {
                         user.avatar &&
                         !user.previousAvatars.includes(user.avatar)
                     ) {
-                        user.previousAvatars.push(user.avatar);
+                        user.previousAvatars.unshift(user.avatar);
                         if (user.previousAvatars.length > 5) {
-                            const removedAvatar = user.previousAvatars.shift();
+                            const removedAvatar = user.previousAvatars.pop();
 
                             if (removedAvatar) {
                                 await s3Client.send(
