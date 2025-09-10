@@ -38,7 +38,7 @@ export class Server {
     private initHeadMiddlewares() {
         this.app.use(
             cors({
-                origin: "*",
+                origin: ["*"],
             }),
         );
 
