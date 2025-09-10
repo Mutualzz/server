@@ -54,7 +54,10 @@ export default class MeController {
             }
 
             if (avatarFile) {
-                if (user.avatar) {
+                if (
+                    user.avatar &&
+                    !user.previousAvatars.includes(user.avatar)
+                ) {
                     user.previousAvatars.push(user.avatar);
                     if (user.previousAvatars.length > 5) {
                         const removedAvatar = user.previousAvatars.shift();
@@ -133,7 +136,10 @@ export default class MeController {
 
             if (avatar !== undefined && !avatarFile) {
                 if (avatar === null) {
-                    if (user.avatar) {
+                    if (
+                        user.avatar &&
+                        !user.previousAvatars.includes(user.avatar)
+                    ) {
                         user.previousAvatars.push(user.avatar);
                         if (user.previousAvatars.length > 5) {
                             const removedAvatar = user.previousAvatars.shift();
@@ -155,13 +161,14 @@ export default class MeController {
                     user.accentColor = genRandColor();
                 } else if (avatar !== user.avatar) {
                     const isGif = avatar.startsWith("a_");
+                    const storedExt = isGif ? "gif" : "png";
 
                     user.avatar = avatar;
 
                     const { Body: avatarObject } = await s3Client.send(
                         new GetObjectCommand({
                             Bucket: bucketName,
-                            Key: `avatars/${user.id}/${avatar}.${isGif ? "gif" : "png"}`,
+                            Key: `avatars/${user.id}/${avatar}.${storedExt}`,
                         }),
                     );
                     if (avatarObject) {
