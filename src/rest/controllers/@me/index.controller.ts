@@ -59,7 +59,7 @@ export default class MeController {
                     !user.previousAvatars.includes(user.avatar)
                 ) {
                     user.previousAvatars.unshift(user.avatar);
-                    if (user.previousAvatars.length > 5) {
+                    if (user.previousAvatars.length > 9) {
                         const removedAvatar = user.previousAvatars.pop();
 
                         if (removedAvatar) {
@@ -141,7 +141,7 @@ export default class MeController {
                         !user.previousAvatars.includes(user.avatar)
                     ) {
                         user.previousAvatars.unshift(user.avatar);
-                        if (user.previousAvatars.length > 5) {
+                        if (user.previousAvatars.length > 9) {
                             const removedAvatar = user.previousAvatars.pop();
 
                             if (removedAvatar) {
