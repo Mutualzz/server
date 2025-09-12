@@ -79,25 +79,28 @@ export default class MeController {
                     .extname(avatarFile.originalname)
                     .replace(".", "");
 
-                const crop = JSON.parse(req.body.crop);
+                let crop = null;
 
-                const { x, y, width, height } = crop;
+                if (req.body.crop) crop = JSON.parse(req.body.crop);
 
                 const isGif = avatarFile.mimetype === "image/gif";
 
-                let avatarSharp;
+                let avatarSharp: sharp.Sharp;
                 if (isGif)
                     avatarSharp = sharp(avatarFile.buffer, { animated: true });
                 else avatarSharp = sharp(avatarFile.buffer).toFormat("png");
 
-                avatarFile.buffer = await avatarSharp
-                    .extract({
+                if (crop) {
+                    const { x, y, width, height } = crop;
+                    avatarSharp = avatarSharp.extract({
                         left: x,
                         top: y,
                         width,
                         height,
-                    })
-                    .toBuffer();
+                    });
+                }
+
+                avatarFile.buffer = await avatarSharp.toBuffer();
 
                 const avatarHash = generateHash(
                     avatarFile.buffer,
