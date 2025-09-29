@@ -13,7 +13,6 @@
         "bufferutil": "^4.0.9",
         "cors": "^2.8.5",
         "cryptr": "^6.4.0",
-        "culori": "^4.0.2",
         "emojibase-regex": "^16.0.0",
         "express": "^5.1.0",
         "fast-glob": "^3.3.3",
