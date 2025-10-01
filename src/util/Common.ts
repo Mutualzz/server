@@ -1,6 +1,6 @@
 import { Snowflake } from "@theinternetfolks/snowflake";
+import Color from "color";
 import crypto from "crypto";
-import { formatHex } from "culori";
 import express from "express";
 import sharp from "sharp";
 import { threadId } from "worker_threads";
@@ -29,10 +29,9 @@ export const genRandColor = () =>
 export const dominantHex = async (buffer: Buffer) => {
     const { dominant } = await sharp(buffer).stats();
 
-    return formatHex({
-        mode: "rgb",
+    return Color({
         r: dominant.r,
         g: dominant.g,
         b: dominant.b,
-    });
+    }).hex();
 };

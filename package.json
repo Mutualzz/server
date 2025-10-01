@@ -11,6 +11,7 @@
         "bcrypt": "^6.0.0",
         "body-parser": "^2.2.0",
         "bufferutil": "^4.0.9",
+        "color": "^5.0.2",
         "cors": "^2.8.5",
         "cryptr": "^6.4.0",
         "emojibase-regex": "^16.0.0",
