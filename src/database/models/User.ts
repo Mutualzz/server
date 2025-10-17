@@ -54,7 +54,11 @@ const userSchema = new Schema(
             currentTheme: {
                 type: String,
                 ref: "themes",
-                default: "ashenDusk",
+                default: "baseDark",
+            },
+            prefferedMode: {
+                type: String,
+                default: "feed",
             },
         },
         createdTimestamp: {
