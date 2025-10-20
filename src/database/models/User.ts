@@ -56,7 +56,7 @@ const userSchema = new Schema(
                 ref: "themes",
                 default: "baseDark",
             },
-            prefferedMode: {
+            preferredMode: {
                 type: String,
                 default: "feed",
             },
