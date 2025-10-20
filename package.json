@@ -1,7 +1,7 @@
 {
     "author": "",
     "dependencies": {
-        "@aws-sdk/client-s3": "^3.911.0",
+        "@aws-sdk/client-s3": "^3.913.0",
         "@mutualzz/logger": "workspace:*",
         "@mutualzz/validators": "workspace:*",
         "@sentry/node": "^10.20.0",
@@ -40,11 +40,11 @@
         "@types/express": "^5.0.3",
         "@types/morgan": "^1.9.10",
         "@types/multer": "^2.0.0",
-        "@types/node": "^24.7.2",
+        "@types/node": "^24.8.1",
         "@types/ws": "^8.18.1",
         "dotenv": "^17.2.3",
-        "eslint": "^9.37.0",
-        "tsdown": "^0.15.7",
+        "eslint": "^9.38.0",
+        "tsdown": "^0.15.8",
         "tsx": "^4.20.6"
     },
     "keywords": [],
