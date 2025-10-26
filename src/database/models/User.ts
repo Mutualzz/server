@@ -1,3 +1,4 @@
+import { defaultAvatars } from "@mutualzz/types";
 import { Schema, model } from "mongoose";
 
 const userSchema = new Schema(
@@ -26,6 +27,7 @@ const userSchema = new Schema(
         },
         defaultAvatar: {
             type: String,
+            enum: defaultAvatars,
             required: true,
         },
         avatar: {
