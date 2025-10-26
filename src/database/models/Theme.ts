@@ -13,10 +13,12 @@ const themeSchema = new Schema(
         description: String,
         type: {
             type: String,
+            enum: ["dark", "light"],
             required: true,
         },
-        mode: {
+        style: {
             type: String,
+            enum: ["normal", "gradient"],
             required: true,
         },
         colors: {
