@@ -21,6 +21,10 @@ const themeSchema = new Schema(
             enum: ["normal", "gradient"],
             required: true,
         },
+        adaptive: {
+            type: Boolean,
+            required: true,
+        },
         colors: {
             common: {
                 white: String,
