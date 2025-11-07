@@ -1,4 +1,4 @@
-import { UserModel } from "@mutualzz/database";
+import { ThemeModel, UserModel } from "@mutualzz/database";
 import {
     GatewayCloseCodes,
     type GatewayPayload,
@@ -36,9 +36,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
     this.sessionId = session.sessionId;
 
-    const user = await UserModel.findById(session.userId)
-        .populate("themes")
-        .populate("settings.currentTheme");
+    const user = await UserModel.findById(session.userId);
     if (!user) {
         logger.error(`User not found for session ${this.sessionId}`);
         await Send(this, {
@@ -59,9 +57,14 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
         seq: this.sequence,
     });
 
+    const themes = (await ThemeModel.find({ createdBy: user.id })).map((doc) =>
+        doc.toJSON(),
+    );
+
     const d = {
         sessionId: this.sessionId,
         user: user.toJSON(),
+        themes,
     };
 
     await Send(this, {

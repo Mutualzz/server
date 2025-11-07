@@ -39,8 +39,6 @@ export default class MeThemesController {
                 updatedTimestamp: Date.now(),
             });
 
-            user.themes.push(newTheme.id);
-
             await newTheme.save();
             await user.save();
 
@@ -113,8 +111,6 @@ export default class MeThemesController {
                 );
 
             await theme.deleteOne();
-            user.themes = user.themes.filter((id) => id !== theme.id);
-            await user.save();
 
             res.status(HttpStatusCode.Success).send({
                 id: theme.id,
