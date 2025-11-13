@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1762764082223,
+      "tag": "0000_futuristic_power_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1762764299744,
+      "tag": "0001_lush_wolfsbane",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762801157094,
+      "tag": "0002_free_logan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762910163495,
+      "tag": "0003_oval_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1762987944370,
+      "tag": "0004_quiet_meltdown",
+      "breakpoints": true
+    }
+  ]
+}
