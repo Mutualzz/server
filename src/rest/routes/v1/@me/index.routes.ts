@@ -4,6 +4,7 @@ import MeController from "../../../controllers/@me/index.controller";
 
 const router = createRouter();
 
-router.patch("/", upload.single("avatar"), MeController.patchMe);
+router.patch("/", upload.single("avatar"), MeController.patch);
+router.patch("/settings", MeController.patchSettings);
 
 export default router;

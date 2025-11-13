@@ -1,10 +1,10 @@
+import { db, userSettingsTable, usersTable } from "@mutualzz/database";
 import { defaultAvatars, HttpException, HttpStatusCode } from "@mutualzz/types";
-import { validateLogin, validateRegister } from "@mutualzz/validators";
-
-import { UserModel } from "@mutualzz/database";
 import { generateSessionId, genRandColor, genSnowflake } from "@mutualzz/util";
+import { validateLogin, validateRegister } from "@mutualzz/validators";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+import { eq, or } from "drizzle-orm";
 import { type NextFunction, type Request, type Response } from "express";
 import {
     BCRYPT_SALT_ROUNDS,
@@ -19,10 +19,16 @@ export default class AuthController {
             const { username, email, password, globalName, dateOfBirth } =
                 validateRegister.parse(req.body);
 
-            // Check if user already exists
-            const userExists = await UserModel.findOne({
-                $or: [{ username }, { email }],
-            });
+            const userExists = await db
+                .select()
+                .from(usersTable)
+                .where(
+                    or(
+                        eq(usersTable.username, username),
+                        eq(usersTable.email, email),
+                    ),
+                )
+                .then((results) => results[0]);
 
             // If user exists, throw an error
             if (userExists) {
@@ -47,30 +53,42 @@ export default class AuthController {
             }
 
             // Hash password
-            const salt = bcrypt.genSaltSync(BCRYPT_SALT_ROUNDS);
-            const hash = bcrypt.hashSync(password, salt);
+            const hash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
             const defaultAvatar =
                 defaultAvatars[crypto.randomInt(0, defaultAvatars.length)];
 
             const accentColor = genRandColor();
 
-            const newUser = new UserModel({
-                _id: genSnowflake(),
-                username,
-                email,
-                globalName,
-                password: hash,
-                accentColor: `#${accentColor}`,
-                defaultAvatar,
-                dateOfBirth,
-                createdAt: new Date(),
-                createdTimestamp: Date.now(),
-                updatedAt: new Date(),
-                updatedTimestamp: Date.now(),
-            });
+            const id = genSnowflake();
+            const newUser = await db.transaction(async (tx) => {
+                const user = await tx
+                    .insert(usersTable)
+                    .values({
+                        id,
+                        username,
+                        email,
+                        globalName,
+                        hash,
+                        accentColor,
+                        defaultAvatar,
+                        dateOfBirth,
+                    })
+                    .returning()
+                    .then((results) => results[0]);
 
-            await newUser.save();
+                if (!user)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to register, please try again later",
+                    );
+
+                await tx.insert(userSettingsTable).values({
+                    user: id,
+                });
+
+                return user;
+            });
 
             const token = generateSessionToken(newUser.id);
             const sessionId = generateSessionId();
@@ -90,10 +108,26 @@ export default class AuthController {
             // Destructure and validate request body
             const { username, email, password } = validateLogin.parse(req.body);
 
-            // Find user by username or email
-            const user = await UserModel.findOne({
-                $or: [{ username }, { email }],
-            });
+            const whereConditions = [];
+            if (username)
+                whereConditions.push(eq(usersTable.username, username));
+            if (email) whereConditions.push(eq(usersTable.email, email));
+
+            if (whereConditions.length === 0) {
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Username or email is required",
+                );
+            }
+
+            const user = await db
+                .select({
+                    id: usersTable.id,
+                    hash: usersTable.hash,
+                })
+                .from(usersTable)
+                .where(or(...whereConditions))
+                .then((results) => results[0]);
 
             // If user does not exist, throw an error
             if (!user)
@@ -109,7 +143,7 @@ export default class AuthController {
                 );
 
             // Compare with input password using bcrypt
-            const pass = bcrypt.compareSync(password, user.password);
+            const pass = bcrypt.compare(password, user.hash);
 
             // If password is invalid, throw an error
             if (!pass)
@@ -123,6 +157,20 @@ export default class AuthController {
                         },
                     ],
                 );
+
+            await db.transaction(async (tx) => {
+                const existingSettings = await tx
+                    .select()
+                    .from(userSettingsTable)
+                    .where(eq(userSettingsTable.user, user.id))
+                    .then((results) => results[0]);
+
+                if (!existingSettings) {
+                    await tx.insert(userSettingsTable).values({
+                        user: user.id,
+                    });
+                }
+            });
 
             const token = generateSessionToken(user.id);
             const sessionId = generateSessionId();

@@ -1,3 +1,3 @@
 export * from "./spaces";
 export * from "./Theme";
-export * from "./User";
+export * from "./users";

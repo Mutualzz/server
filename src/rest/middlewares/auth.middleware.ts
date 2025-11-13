@@ -1,6 +1,5 @@
-import { UserModel } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-
+import { getUser } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
 import { verifySessionToken } from "../utils";
 
@@ -29,7 +28,7 @@ const authMiddleware = async (
                 "Unauthorized",
             );
 
-        const user = await UserModel.findById(session.userId);
+        const user = await getUser(session.userId);
         if (!user)
             throw new HttpException(
                 HttpStatusCode.Unauthorized,
@@ -37,10 +36,9 @@ const authMiddleware = async (
             );
 
         req.user = {
-            ...user.toJSON(),
+            ...user,
             token,
-        } as any;
-        // Sadly we have to do "as any" because for some odd reason mongodb types dont allow me to add user json, evne though it gets transformed during runtime
+        };
 
         next();
     } catch (err) {

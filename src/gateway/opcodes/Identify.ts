@@ -1,12 +1,20 @@
-import { ThemeModel, UserModel } from "@mutualzz/database";
+import {
+    db,
+    spaceMembersTable,
+    spacesTable,
+    themesTable,
+    userSettingsTable,
+} from "@mutualzz/database";
 import {
     GatewayCloseCodes,
     type GatewayPayload,
     type RESTSession,
 } from "@mutualzz/types";
+import { getUser } from "@mutualzz/util";
+import { eq, sql } from "drizzle-orm";
 import { setupListener } from "gateway/Listener";
-import { logger } from "../../util/Logger";
 import { redis } from "../../util/Redis";
+import { logger } from "../Logger";
 import { saveSession } from "../util";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
@@ -36,7 +44,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
     this.sessionId = session.sessionId;
 
-    const user = await UserModel.findById(session.userId);
+    const user = await getUser(session.userId);
     if (!user) {
         logger.error(`User not found for session ${this.sessionId}`);
         await Send(this, {
@@ -57,14 +65,30 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
         seq: this.sequence,
     });
 
-    const themes = (await ThemeModel.find({ createdBy: user.id })).map((doc) =>
-        doc.toJSON(),
-    );
+    const themes = await db
+        .select()
+        .from(themesTable)
+        .where(eq(themesTable.author, user.id));
+
+    const spaces = await db
+        .select()
+        .from(spacesTable)
+        .where(
+            sql`EXISTS (SELECT 1 FROM ${spaceMembersTable} WHERE ${spaceMembersTable.space} = ${spacesTable.id} AND ${spaceMembersTable.user} = ${user.id})`,
+        );
+
+    const settings = await db
+        .select()
+        .from(userSettingsTable)
+        .where(eq(userSettingsTable.user, user.id))
+        .then((results) => results[0]);
 
     const d = {
         sessionId: this.sessionId,
-        user: user.toJSON(),
+        user,
         themes,
+        spaces,
+        settings,
     };
 
     await Send(this, {

@@ -1,7 +1,7 @@
 import { S3ServiceException } from "@aws-sdk/client-s3";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { logger } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
+import { logger } from "../Logger";
 
 const errorMiddleware = (
     error: unknown,
@@ -9,30 +9,33 @@ const errorMiddleware = (
     res: Response,
     __: NextFunction,
 ) => {
-    logger.error(error);
+    let constructedError;
 
     if (error instanceof HttpException) {
         const { status, message, errors } = error;
 
-        res.status(status).json({
-            message,
-            errors,
-        });
-
-        return;
+        constructedError = { status, message, errors };
     }
 
     if (error instanceof S3ServiceException) {
         if (error.$metadata.httpStatusCode === 404) {
-            res.status(HttpStatusCode.NotFound).json({
+            constructedError = {
+                status: HttpStatusCode.NotFound,
                 message: "Asset not found",
-            });
-            return;
+            };
         }
     }
 
-    res.status(HttpStatusCode.InternalServerError).json({
-        message: "Something went wrong",
+    if (!constructedError) {
+        constructedError = {
+            status: HttpStatusCode.InternalServerError,
+            message: "Something went wrong",
+        };
+    }
+
+    logger.error(error);
+    res.status(constructedError.status).json({
+        message: constructedError.message,
     });
 };
 

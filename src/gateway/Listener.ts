@@ -1,5 +1,6 @@
-import { listenEvent, logger, RabbitMQ, type EventOpts } from "@mutualzz/util";
+import { listenEvent, RabbitMQ, type EventOpts } from "@mutualzz/util";
 import type { Channel } from "amqplib";
+import { logger } from "./Logger";
 import { Send, type WebSocket } from "./util";
 
 export async function setupListener(this: WebSocket) {
@@ -13,22 +14,22 @@ export async function setupListener(this: WebSocket) {
 
     const consumer = consume.bind(this);
 
-    logger.debug("[RabbitMQ] setupListener: open for ", this.userId);
+    logger.debug(`[RabbitMQ] setupListener: open for ${this.userId}`);
 
     if (RabbitMQ.connection) {
         logger.debug(
-            `[RabbitMQ] setupListener: opts.channel = 
-            ${typeof opts.channel} 
-            with channel id
-            ${opts.channel?.ch}`,
+            `[RabbitMQ] setupListener: opts.channel =`,
+            typeof opts.channel,
+            "with channel id",
+            opts.channel?.ch,
         );
         opts.channel = await RabbitMQ.connection.createChannel();
         opts.channel.queues = {};
         logger.debug(
-            `[RabbitMQ] channel created: 
-            ${typeof opts.channel} 
-            with channel id 
-            ${opts.channel?.ch}`,
+            "[RabbitMQ] channel created:",
+            typeof opts.channel,
+            "with channel id",
+            opts.channel?.ch,
         );
     }
 
@@ -41,12 +42,10 @@ export async function setupListener(this: WebSocket) {
 
     this.once("close", () => {
         logger.debug(
-            `[RabbitMQ] setupListener: close for 
-            ${this.userId} 
-            = 
-            ${typeof opts.channel} 
-            with channel id 
-            ${opts.channel?.ch}`,
+            `[RabbitMQ] setupListener: close for ${this.userId} =`,
+            typeof opts.channel,
+            "with channel id",
+            opts.channel?.ch,
         );
         if (opts.channel) opts.channel.close();
         else {

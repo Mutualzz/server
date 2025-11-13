@@ -3,6 +3,6 @@ import PreviousAvatarController from "../../../controllers/@me/previousAvatar.co
 
 const router = createRouter();
 
-router.delete("/", PreviousAvatarController.deletePreviousAvatar);
+router.delete("/", PreviousAvatarController.delete);
 
 export default router;

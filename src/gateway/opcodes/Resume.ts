@@ -1,5 +1,5 @@
 import { GatewayCloseCodes, type GatewayPayload } from "@mutualzz/types";
-import { logger } from "../../util/Logger";
+import { logger } from "../Logger";
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
 import type { WebSocket } from "../util/WebSocket";

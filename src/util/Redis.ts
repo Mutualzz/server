@@ -1,6 +1,11 @@
+import { Logger } from "@mutualzz/logger";
 import Redis from "ioredis";
+
 import { SESSION_EXPIRY } from "./Constants";
-import { logger } from "./Logger";
+
+const logger = new Logger({
+    tag: "Redis",
+});
 
 const redis = new Redis({
     host: process.env.REDIS_HOST,

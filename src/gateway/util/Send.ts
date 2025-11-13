@@ -2,11 +2,13 @@ import {
     GatewayDispatchEvents,
     GatewayOpcodes,
     type GatewayPayload,
+    type WireGatewayPayload,
 } from "@mutualzz/types";
+import { JSONReplacer } from "@mutualzz/util";
 import type { WebSocket } from "./WebSocket";
 
 export function Send(socket: WebSocket, data: GatewayPayload) {
-    const payload = {
+    const payload: WireGatewayPayload = {
         op: GatewayOpcodes[data.op],
         d: data.d,
         s: data.s,
@@ -14,13 +16,23 @@ export function Send(socket: WebSocket, data: GatewayPayload) {
     };
 
     return new Promise((resolve, reject) => {
-        if (socket.readyState !== socket.OPEN) {
+        if (socket.readyState !== socket.OPEN)
             return reject(new Error("WebSocket is not open"));
+
+        if (!socket.codec || !socket.compressor || socket.compress === "none") {
+            const json = JSON.stringify(payload, JSONReplacer);
+            socket.send(json, (err) => (err ? reject(err) : resolve(null)));
+            return;
         }
 
-        socket.send(JSON.stringify(payload), (err) => {
-            if (err) return reject(err);
-            else resolve(null);
-        });
+        try {
+            const encoded = socket.codec.encode(payload);
+            const compressed = socket.compressor.compress(encoded);
+            socket.send(Buffer.from(compressed), { binary: true }, (err) =>
+                err ? reject(err) : resolve(null),
+            );
+        } catch (err) {
+            reject(err);
+        }
     });
 }

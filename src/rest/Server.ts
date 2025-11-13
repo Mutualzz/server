@@ -1,6 +1,5 @@
 import "./instrument";
 
-import { logger } from "@mutualzz/util";
 import * as Sentry from "@sentry/node";
 import bodyParser from "body-parser";
 import cors from "cors";
@@ -13,9 +12,20 @@ import multer from "multer";
 import path from "path";
 import { pathToFileURL } from "url";
 import SentryController from "./controllers/sentry.controller";
+import { logger } from "./Logger";
 import authMiddleware from "./middlewares/auth.middleware";
 import errorMiddleware from "./middlewares/error.middleware";
 import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./utils";
+
+declare global {
+    interface BigInt {
+        toJSON(): Number;
+    }
+}
+
+BigInt.prototype.toJSON = function () {
+    return Number(this);
+};
 
 export const upload = multer({
     storage: multer.memoryStorage(),
@@ -39,13 +49,13 @@ export class Server {
         await this.init();
 
         this.http.listen(this.port, () => {
-            logger.info(`[REST] Server is running on port ${this.port}`);
+            logger.info(`Server is running on port ${this.port}`);
         });
     }
 
     async stop() {
         this.http.close(() => {
-            logger.info(`[REST] Server is stopped`);
+            logger.info(`Server is stopped`);
         });
     }
 
@@ -96,13 +106,13 @@ export class Server {
     private async initRoutes() {
         const routesBaseDir = path.join(import.meta.dirname, "rest", "routes");
 
-        logger.debug(`[REST] Loading routes from ${routesBaseDir}`);
+        logger.debug(`Loading routes from ${routesBaseDir}`);
 
         const routeFiles = await fg("**/*.routes.{ts,js,mjs}", {
             cwd: routesBaseDir,
         });
 
-        logger.debug(`[REST] Found ${routeFiles.length} route files`);
+        logger.debug(`Found ${routeFiles.length} route files`);
 
         for (const routeFile of routeFiles) {
             const fullPath = path.join(routesBaseDir, routeFile);
@@ -113,9 +123,7 @@ export class Server {
 
             const route = mod.default;
             if (!route || !(route instanceof Router)) {
-                logger.warning(
-                    `[REST] Invalid or missing router in file: ${routeFile}`,
-                );
+                logger.warn(`Invalid or missing router in file: ${routeFile}`);
                 continue;
             }
 
@@ -140,7 +148,7 @@ export class Server {
 
             this.app.use(routePath, ...middlewares, route);
             logger.debug(
-                `[REST] Route "${routePath}" loaded from "${routeFile}"${middlewares.length > 0 ? ` with middlewares: ${middlewares.map((m) => m.name).join(", ")}` : ""}`,
+                `Route "${routePath}" loaded from "${routeFile}"${middlewares.length > 0 ? ` with middlewares: ${middlewares.map((m) => m.name).join(", ")}` : ""}`,
             );
         }
     }

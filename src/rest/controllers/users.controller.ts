@@ -1,13 +1,27 @@
-import { UserModel } from "@mutualzz/database";
+import { db, toPublicUser, usersTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { getUser } from "@mutualzz/util";
+import { validateUserGet } from "@mutualzz/validators";
+import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class UsersController {
-    static async getUser(req: Request, res: Response, next: NextFunction) {
+    static async get(req: Request, res: Response, next: NextFunction) {
         try {
-            const { id } = req.params;
+            const auth = await getUser(req.user?.id);
+            if (!auth)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "You are not logged in",
+                );
 
-            const user = await UserModel.findById(id);
+            const { id } = validateUserGet.parse(req.params);
+
+            const user = await db
+                .select()
+                .from(usersTable)
+                .where(eq(usersTable.id, id))
+                .then((results) => results[0]);
 
             if (!user)
                 throw new HttpException(
@@ -15,7 +29,7 @@ export default class UsersController {
                     "User not found",
                 );
 
-            return res.status(HttpStatusCode.Success).json(user.toPublicUser());
+            return res.status(HttpStatusCode.Success).json(toPublicUser(user));
         } catch (err) {
             next(err);
         }

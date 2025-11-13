@@ -1,4 +1,3 @@
-import { logger } from "@mutualzz/util";
 import bodyParser from "body-parser";
 import cors from "cors";
 import express, { Router } from "express";
@@ -7,6 +6,7 @@ import { createServer } from "http";
 import morgan from "morgan";
 import path from "path";
 import { pathToFileURL } from "url";
+import { logger } from "./Logger";
 import errorMiddleware from "./middlewares/error.middleware";
 import { DEFAULT_PORT } from "./utils/Constants";
 
@@ -25,13 +25,13 @@ export class Server {
         await this.init();
 
         this.http.listen(this.port, () => {
-            logger.info(`[CDN] Server is running on port ${this.port}`);
+            logger.info(`Server is running on port ${this.port}`);
         });
     }
 
     async stop() {
         this.http.close(() => {
-            logger.info(`[CDN] Server is stopped`);
+            logger.info(`Server is stopped`);
         });
     }
 
@@ -41,6 +41,13 @@ export class Server {
                 origin: ["*"],
             }),
         );
+
+        this.app.use((_, res, next) => {
+            res.setHeader("X-Content-Type-Options", "nosniff");
+            res.setHeader("X-Frame-Options", "DENY");
+            res.setHeader("X-XSS-Protection", "1; mode=block");
+            next();
+        });
 
         this.app.use(
             morgan(process.env.NODE_ENV === "production" ? "tiny" : "dev"),
@@ -57,13 +64,13 @@ export class Server {
     private async initRoutes() {
         const routesBaseDir = path.join(import.meta.dirname, "cdn", "routes");
 
-        logger.debug(`[CDN] Loading routes from ${routesBaseDir}`);
+        logger.debug(`Loading routes from ${routesBaseDir}`);
 
         const routeFiles = await fg("**/*.routes.{ts,js,mjs}", {
             cwd: routesBaseDir,
         });
 
-        logger.debug(`[CDN] Found ${routeFiles.length} route files`);
+        logger.debug(`Found ${routeFiles.length} route files`);
 
         for (const routeFile of routeFiles) {
             const fullPath = path.join(routesBaseDir, routeFile);
@@ -74,9 +81,7 @@ export class Server {
 
             const route = mod.default;
             if (!route || !(route instanceof Router)) {
-                logger.warning(
-                    `[CDN] Invalid or missing router in file: ${routeFile}`,
-                );
+                logger.warn(`Invalid or missing router in file: ${routeFile}`);
                 continue;
             }
 
@@ -100,9 +105,7 @@ export class Server {
             const middlewares = mod.middlewares ?? [];
 
             this.app.use(routePath, ...middlewares, route);
-            logger.debug(
-                `[CDN] Route "${routePath}" loaded from "${routeFile}"`,
-            );
+            logger.debug(`Route "${routePath}" loaded from "${routeFile}"`);
         }
     }
 

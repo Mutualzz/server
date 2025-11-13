@@ -1,36 +1,59 @@
-import { UserModel } from "@mutualzz/database";
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { db, usersTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { bucketName, getUser, s3Client } from "@mutualzz/util";
+import { validatePreviousAvatarDelete } from "@mutualzz/validators";
+import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class PreviousAvatarController {
-    static async deletePreviousAvatar(
-        req: Request,
-        res: Response,
-        next: NextFunction,
-    ) {
+    static async delete(req: Request, res: Response, next: NextFunction) {
         try {
-            const user = await UserModel.findById(req.user?.id);
+            const user = await getUser(req.user?.id);
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
                     "You are not logged in",
                 );
 
-            if (!user.previousAvatars.includes(req.query.avatar as string))
+            const { avatar: avatarHash } = validatePreviousAvatarDelete.parse(
+                req.query,
+            );
+
+            if (!avatarHash)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Avatar hash is required",
+                );
+
+            if (!user.previousAvatars.includes(avatarHash))
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Avatar not found",
                 );
 
-            user.previousAvatars = user.previousAvatars.filter(
-                (avatar) => avatar !== req.query.avatar,
+            const isGif = avatarHash.startsWith("a_");
+            const extName = isGif ? "gif" : "png";
+
+            await db
+                .update(usersTable)
+                .set({
+                    previousAvatars: user.previousAvatars.filter(
+                        (avatar) => avatar !== avatarHash,
+                    ),
+                })
+                .where(eq(usersTable.id, user.id));
+
+            // Delete from S3
+            await s3Client.send(
+                new DeleteObjectCommand({
+                    Bucket: bucketName,
+                    Key: `avatars/${user.id}/${avatarHash}.${extName}`,
+                }),
             );
 
-            user.markModified("previousAvatars");
-            await user.save();
-
             res.status(HttpStatusCode.Success).json({
-                avatar: req.query.avatar as string,
+                avatar: avatarHash,
             });
         } catch (error) {
             next(error);

@@ -1,5 +1,8 @@
 import type { Channel } from "amqplib";
 import type WS from "ws";
+import type { Codec } from "./Codec";
+import type { Compressor } from "./Compressor";
+import type { Compression, Encoding } from "./Negotation";
 
 export interface WebSocket extends WS {
     listenOptions: {
@@ -16,4 +19,10 @@ export interface WebSocket extends WS {
     readyTimeout?: NodeJS.Timeout;
     sequence: number;
     events: Record<string, undefined | (() => unknown)>;
+
+    encoding?: Encoding;
+    compress?: Compression;
+
+    codec?: Codec;
+    compressor?: Compressor;
 }

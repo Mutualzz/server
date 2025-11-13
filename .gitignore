@@ -11,6 +11,8 @@ lerna-debug.log*
 .pnpm-debug.log*
 .turbo
 
+**/migrations/**
+
 # Caches
 
 .cache

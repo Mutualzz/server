@@ -1,7 +1,7 @@
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { logger } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
+import { logger } from "../Logger";
 
 const errorMiddleware = (
     error: unknown,
@@ -9,17 +9,16 @@ const errorMiddleware = (
     res: Response,
     __: NextFunction,
 ) => {
-    logger.error(error);
+    let constructedError;
 
     if (error instanceof HttpException) {
         const { status, message, errors } = error;
 
-        res.status(status).json({
+        constructedError = {
+            status,
             message,
             errors,
-        });
-
-        return;
+        };
     }
 
     if (error instanceof ZodError) {
@@ -28,16 +27,25 @@ const errorMiddleware = (
             message: err.message,
         }));
 
-        res.status(HttpStatusCode.BadRequest).json({
+        constructedError = {
+            status: HttpStatusCode.BadRequest,
             message: "Invalid request data",
             errors,
-        });
-
-        return;
+        };
     }
 
-    res.status(HttpStatusCode.InternalServerError).json({
-        message: "Something went wrong",
+    if (!constructedError) {
+        constructedError = {
+            status: HttpStatusCode.InternalServerError,
+            message: "Something went wrong",
+        };
+    }
+
+    logger.error(constructedError);
+
+    res.status(constructedError.status).json({
+        message: constructedError.message,
+        errors: constructedError.errors,
     });
 };
 

@@ -1,7 +1,7 @@
 import { closeDatabase } from "@mutualzz/database";
 import http, { type Server as HttpServer } from "http";
 import { WebSocketServer } from "ws";
-import { logger } from "../util/Logger";
+import { logger } from "./Logger";
 import Connection from "./events/Connection";
 import { DEFAULT_PORT } from "./util/Constants";
 
@@ -27,30 +27,20 @@ export class Server {
 
         this.ws = new WebSocketServer({
             noServer: true,
-            perMessageDeflate: {
-                zlibDeflateOptions: {
-                    level: 7,
-                },
-                zlibInflateOptions: {
-                    chunkSize: 1024,
-                },
-                clientNoContextTakeover: true,
-                serverNoContextTakeover: true,
-                threshold: 1024,
-            },
-            maxPayload: 4096,
+            perMessageDeflate: false,
+            maxPayload: 4 * 1024 * 1024,
         });
 
         this.ws.on("connection", Connection);
         this.ws.on("error", (err) => {
-            logger.error(`[Gateway] WebSocket error: ${err}`);
+            logger.error(`WebSocket error: ${err}`);
         });
     }
 
     async start() {
         if (!this.server.listening) {
             this.server.listen(this.port);
-            logger.info(`[Gateway] online on port ${this.port}`);
+            logger.info(`online on port ${this.port}`);
         }
     }
 

@@ -3,8 +3,8 @@ import MeThemesController from "../../../controllers/@me/themes.controller";
 
 const router = createRouter();
 
-router.put("/", MeThemesController.putTheme);
-router.patch("/", MeThemesController.patchTheme);
-router.delete("/", MeThemesController.deleteTheme);
+router.put("/", MeThemesController.put);
+router.patch("/:id", MeThemesController.patch);
+router.delete("/:id", MeThemesController.delete);
 
 export default router;

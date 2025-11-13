@@ -1,13 +1,18 @@
-import { ThemeModel, UserModel } from "@mutualzz/database";
+import { db, themesTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { validateThemePut } from "@mutualzz/validators";
+import { genSnowflake, getUser } from "@mutualzz/util";
+import {
+    validateThemePatchBody,
+    validateThemePatchQuery,
+    validateThemePut,
+} from "@mutualzz/validators";
+import { and, eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import { genSnowflake } from "util/Common";
 
 export default class MeThemesController {
-    static async putTheme(req: Request, res: Response, next: NextFunction) {
+    static async put(req: Request, res: Response, next: NextFunction) {
         try {
-            const user = await UserModel.findById(req.user?.id);
+            const user = await getUser(req.user?.id);
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
@@ -16,31 +21,47 @@ export default class MeThemesController {
 
             const validatedTheme = validateThemePut.parse(req.body);
 
-            const similarNamedThemes = await ThemeModel.find({
-                name: validatedTheme.name,
-            });
+            const similarNamedThemes = await db
+                .select({
+                    name: themesTable.name,
+                })
+                .from(themesTable)
+                .where(and(eq(themesTable.author, user.id)))
+                .then((themes) =>
+                    themes.filter((t) =>
+                        t.name.startsWith(validatedTheme.name),
+                    ),
+                );
 
             // Generate a new name for the theme if there are similar named themes
-            const newName =
-                similarNamedThemes.length > 0
-                    ? validatedTheme.name +
-                      " " +
-                      (similarNamedThemes.length + 1)
-                    : validatedTheme.name;
+            let newName = validatedTheme.name;
+            if (similarNamedThemes.length > 0) {
+                const existingNames = new Set(
+                    similarNamedThemes.map((t) => t.name),
+                );
+                let counter = 2;
+                while (existingNames.has(`${validatedTheme.name} ${counter}`)) {
+                    counter++;
+                }
+                newName = `${validatedTheme.name} ${counter}`;
+            }
 
-            const newTheme = new ThemeModel({
-                _id: genSnowflake(),
-                ...validatedTheme,
-                name: newName,
-                createdBy: user.id,
-                createdAt: new Date(),
-                createdTimestamp: Date.now(),
-                updatedAt: new Date(),
-                updatedTimestamp: Date.now(),
-            });
+            const newTheme = await db
+                .insert(themesTable)
+                .values({
+                    id: genSnowflake(),
+                    ...validatedTheme,
+                    name: newName,
+                    author: user.id,
+                })
+                .returning()
+                .then((results) => results[0]);
 
-            await newTheme.save();
-            await user.save();
+            if (!newTheme)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to create theme",
+                );
 
             res.status(HttpStatusCode.Created).json(newTheme);
         } catch (error) {
@@ -48,69 +69,127 @@ export default class MeThemesController {
         }
     }
 
-    static async patchTheme(req: Request, res: Response, next: NextFunction) {
+    static async patch(req: Request, res: Response, next: NextFunction) {
         try {
-            const user = await UserModel.findById(req.user?.id);
+            const user = await getUser(req.user?.id);
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
                     "You are not logged in",
                 );
 
-            const theme = await ThemeModel.findById(req.query.id);
+            const { id: themeId } = validateThemePatchQuery.parse(req.params);
+
+            if (!themeId)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Theme ID is required",
+                );
+
+            const theme = await db
+                .select()
+                .from(themesTable)
+                .where(eq(themesTable.id, themeId))
+                .then((results) => results[0]);
+
             if (!theme)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Theme not found",
                 );
 
-            if (theme.createdBy !== user.id)
+            if (theme.author !== user.id)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
                     "You are not allowed to update this theme",
                 );
 
-            const validatedTheme = validateThemePut.parse(req.body);
+            const validatedTheme = validateThemePatchBody.parse(req.body);
 
-            theme.name = validatedTheme.name;
-            theme.description = validatedTheme.description;
-            theme.type = validatedTheme.type;
-            theme.colors = validatedTheme.colors;
-            theme.typography = validatedTheme.typography;
-            theme.updatedAt = new Date();
-            theme.updatedTimestamp = Date.now();
+            let newName = theme.name;
+            if (validatedTheme.name && validatedTheme.name !== theme.name) {
+                const similarNamedThemes = await db
+                    .select({
+                        name: themesTable.name,
+                    })
+                    .from(themesTable)
+                    .where(eq(themesTable.author, user.id))
+                    .then((themes) =>
+                        themes.filter((t) =>
+                            t.name.startsWith(
+                                validatedTheme.name ?? theme.name,
+                            ),
+                        ),
+                    );
 
-            await theme.save();
+                if (similarNamedThemes.length > 0) {
+                    const existingNames = new Set(
+                        similarNamedThemes.map((t) => t.name),
+                    );
+                    let counter = 2;
+                    while (
+                        existingNames.has(`${validatedTheme.name} ${counter}`)
+                    ) {
+                        counter++;
+                    }
+                    newName = `${validatedTheme.name} ${counter}`;
+                } else {
+                    newName = validatedTheme.name;
+                }
+            }
 
-            res.status(HttpStatusCode.Success).json(theme);
+            const updatedTheme = await db
+                .update(themesTable)
+                .set({
+                    ...validatedTheme,
+                    name: newName,
+                    updated: new Date(),
+                })
+                .where(eq(themesTable.id, theme.id))
+                .returning()
+                .then((results) => results[0]);
+
+            res.status(HttpStatusCode.Success).json(updatedTheme);
         } catch (error) {
             next(error);
         }
     }
 
-    static async deleteTheme(req: Request, res: Response, next: NextFunction) {
+    static async delete(req: Request, res: Response, next: NextFunction) {
         try {
-            const user = await UserModel.findById(req.user?.id);
+            const user = await getUser(req.user?.id);
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
                     "You are not logged in",
                 );
 
-            const theme = await ThemeModel.findById(req.query.id);
+            const { id: themeId } = validateThemePatchQuery.parse(req.params);
+            if (!themeId)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Theme ID is required",
+                );
+
+            const theme = await db
+                .select()
+                .from(themesTable)
+                .where(eq(themesTable.id, themeId))
+                .then((results) => results[0]);
+
             if (!theme)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Theme not found",
                 );
 
-            if (theme.createdBy !== user.id)
+            if (theme.author !== user.id)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
                     "You are not allowed to delete this theme",
                 );
 
-            await theme.deleteOne();
+            await db.delete(themesTable).where(eq(themesTable.id, themeId));
 
             res.status(HttpStatusCode.Success).send({
                 id: theme.id,

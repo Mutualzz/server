@@ -1,16 +1,24 @@
-import { closeDatabase, startDatabase } from "@mutualzz/database";
-
 import * as CDN from "@mutualzz/cdn";
+import {
+    closeDatabase,
+    initDatabaseShutdownHooks,
+    startDatabase,
+} from "@mutualzz/database";
 import * as Gateway from "@mutualzz/gateway";
+import { Logger } from "@mutualzz/logger";
 import * as REST from "@mutualzz/rest";
-import { logger, RabbitMQ } from "@mutualzz/util";
+import { RabbitMQ } from "@mutualzz/util";
+
+const logger = new Logger({
+    tag: "Bundle",
+});
 
 const rest = new REST.Server();
 const gateway = new Gateway.Server();
 const cdn = new CDN.Server();
 
 process.on("SIGTERM", async () => {
-    logger.warning("Shutting down due to SIGTERM");
+    logger.warn("Shutting down due to SIGTERM");
     await gateway.stop();
     await rest.stop();
     await cdn.stop();
@@ -21,6 +29,7 @@ process.on("SIGTERM", async () => {
 
 async function main() {
     await startDatabase();
+    initDatabaseShutdownHooks();
 
     await Promise.all([
         RabbitMQ.init(),
