@@ -10,7 +10,6 @@ export interface Codec {
 }
 
 export async function createCodec(encoding: Encoding): Promise<Codec> {
-    console.log(encoding);
     if (encoding === "etf") {
         try {
             const erl = await import("@yukikaze-bot/erlpack");
