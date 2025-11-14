@@ -1,12 +1,17 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import {
+    defaultAvatars,
+    HttpException,
+    HttpStatusCode,
+    type DefaultAvatar,
+} from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
 import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
 import { LRUCache } from "lru-cache";
 import path from "path";
 import sharp, { type FormatEnum } from "sharp";
-import { MIME_TYPES } from "../utils/Constants";
+import { MIME_TYPES } from "../Constants";
 
 const defaultAvatarCache = new LRUCache<string, Uint8Array>({
     max: 300,
@@ -21,6 +26,13 @@ export default class DefaultAvatarsController {
     ) {
         try {
             const { id } = req.params;
+
+            if (!defaultAvatars.includes(id as DefaultAvatar))
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Default Avatar not found",
+                );
+
             const { format: formatQuery, size } = req.query;
 
             const ext = path.extname(id).replace(".", "").toLowerCase();
