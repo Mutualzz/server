@@ -8,12 +8,18 @@ import { JSONReplacer } from "@mutualzz/util";
 import type { WebSocket } from "./WebSocket";
 
 export function Send(socket: WebSocket, data: GatewayPayload) {
-    const payload: WireGatewayPayload = {
-        op: GatewayOpcodes[data.op],
-        d: data.d,
-        s: data.s,
-        t: data.t ? GatewayDispatchEvents[data.t] : undefined,
-    };
+    const payload: WireGatewayPayload = JSON.parse(
+        JSON.stringify(
+            {
+                op: GatewayOpcodes[data.op],
+                d: data.d,
+                s: data.s,
+                t: data.t ? GatewayDispatchEvents[data.t] : undefined,
+            },
+            JSONReplacer,
+        ),
+        JSONReplacer,
+    );
 
     return new Promise((resolve, reject) => {
         if (socket.readyState !== socket.OPEN)
