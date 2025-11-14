@@ -76,6 +76,13 @@ export class Server {
             }),
         );
 
+        this.app.use((_, res, next) => {
+            res.setHeader("X-Content-Type-Options", "nosniff");
+            res.setHeader("X-Frame-Options", "DENY");
+            res.setHeader("X-XSS-Protection", "1; mode=block");
+            next();
+        });
+
         this.app.use(
             morgan(process.env.NODE_ENV === "production" ? "tiny" : "dev"),
         );
