@@ -1,34 +1,17 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
-import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
 import { LRUCache } from "lru-cache";
-import os from "os";
 import path from "path";
 import sharp from "sharp";
-import { MIME_TYPES } from "../utils/Constants";
+import { MIME_TYPES } from "../Constants";
+import { contentEtag, normalizeFormat } from "../utils";
 
 const avatarCache = new LRUCache<string, Uint8Array>({
     max: 300,
     ttl: 1000 * 60 * 60 * 24, // 1 day
 });
-
-sharp.cache({ files: 0, items: 512, memory: 256 });
-sharp.concurrency(Math.max(2, Math.min(8, os.cpus().length - 1)));
-
-const ALLOWED_FORMATS = new Set(["png", "webp", "avif", "jpg", "jpeg", "gif"]);
-
-function normalizeFormat(fmt?: string | null) {
-    if (!fmt) return undefined;
-    const f = fmt.toLowerCase();
-    if (!ALLOWED_FORMATS.has(f)) return undefined;
-    return f === "jpeg" ? "jpg" : f;
-}
-
-function contentEtag(buf: Uint8Array) {
-    return 'W/"' + crypto.createHash("sha1").update(buf).digest("hex") + '"';
-}
 
 export default class AvatarsController {
     static async getAvatar(req: Request, res: Response, next: NextFunction) {
@@ -37,6 +20,7 @@ export default class AvatarsController {
                 userId: string;
                 avatar: string;
             };
+
             const {
                 format: formatQuery,
                 size: sizeQuery,
@@ -70,17 +54,13 @@ export default class AvatarsController {
             }
 
             let willAnimate = false;
-            if (targetFormat === "gif") {
+            if (targetFormat === "gif")
                 willAnimate = isAnimatedHash && !explicitStatic;
-            } else if (targetFormat === "webp") {
+            else if (targetFormat === "webp")
                 willAnimate = isAnimatedHash && explicitAnimated;
-            } else {
-                willAnimate = false;
-            }
+            else willAnimate = false;
 
-            if (!willAnimate && targetFormat === "gif") {
-                targetFormat = "png";
-            }
+            if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
             const boundedSize = (() => {
                 const n = Number(sizeQuery);

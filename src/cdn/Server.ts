@@ -4,11 +4,16 @@ import express, { Router } from "express";
 import fg from "fast-glob";
 import { createServer } from "http";
 import morgan from "morgan";
+import os from "os";
 import path from "path";
+import sharp from "sharp";
 import { pathToFileURL } from "url";
+import { DEFAULT_PORT } from "./Constants";
 import { logger } from "./Logger";
 import errorMiddleware from "./middlewares/error.middleware";
-import { DEFAULT_PORT } from "./utils/Constants";
+
+sharp.cache({ files: 0, items: 512, memory: 256 });
+sharp.concurrency(Math.max(2, Math.min(8, os.cpus().length - 1)));
 
 export class Server {
     private readonly port: number;
