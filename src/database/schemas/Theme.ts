@@ -1,5 +1,8 @@
+import { relations } from "drizzle-orm";
 import {
+    bigint,
     boolean,
+    index,
     jsonb,
     pgEnum,
     pgTable,
@@ -35,31 +38,47 @@ interface ThemeTypography {
     };
 }
 
-export const themesTable = pgTable("themes", {
-    id: text().primaryKey().notNull(),
-    name: text().notNull(),
-    description: text(),
+export const themesTable = pgTable(
+    "themes",
+    {
+        id: bigint({ mode: "bigint" }).primaryKey(),
+        name: text().notNull(),
+        description: text(),
 
-    author: text()
-        .notNull()
-        .references(() => usersTable.id, {
-            onDelete: "cascade",
-            onUpdate: "cascade",
-        }),
+        authorId: bigint({ mode: "bigint" })
+            .notNull()
+            .references(() => usersTable.id, {
+                onDelete: "cascade",
+                onUpdate: "cascade",
+            }),
 
-    type: themeTypeEnum().notNull(),
-    style: themeStyleEnum().notNull(),
-    adaptive: boolean().notNull(),
+        type: themeTypeEnum().notNull(),
+        style: themeStyleEnum().notNull(),
+        adaptive: boolean().notNull(),
 
-    colors: jsonb().$type<ThemeColors>().notNull(),
-    typography: jsonb().$type<ThemeTypography>().notNull(),
+        colors: jsonb().$type<ThemeColors>().notNull(),
+        typography: jsonb().$type<ThemeTypography>().notNull(),
 
-    created: timestamp({ withTimezone: true, mode: "date" })
-        .notNull()
-        .defaultNow(),
+        createdAt: timestamp({ withTimezone: true, mode: "date" })
+            .notNull()
+            .defaultNow(),
 
-    updated: timestamp({ withTimezone: true, mode: "date" })
-        .defaultNow()
-        .notNull()
-        .$onUpdate(() => new Date()),
-});
+        updatedAt: timestamp({ withTimezone: true, mode: "date" })
+            .defaultNow()
+            .notNull()
+            .$onUpdate(() => new Date()),
+    },
+    (table) => [
+        index("theme_author_id_idx").on(table.authorId),
+        index("theme_type_idx").on(table.type),
+        index("theme_style_idx").on(table.style),
+        index("theme_created_at_idx").on(table.createdAt),
+    ],
+);
+
+export const themeRelations = relations(themesTable, ({ one }) => ({
+    author: one(usersTable, {
+        fields: [themesTable.authorId],
+        references: [usersTable.id],
+    }),
+}));

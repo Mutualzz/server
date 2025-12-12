@@ -1,7 +1,19 @@
 import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import JSONbig from "json-bigint";
+import { Pool, types } from "pg";
 import { logger } from "./Logger";
 import * as schema from "./schemas";
+
+const JSONBig = JSONbig({ useNativeBigInt: true });
+
+// BIGINT (int8) columns → BigInt
+types.setTypeParser(20, (val: string) => BigInt(val));
+
+// JSON (oid 114) → parse with JSONBig
+types.setTypeParser(114, (val: string) => JSONBig.parse(val));
+
+// JSONB (oid 3802) → parse with JSONBig
+types.setTypeParser(3802, (val: string) => JSONBig.parse(val));
 
 declare global {
     // for dev/hot-reload safety

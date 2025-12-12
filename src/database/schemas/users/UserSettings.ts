@@ -1,23 +1,24 @@
-import { pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { usersTable } from "./User";
 
 export const preferredModeEnum = pgEnum("preferred_mode", ["spaces", "feed"]);
 
 export const userSettingsTable = pgTable("user_settings", {
-    user: text()
-        .notNull()
+    userId: bigint({ mode: "bigint" })
+        .primaryKey()
         .references(() => usersTable.id, {
             onDelete: "cascade",
             onUpdate: "cascade",
         }),
 
-    currentTheme: text().default("baseDark").notNull(),
+    currentTheme: text(),
+    currentIcon: text(),
 
     preferredMode: preferredModeEnum().default("spaces").notNull(),
 
-    spacePositions: text().array().default([]).notNull(),
+    spacePositions: bigint({ mode: "bigint" }).array().default([]).notNull(),
 
-    updated: timestamp()
+    updatedAt: timestamp()
         .notNull()
         .defaultNow()
         .$onUpdate(() => new Date()),

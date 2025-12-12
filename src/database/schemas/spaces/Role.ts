@@ -1,40 +1,56 @@
-import { sql } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
     bigint,
     boolean,
-    integer,
+    index,
     pgTable,
+    smallint,
     text,
     timestamp,
 } from "drizzle-orm/pg-core";
 import { spacesTable } from "./Space";
 
-export const rolesTable = pgTable("roles", {
-    id: text().primaryKey().notNull(),
-    name: text().notNull(),
-    space: text()
-        .notNull()
-        .references(() => spacesTable.id, {
-            onDelete: "cascade",
-        }),
+export const rolesTable = pgTable(
+    "roles",
+    {
+        id: bigint({ mode: "bigint" }).primaryKey(),
+        name: text().notNull(),
+        spaceId: bigint({ mode: "bigint" })
+            .notNull()
+            .references(() => spacesTable.id, {
+                onDelete: "cascade",
+            }),
 
-    hoist: boolean().notNull().default(false),
-    permissions: bigint("permissions", { mode: "bigint" })
-        .notNull()
-        .default(sql`0`),
-    position: integer().notNull().default(0),
-    color: integer().notNull().default(0),
-    mentionable: boolean().notNull().default(false),
-    flags: bigint("flags", { mode: "bigint" })
-        .notNull()
-        .default(sql`0`),
+        hoist: boolean().notNull().default(false),
+        permissions: bigint("permissions", { mode: "bigint" })
+            .notNull()
+            .default(sql`0`),
+        position: smallint().notNull().default(0),
+        color: text().notNull().default(`#99958e`),
+        mentionable: boolean().notNull().default(false),
+        flags: bigint("flags", { mode: "bigint" })
+            .notNull()
+            .default(sql`0`),
 
-    created: timestamp({ withTimezone: true, mode: "date" })
-        .notNull()
-        .defaultNow(),
+        createdAt: timestamp({ withTimezone: true, mode: "date" })
+            .notNull()
+            .defaultNow(),
 
-    updated: timestamp({ withTimezone: true, mode: "date" })
-        .defaultNow()
-        .notNull()
-        .$onUpdate(() => new Date()),
-});
+        updatedAt: timestamp({ withTimezone: true, mode: "date" })
+            .defaultNow()
+            .notNull()
+            .$onUpdate(() => new Date()),
+    },
+    (table) => [
+        index("roles_space_id_idx").on(table.spaceId),
+        index("roles_position_idx").on(table.position),
+        index("roles_created_at_idx").on(table.createdAt),
+    ],
+);
+
+export const roleRelations = relations(rolesTable, ({ one }) => ({
+    space: one(spacesTable, {
+        fields: [rolesTable.spaceId],
+        references: [spacesTable.id],
+    }),
+}));
