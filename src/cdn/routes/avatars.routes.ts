@@ -3,6 +3,6 @@ import AvatarsController from "../controllers/avatars.controller";
 
 const router = createRouter();
 
-router.get("/:userId/:avatar", AvatarsController.getAvatar);
+router.get("/:userId/:avatar", AvatarsController.get);
 
 export default router;

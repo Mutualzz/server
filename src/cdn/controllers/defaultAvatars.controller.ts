@@ -1,55 +1,53 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
-import {
-    defaultAvatars,
-    HttpException,
-    HttpStatusCode,
-    type DefaultAvatar,
-} from "@mutualzz/types";
+import { defaultAvatarCache, getCache } from "@mutualzz/cache";
+import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
 import crypto from "crypto";
 import type { NextFunction, Request, Response } from "express";
-import { LRUCache } from "lru-cache";
 import path from "path";
 import sharp, { type FormatEnum } from "sharp";
 import { MIME_TYPES } from "../Constants";
 
-const defaultAvatarCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
-});
-
 export default class DefaultAvatarsController {
-    static async getDefaultAvatar(
-        req: Request,
-        res: Response,
-        next: NextFunction,
-    ) {
+    static async get(req: Request, res: Response, next: NextFunction) {
         try {
             const { id } = req.params;
 
-            if (!defaultAvatars.includes(id as DefaultAvatar))
+            if (!id.match(/^[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/))
                 throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Default Avatar not found",
+                    HttpStatusCode.BadRequest,
+                    "Invalid default avatar ID",
                 );
 
-            const { format: formatQuery, size } = req.query;
+            const {
+                format: formatQuery,
+                size,
+                version: versionQuery,
+            } = req.query;
+
+            const version = (versionQuery as string) ?? "light";
+
+            if (version !== "light" && version !== "dark")
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Invalid version query parameter",
+                );
 
             const ext = path.extname(id).replace(".", "").toLowerCase();
             const finalFormat = (formatQuery as string) || ext;
             const name = id.replace(/\.[^/.]+$/, "");
 
-            let cacheKey = `${name}:${finalFormat}`;
+            let cacheKey = `${name}:${finalFormat}:${version}`;
             if (size) cacheKey += `:${size}`;
 
-            let outputBuffer = defaultAvatarCache.get(cacheKey);
+            let outputBuffer = await getCache("defaultAvatar", cacheKey);
 
             if (!outputBuffer) {
                 // Fetch original from S3
                 const { Body } = await s3Client.send(
                     new GetObjectCommand({
                         Bucket: bucketName,
-                        Key: `defaultAvatars/${id}`,
+                        Key: `defaultAvatars/${version}/${id}`,
                     }),
                 );
 

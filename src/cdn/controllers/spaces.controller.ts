@@ -1,17 +1,12 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { getCache, spaceIconCache } from "@mutualzz/cache";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
-import { LRUCache } from "lru-cache";
 import path from "path";
 import sharp from "sharp";
 import { MIME_TYPES } from "../Constants";
 import { contentEtag, normalizeFormat } from "../utils";
-
-const iconCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
-});
 
 export default class SpacesController {
     static async getIcon(req: Request, res: Response, next: NextFunction) {
@@ -72,7 +67,7 @@ export default class SpacesController {
             if (boundedSize) cacheKey += `:${boundedSize}`;
             if (willAnimate) cacheKey += `:a`;
 
-            const cached = iconCache.get(cacheKey);
+            const cached = await getCache("spaceIcon", cacheKey);
             if (cached) {
                 res.setHeader(
                     "Cache-Control",
@@ -128,7 +123,7 @@ export default class SpacesController {
                 } else if (targetFormat === "gif") {
                     if (!boundedSize) {
                         const etag = contentEtag(sourceBody);
-                        iconCache.set(cacheKey, sourceBody);
+                        spaceIconCache.set(cacheKey, sourceBody);
                         res.setHeader(
                             "Cache-Control",
                             "public, max-age=86400, immutable",
@@ -174,7 +169,7 @@ export default class SpacesController {
             const outputBuffer = await image.toBuffer();
 
             const etag = contentEtag(outputBuffer);
-            iconCache.set(cacheKey, outputBuffer);
+            spaceIconCache.set(cacheKey, outputBuffer);
 
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");
             res.setHeader("ETag", etag);

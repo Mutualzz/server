@@ -1,20 +1,15 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { avatarCache, getCache } from "@mutualzz/cache";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
-import { LRUCache } from "lru-cache";
 import path from "path";
 import sharp from "sharp";
 import { MIME_TYPES } from "../Constants";
 import { contentEtag, normalizeFormat } from "../utils";
 
-const avatarCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
-});
-
 export default class AvatarsController {
-    static async getAvatar(req: Request, res: Response, next: NextFunction) {
+    static async get(req: Request, res: Response, next: NextFunction) {
         try {
             const { userId, avatar } = req.params as {
                 userId: string;
@@ -73,7 +68,7 @@ export default class AvatarsController {
             if (boundedSize) cacheKey += `:${boundedSize}`;
             if (willAnimate) cacheKey += `:a`;
 
-            const cached = avatarCache.get(cacheKey);
+            const cached = await getCache("avatar", cacheKey);
             if (cached) {
                 res.setHeader(
                     "Cache-Control",
