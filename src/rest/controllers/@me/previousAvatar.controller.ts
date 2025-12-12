@@ -1,7 +1,7 @@
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { db, usersTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { bucketName, getUser, s3Client } from "@mutualzz/util";
+import { bucketName, s3Client } from "@mutualzz/util";
 import { validatePreviousAvatarDelete } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -9,11 +9,11 @@ import type { NextFunction, Request, Response } from "express";
 export default class PreviousAvatarController {
     static async delete(req: Request, res: Response, next: NextFunction) {
         try {
-            const user = await getUser(req.user?.id);
+            const { user } = req;
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
-                    "You are not logged in",
+                    "Unauthorized",
                 );
 
             const { avatar: avatarHash } = validatePreviousAvatarDelete.parse(
@@ -42,7 +42,7 @@ export default class PreviousAvatarController {
                         (avatar) => avatar !== avatarHash,
                     ),
                 })
-                .where(eq(usersTable.id, user.id));
+                .where(eq(usersTable.id, BigInt(user.id)));
 
             // Delete from S3
             await s3Client.send(

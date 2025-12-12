@@ -3,21 +3,25 @@ export const JSONReplacer = function (
     key: string,
     value: unknown,
 ) {
-    if (this[key] instanceof Date) {
-        return this[key].toISOString().replace("Z", "+00:00");
+    if (key === "hash") return undefined;
+
+    // Date → ISO string
+    if (value instanceof Date) {
+        return value.toISOString().replace("Z", "+00:00");
     }
 
-    if (typeof this[key] === "bigint") {
-        return this[key].toString();
-    }
-
-    // erlpack encoding doesn't call json.stringify,
-    // so our toJSON functions don't get called.
-    // manually call it here
-    //@ts-ignore
-    if (this[key]?.toJSON)
+    // Handle objects with custom .toJSON
+    // erlpack doesn't use JSON.stringify so force it manually
+    // @ts-ignore
+    if (value?.toJSON) {
         //@ts-ignore
-        this[key] = this[key].toJSON();
+        return value.toJSON();
+    }
 
     return value;
+};
+
+export const normalizeJSON = <T>(obj: T): T => {
+    if (obj === null || obj === undefined) return obj as any;
+    return JSON.parse(JSON.stringify(obj, JSONReplacer));
 };

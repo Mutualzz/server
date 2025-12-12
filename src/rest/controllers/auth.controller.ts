@@ -1,6 +1,12 @@
 import { db, userSettingsTable, usersTable } from "@mutualzz/database";
-import { defaultAvatars, HttpException, HttpStatusCode } from "@mutualzz/types";
-import { generateSessionId, genRandColor, genSnowflake } from "@mutualzz/util";
+import type { APIPrivateUser } from "@mutualzz/types";
+import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import {
+    execNormalized,
+    generateSessionId,
+    genRandColor,
+    Snowflake,
+} from "@mutualzz/util";
 import { validateLogin, validateRegister } from "@mutualzz/validators";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
@@ -10,7 +16,7 @@ import {
     BCRYPT_SALT_ROUNDS,
     createSession,
     generateSessionToken,
-} from "../utils";
+} from "../util";
 
 export default class AuthController {
     static async register(req: Request, res: Response, next: NextFunction) {
@@ -19,16 +25,14 @@ export default class AuthController {
             const { username, email, password, globalName, dateOfBirth } =
                 validateRegister.parse(req.body);
 
-            const userExists = await db
-                .select()
-                .from(usersTable)
-                .where(
-                    or(
+            const userExists = await execNormalized<APIPrivateUser>(
+                db.query.usersTable.findFirst({
+                    where: or(
                         eq(usersTable.username, username),
                         eq(usersTable.email, email),
                     ),
-                )
-                .then((results) => results[0]);
+                }),
+            );
 
             // If user exists, throw an error
             if (userExists) {
@@ -55,27 +59,31 @@ export default class AuthController {
             // Hash password
             const hash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
-            const defaultAvatar =
-                defaultAvatars[crypto.randomInt(0, defaultAvatars.length)];
+            const defaultAvatar = crypto.randomInt(0, 5);
 
             const accentColor = genRandColor();
 
-            const id = genSnowflake();
+            const id = BigInt(Snowflake.generate());
             const newUser = await db.transaction(async (tx) => {
-                const user = await tx
-                    .insert(usersTable)
-                    .values({
-                        id,
-                        username,
-                        email,
-                        globalName,
-                        hash,
-                        accentColor,
-                        defaultAvatar,
-                        dateOfBirth,
-                    })
-                    .returning()
-                    .then((results) => results[0]);
+                const user = await execNormalized<APIPrivateUser>(
+                    tx
+                        .insert(usersTable)
+                        .values({
+                            id,
+                            username,
+                            email,
+                            globalName,
+                            hash,
+                            accentColor,
+                            defaultAvatar: {
+                                type: defaultAvatar,
+                                color: null,
+                            },
+                            dateOfBirth,
+                        })
+                        .returning()
+                        .then((results) => results[0]),
+                );
 
                 if (!user)
                     throw new HttpException(
@@ -83,9 +91,15 @@ export default class AuthController {
                         "Failed to register, please try again later",
                     );
 
-                await tx.insert(userSettingsTable).values({
-                    user: id,
-                });
+                await tx
+                    .insert(userSettingsTable)
+                    .values({
+                        userId: BigInt(user.id),
+                    })
+                    .onConflictDoUpdate({
+                        target: userSettingsTable.userId,
+                        set: { userId: BigInt(user.id) },
+                    });
 
                 return user;
             });
@@ -120,14 +134,13 @@ export default class AuthController {
                 );
             }
 
-            const user = await db
-                .select({
-                    id: usersTable.id,
-                    hash: usersTable.hash,
-                })
-                .from(usersTable)
-                .where(or(...whereConditions))
-                .then((results) => results[0]);
+            const user = await db.query.usersTable.findFirst({
+                columns: {
+                    id: true,
+                    hash: true,
+                },
+                where: or(...whereConditions),
+            });
 
             // If user does not exist, throw an error
             if (!user)
@@ -159,20 +172,22 @@ export default class AuthController {
                 );
 
             await db.transaction(async (tx) => {
-                const existingSettings = await tx
-                    .select()
-                    .from(userSettingsTable)
-                    .where(eq(userSettingsTable.user, user.id))
-                    .then((results) => results[0]);
+                const existingSettings =
+                    await tx.query.userSettingsTable.findFirst({
+                        columns: {
+                            userId: true,
+                        },
+                        where: eq(userSettingsTable.userId, BigInt(user.id)),
+                    });
 
                 if (!existingSettings) {
                     await tx.insert(userSettingsTable).values({
-                        user: user.id,
+                        userId: BigInt(user.id),
                     });
                 }
             });
 
-            const token = generateSessionToken(user.id);
+            const token = generateSessionToken(user.id.toString());
             const sessionId = generateSessionId();
             await createSession(token, user.id, sessionId);
 

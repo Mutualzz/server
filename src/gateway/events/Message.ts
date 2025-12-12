@@ -1,10 +1,18 @@
+import { GatewayCloseCodes } from "@mutualzz/types";
 import { JSONReplacer } from "@mutualzz/util";
 import type { Data } from "ws";
 import { logger } from "../Logger";
 import OPCodeHandlers from "../opcodes";
+import { OPCODE_LIMITS } from "../util";
+import { checkGlobalRateLimit, checkRateLimit } from "../util/RateLimit";
 import type { WebSocket } from "../util/WebSocket";
 
 export async function Message(this: WebSocket, buffer: Data) {
+    if (!checkGlobalRateLimit(this)) {
+        logger.warn(`Rate limit exceeded ${this.sessionId ?? ""}`);
+        return this.close(GatewayCloseCodes.RateLimit, "Rate limit exceeded");
+    }
+
     let raw: Uint8Array;
 
     // ws Data can be string | Buffer | ArrayBuffer | Buffer[]
@@ -28,7 +36,7 @@ export async function Message(this: WebSocket, buffer: Data) {
         }
         raw = out;
     } else {
-        logger.error("[Gateway] Unknown message type");
+        logger.error("Unknown message type");
         return;
     }
 
@@ -45,24 +53,43 @@ export async function Message(this: WebSocket, buffer: Data) {
             decoded = JSON.parse(new TextDecoder().decode(raw), JSONReplacer);
         }
     } catch (e: any) {
-        logger.error(`[Gateway] Failed to decode message: ${e.stack}`);
+        logger.error(`Failed to decode message: ${e.stack}`);
         return;
     }
 
+    if (!decoded || typeof decoded.op !== "number") {
+        logger.error(`Invalid message format: ${JSON.stringify(decoded)}`);
+        return;
+    }
+
+    if (
+        !checkRateLimit(
+            this,
+            decoded.op,
+            OPCODE_LIMITS[decoded.op]?.limit,
+            OPCODE_LIMITS[decoded.op]?.window,
+        )
+    ) {
+        logger.warn(
+            `Rate limit exceeded for Opcode ${decoded.op} - ${this.sessionId}`,
+        );
+        return this.close(
+            GatewayCloseCodes.RateLimit,
+            `Rate limit exceeded for Opcode ${decoded.op}`,
+        );
+    }
     const OPCodeHandler =
         OPCodeHandlers[decoded.op as keyof typeof OPCodeHandlers];
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!OPCodeHandler) {
-        logger.error(`[Gateway] Unknown Opcode: ${decoded.op}`);
+        logger.error(`Unknown Opcode: ${decoded.op}`);
         return;
     }
 
     try {
         await OPCodeHandler.call(this, decoded);
     } catch (error: any) {
-        logger.error(
-            `[Gateway] Error while handling Opcode ${decoded.op}: ${error.stack}`,
-        );
+        logger.error(`Error while handling Opcode ${decoded.op}`, error.stack);
     }
 }

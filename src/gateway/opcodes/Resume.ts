@@ -1,4 +1,5 @@
 import { GatewayCloseCodes, type GatewayPayload } from "@mutualzz/types";
+import { getUser, prepareReadyData } from "@mutualzz/util";
 import { logger } from "../Logger";
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
@@ -23,9 +24,20 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
     this.userId = session.userId;
     this.sequence = session.seq;
 
+    const user = await getUser(this.userId, true);
+    if (!user) {
+        logger.error(`User not found for resume: ${this.userId}`);
+        await Send(this, {
+            op: "InvalidSession",
+            d: false,
+        });
+
+        return this.close(GatewayCloseCodes.InvalidSession, "Invalid session");
+    }
+
     await saveSession({
         sessionId: this.sessionId,
-        userId: this.userId,
+        userId: user.id,
         seq: this.sequence,
     });
 
@@ -39,4 +51,18 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
     });
 
     logger.info(`Session resumed: ${this.sessionId}`);
+
+    const readyData = await prepareReadyData(user);
+
+    await Send(this, {
+        op: "Dispatch",
+        t: "Ready",
+        s: this.sequence++,
+        d: {
+            ...readyData,
+            sessionId: this.sessionId,
+        },
+    });
+
+    logger.info(`Sent Ready event for resumed session: ${this.sessionId}`);
 }

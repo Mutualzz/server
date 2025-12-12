@@ -3,31 +3,38 @@ import {
     GetObjectCommand,
     PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import { db, userSettingsTable, usersTable } from "@mutualzz/database";
-import { defaultAvatars, HttpException, HttpStatusCode } from "@mutualzz/types";
+import { setCache } from "@mutualzz/cache";
+import {
+    db,
+    toPublicUser,
+    userSettingsTable,
+    usersTable,
+} from "@mutualzz/database";
+import { logger } from "@mutualzz/rest/Logger";
+import { generateHash } from "@mutualzz/rest/util";
+import type { APIPrivateUser, APIUserSettings } from "@mutualzz/types";
+import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     bucketName,
     dominantHex,
     emitEvent,
+    execNormalized,
     genRandColor,
-    getUser,
     s3Client,
 } from "@mutualzz/util";
 import { validateMePatch, validateMeSettingsPatch } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
-import { logger } from "../../Logger";
-import { generateHash } from "../../utils";
 
 export default class MeController {
-    static async patch(req: Request, res: Response, next: NextFunction) {
+    static async update(req: Request, res: Response, next: NextFunction) {
         try {
-            const user = await getUser(req.user?.id);
+            const { user } = req;
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
-                    "You are not logged in",
+                    "Unauthorized",
                 );
 
             const { username, avatar, defaultAvatar, globalName } =
@@ -47,24 +54,11 @@ export default class MeController {
                     "Provide either defaultAvatar or avatar, not both",
                 );
 
-            if (defaultAvatar && !defaultAvatars.includes(defaultAvatar))
-                throw new HttpException(
-                    HttpStatusCode.BadRequest,
-                    "Invalid default avatar selected",
-                );
-
-            if (avatar === null && defaultAvatar)
-                throw new HttpException(
-                    HttpStatusCode.BadRequest,
-                    "Cannot set avatar to null and defaultAvatar simultaneously",
-                );
-
             if (username && user.username !== username) {
-                const exists = await db
-                    .select({})
-                    .from(usersTable)
-                    .where(eq(usersTable.username, username))
-                    .then((results) => results[0]);
+                const exists = await db.query.usersTable.findFirst({
+                    where: eq(usersTable.username, username),
+                    columns: {},
+                });
 
                 if (exists)
                     throw new HttpException(
@@ -257,11 +251,7 @@ export default class MeController {
                 }
             }
 
-            if (
-                defaultAvatar &&
-                defaultAvatar !== user.defaultAvatar &&
-                defaultAvatars.includes(defaultAvatar)
-            ) {
+            if (defaultAvatar) {
                 if (
                     user.avatar &&
                     user.avatar !== null &&
@@ -286,51 +276,100 @@ export default class MeController {
                 }
 
                 user.avatar = null;
-                user.defaultAvatar = defaultAvatar;
-                user.accentColor = genRandColor();
+
+                user.defaultAvatar.type = defaultAvatar.type ?? 0;
+                user.defaultAvatar.color = defaultAvatar.color ?? null;
+                user.accentColor = defaultAvatar.color ?? genRandColor();
             }
 
-            const { dateOfBirth, ...toUpdate } = user;
+            const newUser = await execNormalized<APIPrivateUser>(
+                db
+                    .update(usersTable)
+                    .set({
+                        ...user,
+                        id: BigInt(user.id),
+                    })
+                    .where(eq(usersTable.id, BigInt(user.id)))
+                    .returning()
+                    .then((results) => results[0]),
+            );
 
-            await db
-                .update(usersTable)
-                .set(toUpdate)
-                .where(eq(usersTable.id, user.id));
+            if (!newUser)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to update user",
+                );
 
             await emitEvent({
                 event: "UserUpdate",
-                user_id: user.id,
-                data: user,
+                user_id: newUser.id,
+                data: toPublicUser(newUser),
             });
 
-            res.status(HttpStatusCode.Success).json(user);
+            await setCache("user", user.id, newUser);
+
+            res.status(HttpStatusCode.Success).json(toPublicUser(newUser));
         } catch (err) {
             next(err);
         }
     }
 
-    static async patchSettings(
+    static async updateSettings(
         req: Request,
         res: Response,
         next: NextFunction,
     ) {
         try {
-            const user = await getUser(req.user?.id);
+            const { user } = req;
 
             if (!user)
                 throw new HttpException(
                     HttpStatusCode.Unauthorized,
-                    "You are not logged in",
+                    "Unauthorized",
                 );
 
-            const validatedSettings = validateMeSettingsPatch.parse(req.body);
+            const { spacePositions, ...validatedSettings } =
+                validateMeSettingsPatch.parse(req.body);
 
-            const result = await db
-                .update(userSettingsTable)
-                .set(validatedSettings)
-                .where(eq(userSettingsTable.user, user.id))
-                .returning()
-                .then((results) => results[0]);
+            await db
+                .insert(userSettingsTable)
+                .values({
+                    userId: BigInt(user.id),
+                })
+                .onConflictDoUpdate({
+                    target: userSettingsTable.userId,
+                    set: { userId: BigInt(user.id) },
+                });
+
+            const newSettings = {
+                ...validatedSettings,
+                ...(spacePositions && {
+                    spacePositions: spacePositions.map(BigInt),
+                }),
+            };
+
+            const result = await execNormalized<APIUserSettings>(
+                db
+                    .update(userSettingsTable)
+                    .set(newSettings)
+                    .where(eq(userSettingsTable.userId, BigInt(user.id)))
+                    .returning()
+                    .then((results) => results[0]),
+            );
+
+            if (!result)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to update user settings",
+                );
+
+            await emitEvent({
+                event: "UserSettingsUpdate",
+                user_id: user.id,
+                data: result,
+            });
+
+            await setCache("userSettings", user.id, result);
 
             res.status(HttpStatusCode.Success).json(result);
         } catch (error) {

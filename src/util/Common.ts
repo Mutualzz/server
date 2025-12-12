@@ -1,10 +1,16 @@
-import { db, usersTable } from "@mutualzz/database";
-import type { APIPrivateUser } from "@mutualzz/types";
+import type { APIMessageEmbed } from "@mutualzz/types";
+import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import Color from "color";
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import sharp from "sharp";
+import urlMetadata from "url-metadata";
+
+export const spotifySdk = SpotifyApi.withClientCredentials(
+    process.env.SPOTIFY_CLIENT_ID!,
+    process.env.SPOTIFY_CLIENT_SECRET!,
+);
 
 export const base64UrlEncode = (input: Buffer | string) =>
     Buffer.from(input)
@@ -13,7 +19,30 @@ export const base64UrlEncode = (input: Buffer | string) =>
         .replace(/\+/g, "-")
         .replace(/\//g, "_");
 
+export const asAcronym = (str: string) =>
+    str
+        .split(" ")
+        .map((str) => str[0])
+        .join("");
+
+export function arrayPartition<T>(
+    array: T[],
+    filter: (elem: T) => boolean,
+): [T[], T[]] {
+    const pass: T[] = [],
+        fail: T[] = [];
+    array.forEach((e) => (filter(e) ? pass : fail).push(e));
+    return [pass, fail];
+}
+
 export const createRouter = () => express.Router({ mergeParams: true });
+export const createLimiter = (ms: number, limit: number) =>
+    rateLimit({
+        windowMs: ms,
+        max: limit,
+        standardHeaders: true,
+        legacyHeaders: false,
+    });
 
 export const genRandColor = () =>
     "#" +
@@ -31,23 +60,195 @@ export const dominantHex = async (buffer: Buffer) => {
     }).hex();
 };
 
-export const getUser = async (id?: string): Promise<APIPrivateUser | null> => {
-    if (!id) return null;
+export const generateInviteCode = () => {
+    const characters =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let code = "";
+    for (let i = 0; i < 8; i++) {
+        code += characters.charAt(crypto.randomInt(characters.length));
+    }
 
-    const results = await db
-        .select()
-        .from(usersTable)
-        .where(eq(usersTable.id, id));
+    return code;
+};
 
-    if (!results) return null;
-    if (results.length > 1)
-        throw new Error(
-            "Multiple users found with the same ID, this should never happen.",
-        );
-    if (results.length === 0) return null;
-    if (!results[0]) return null;
+export const getUrls = (text: string) => {
+    const urlPattern = /\bhttps?:\/\/[^\s/$.?#].[^\s]*\b/g;
+    const urls = text.match(urlPattern) || []; // Find all URLs or return an empty array if none
 
-    const { hash, ...user } = results[0];
+    // Convert each URL to valid format (ensure it has https://)
+    const validUrls = urls.map((url) => {
+        // If the URL doesn't start with 'http' (or 'https'), add 'https://'
+        if (!/^https?:\/\//i.test(url)) {
+            url = "https://" + url;
+        }
+        return url;
+    });
 
-    return user;
+    // Remove duplicates using Set
+    return [...new Set(validUrls)];
+};
+
+export const fetchSpotifyMetadata = async (
+    url: string,
+): Promise<APIMessageEmbed | null> => {
+    const match = url.match(
+        /spotify\.com\/(track|album|artist|playlist)\/([a-zA-Z0-9]+)/,
+    );
+
+    if (!match) return null;
+    const [, type, id] = match;
+
+    try {
+        let data: any;
+
+        switch (type) {
+            case "track":
+                data = await spotifySdk.tracks.get(id);
+                break;
+            case "album":
+                data = await spotifySdk.albums.get(id);
+                break;
+            case "artist":
+                data = await spotifySdk.artists.get(id);
+                break;
+            case "playlist":
+                data = await spotifySdk.playlists
+                    .getPlaylist(id)
+                    .catch(() => null);
+                break;
+            default:
+                return null;
+        }
+
+        return {
+            title: data.name,
+            url,
+            description: type.charAt(0).toUpperCase() + type.slice(1),
+            image:
+                data.album?.images?.[0]?.url ||
+                data.images?.[0]?.url ||
+                undefined,
+            author: {
+                name: data.artists
+                    ? data.artists.map((a: any) => a.name).join(", ")
+                    : data.name,
+                iconUrl:
+                    "https://cdn-icons-png.flaticon.com/512/174/174872.png", // Spotify logo
+            },
+            color: "#1DB954",
+            spotify: {
+                type,
+                id,
+                embedUrl: `https://open.spotify.com/embed/${type}/${id}`,
+            },
+        };
+    } catch (err) {
+        console.error(err);
+        return null;
+    }
+};
+
+export const fetchYoutubeMetadata = async (
+    url: string,
+): Promise<APIMessageEmbed | null> => {
+    const match = url.match(
+        /(?:youtube\.com\/.*v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    );
+    if (!match) return null;
+    const videoId = match[1];
+
+    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`;
+
+    try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const video = data.items?.[0];
+        if (!video) return null;
+
+        return {
+            title: video.snippet.title,
+            url,
+            description: video.snippet.description,
+            image: video.snippet.thumbnails.high.url,
+            author: {
+                name: video.snippet.channelTitle,
+            },
+            color: "#FF0000",
+            youtube: {
+                videoId,
+                embedUrl: `https://www.youtube.com/embed/${videoId}`,
+            },
+        };
+    } catch (err) {
+        console.error(err);
+        return null;
+    }
+};
+
+export const detectService = (url: string): "spotify" | "youtube" | "other" => {
+    if (/open\.spotify\.com/.test(url)) return "spotify";
+    if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
+    return "other";
+};
+
+export const buildEmbed = async (
+    url: string,
+): Promise<APIMessageEmbed | null> => {
+    const service = detectService(url);
+    let embed: APIMessageEmbed | null = null;
+
+    if (service === "spotify") {
+        embed = await fetchSpotifyMetadata(url);
+    } else if (service === "youtube") {
+        embed = await fetchYoutubeMetadata(url);
+    } else {
+        // Fallback to Open Graph
+        const metadata = await urlMetadata(url).catch(() => null);
+        if (!metadata) return null;
+
+        const limit = 500;
+        let description: string = (metadata["og:description"] ?? "")
+            .replace(/\s+/g, " ")
+            .trim(); // Collapse multiple spaces/newlines;
+
+        if (description.length > limit)
+            description = description.slice(0, limit) + "..."; // Limit to 100 chars
+
+        embed = {
+            title: metadata["og:title"],
+            description,
+            url: metadata["og:url"] ?? url,
+            image: metadata["og:image"] ?? null,
+            media:
+                metadata["og:video:secure_url"] ??
+                metadata["og:video:url"] ??
+                null,
+            author: {
+                name: metadata["og:site_name"]?.split(",")[0] ?? "",
+                url: metadata["og:url"] ?? url,
+                iconUrl:
+                    metadata.favicons?.[0]?.href &&
+                    !metadata.favicons[0].href.startsWith("/")
+                        ? metadata.favicons[0].href
+                        : null,
+            },
+            color:
+                metadata["theme-color"] && metadata["theme-color"].length > 0
+                    ? metadata["theme-color"]
+                    : undefined,
+        };
+    }
+
+    return embed;
+};
+
+export const buildEmbeds = async (content: string) => {
+    const urls = Array.from(getUrls(content)).slice(0, 5); // Limit to first 5 URLs
+    const embeds: APIMessageEmbed[] = [];
+    for (const url of urls) {
+        const embed = await buildEmbed(url);
+        if (embed) embeds.push(embed);
+    }
+    return embeds;
 };

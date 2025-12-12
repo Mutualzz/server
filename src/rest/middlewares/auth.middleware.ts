@@ -1,7 +1,7 @@
+import { verifySessionToken } from "@mutualzz/rest/util";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { getUser } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
-import { verifySessionToken } from "../utils";
 
 const { JWT_SECRET } = process.env;
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined");
@@ -22,23 +22,22 @@ const authMiddleware = async (
             );
 
         const session = await verifySessionToken(token);
+
         if (!session)
             throw new HttpException(
                 HttpStatusCode.Unauthorized,
                 "Unauthorized",
             );
 
-        const user = await getUser(session.userId);
+        const user = await getUser(session.userId, true);
+
         if (!user)
             throw new HttpException(
                 HttpStatusCode.Unauthorized,
                 "Unauthorized",
             );
 
-        req.user = {
-            ...user,
-            token,
-        };
+        req.user = user;
 
         next();
     } catch (err) {

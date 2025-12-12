@@ -28,11 +28,18 @@
         "baseUrl": "./src",
 
         "paths": {
+            "@mutualzz/cache": ["./cache"],
+            "@mutualzz/cache/*": ["./cache/*"],
             "@mutualzz/rest": ["./rest"],
+            "@mutualzz/rest/*": ["./rest/*"],
             "@mutualzz/database": ["./database"],
+            "@mutualzz/database/*": ["./database/*"],
             "@mutualzz/gateway": ["./gateway"],
+            "@mutualzz/gateway/*": ["./gateway/*"],
             "@mutualzz/cdn": ["./cdn"],
-            "@mutualzz/util": ["./util"]
+            "@mutualzz/cdn/*": ["./cdn/*"],
+            "@mutualzz/util": ["./util"],
+            "@mutualzz/util/*": ["./util/*"]
         }
     }
 }

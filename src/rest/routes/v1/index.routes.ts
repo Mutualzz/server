@@ -1,5 +1,5 @@
+import MainController from "@mutualzz/rest/controllers/index.controller";
 import { createRouter } from "@mutualzz/util";
-import MainController from "../../controllers/index.controller";
 
 const router = createRouter();
 

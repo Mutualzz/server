@@ -1,10 +1,10 @@
-import { createRouter } from "@mutualzz/util";
-import MeThemesController from "../../../controllers/@me/themes.controller";
+import MeThemesController from "@mutualzz/rest/controllers/@me/themes.controller";
+import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
-router.put("/", MeThemesController.put);
-router.patch("/:id", MeThemesController.patch);
-router.delete("/:id", MeThemesController.delete);
+router.post("/", createLimiter(60_000, 30), MeThemesController.create);
+router.patch("/:id", createLimiter(60_000, 30), MeThemesController.update);
+router.delete("/:id", createLimiter(60_000, 20), MeThemesController.delete);
 
 export default router;

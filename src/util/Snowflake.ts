@@ -1,24 +1,89 @@
-import { Snowflake } from "@theinternetfolks/snowflake";
-import os from "os";
+export class Snowflake {
+    static readonly EPOCH = 1735737360000;
+    static INCREMENT = BigInt(0); // max 4095
+    static processId = BigInt(0 % 31); // max 31
+    static workerId = BigInt(0 % 31); // max 31
 
-export const SNOWFLAKE_EPOCH = 1735737360000;
+    constructor() {
+        throw new Error(
+            `The ${this.constructor.name} class may not be instantiated.`,
+        );
+    }
 
-// Derive a stable shard id (0–1023)
-const machineHash =
-    Math.abs(
-        os
-            .hostname()
-            .split("")
-            .reduce((a, c) => a + c.charCodeAt(0), 0),
-    ) % 32;
-const procHash =
-    (process.env.PM2_INSTANCE_ID
-        ? Number(process.env.PM2_INSTANCE_ID)
-        : process.pid) % 32;
-const shardId = (machineHash << 5) | procHash;
+    static idToBinary(num: any): string {
+        let bin = "";
+        let high = parseInt(num.slice(0, -10)) || 0;
+        let low = parseInt(num.slice(-10));
+        while (low > 0 || high > 0) {
+            bin = String(low & 1) + bin;
+            low = Math.floor(low / 2);
+            if (high > 0) {
+                low += 5000000000 * (high % 2);
+                high = Math.floor(high / 2);
+            }
+        }
+        return bin;
+    }
 
-export const genSnowflake = () =>
-    Snowflake.generate({
-        timestamp: SNOWFLAKE_EPOCH,
-        shard_id: shardId,
-    });
+    static binaryToID(num: any): Snowflake {
+        let dec = "";
+
+        while (num.length > 50) {
+            const high = parseInt(num.slice(0, -32), 2);
+            const low = parseInt((high % 10).toString(2) + num.slice(-32), 2);
+
+            dec = (low % 10).toString() + dec;
+            num =
+                Math.floor(high / 10).toString(2) +
+                Math.floor(low / 10)
+                    .toString(2)
+                    .padStart(32, "0");
+        }
+
+        num = parseInt(num, 2);
+        while (num > 0) {
+            dec = (num % 10).toString() + dec;
+            num = Math.floor(num / 10);
+        }
+
+        return dec;
+    }
+
+    static generateWorkerProcess(timestamp?: number) {
+        // Use provided timestamp or current time
+        const time =
+            BigInt((timestamp ?? Date.now()) - Snowflake.EPOCH) << BigInt(22);
+        const worker = Snowflake.workerId << 17n;
+        const process = Snowflake.processId << 12n;
+        const increment = Snowflake.INCREMENT++;
+
+        return BigInt(time | worker | process | increment);
+    }
+
+    static generate(timestamp?: number) {
+        return Snowflake.generateWorkerProcess(timestamp).toString();
+    }
+
+    static deconstruct(snowflake: Snowflake) {
+        const BINARY = Snowflake.idToBinary(snowflake)
+            .toString()
+            .padStart(64, "0");
+
+        const res = {
+            timestamp: parseInt(BINARY.substring(0, 42), 2) + Snowflake.EPOCH,
+            workerID: parseInt(BINARY.substring(42, 47), 2),
+            processID: parseInt(BINARY.substring(47, 52), 2),
+            increment: parseInt(BINARY.substring(52, 64), 2),
+            binary: BINARY,
+        };
+
+        Object.defineProperty(res, "date", {
+            get: function get() {
+                return new Date(this.timestamp);
+            },
+            enumerable: true,
+        });
+
+        return res;
+    }
+}

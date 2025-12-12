@@ -1,19 +1,10 @@
 import {
-    db,
-    spaceMembersTable,
-    spacesTable,
-    themesTable,
-    userSettingsTable,
-} from "@mutualzz/database";
-import {
     GatewayCloseCodes,
     type GatewayPayload,
     type RESTSession,
 } from "@mutualzz/types";
-import { getUser } from "@mutualzz/util";
-import { eq, sql } from "drizzle-orm";
+import { getUser, prepareReadyData, redis } from "@mutualzz/util";
 import { setupListener } from "gateway/Listener";
-import { redis } from "../../util/Redis";
 import { logger } from "../Logger";
 import { saveSession } from "../util";
 import { Send } from "../util/Send";
@@ -44,7 +35,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
     this.sessionId = session.sessionId;
 
-    const user = await getUser(session.userId);
+    const user = await getUser(session.userId, true);
     if (!user) {
         logger.error(`User not found for session ${this.sessionId}`);
         await Send(this, {
@@ -56,7 +47,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
         return this.close(GatewayCloseCodes.InvalidSession, "Invalid user");
     }
 
-    this.userId = user.id;
+    this.userId = user.id.toString();
     this.sequence = 0;
 
     await saveSession({
@@ -65,37 +56,16 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
         seq: this.sequence,
     });
 
-    const themes = await db
-        .select()
-        .from(themesTable)
-        .where(eq(themesTable.author, user.id));
-
-    const spaces = await db
-        .select()
-        .from(spacesTable)
-        .where(
-            sql`EXISTS (SELECT 1 FROM ${spaceMembersTable} WHERE ${spaceMembersTable.space} = ${spacesTable.id} AND ${spaceMembersTable.user} = ${user.id})`,
-        );
-
-    const settings = await db
-        .select()
-        .from(userSettingsTable)
-        .where(eq(userSettingsTable.user, user.id))
-        .then((results) => results[0]);
-
-    const d = {
-        sessionId: this.sessionId,
-        user,
-        themes,
-        spaces,
-        settings,
-    };
+    const readyData = await prepareReadyData(user);
 
     await Send(this, {
         op: "Dispatch",
         t: "Ready",
         s: this.sequence++,
-        d,
+        d: {
+            ...readyData,
+            sessionId: this.sessionId,
+        },
     });
 
     logger.info(

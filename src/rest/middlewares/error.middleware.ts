@@ -1,7 +1,7 @@
+import { logger } from "@mutualzz/rest/Logger";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import type { NextFunction, Request, Response } from "express";
 import { ZodError } from "zod";
-import { logger } from "../Logger";
 
 const errorMiddleware = (
     error: unknown,
@@ -9,6 +9,7 @@ const errorMiddleware = (
     res: Response,
     __: NextFunction,
 ) => {
+    logger.error(error);
     let constructedError;
 
     if (error instanceof HttpException) {
@@ -23,7 +24,7 @@ const errorMiddleware = (
 
     if (error instanceof ZodError) {
         const errors = error.issues.map((err) => ({
-            path: err.path[0].toString(),
+            path: err.path[0]?.toString() ?? "unknown",
             message: err.message,
         }));
 

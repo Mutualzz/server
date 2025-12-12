@@ -1,9 +1,17 @@
 import type { RESTSession } from "@mutualzz/types";
-import { base64UrlEncode, genSnowflake, redis } from "@mutualzz/util";
+import { base64UrlEncode, redis, Snowflake } from "@mutualzz/util";
 import crypto from "crypto";
+import { LRUCache } from "lru-cache";
+
+export const sessionLRU = new LRUCache<string, RESTSession>({
+    max: 1000,
+    ttl: 5 * 60 * 1000, // 5 minutes
+});
 
 export const generateSessionToken = (userId: string) => {
-    const timestamp = genSnowflake();
+    userId = userId.toString();
+
+    const timestamp = Snowflake.generate();
     const base64UrlId = base64UrlEncode(userId);
     const base64Timestamp = base64UrlEncode(timestamp);
 
@@ -20,18 +28,24 @@ export const generateSessionToken = (userId: string) => {
 
 export const createSession = async (
     token: string,
-    userId: string,
+    userId: string | bigint,
     sessionId: string,
 ) => {
-    const sessionData = JSON.stringify({
+    userId = userId.toString();
+
+    const sessionData = {
         sessionId,
         userId,
         createdAt: Date.now(),
         lastUsedAt: Date.now(),
-    });
+    };
 
-    await redis.set(`rest:sessions:${token}`, sessionData);
+    await redis.set(`rest:sessions:${token}`, JSON.stringify(sessionData));
     await redis.sadd(`users:${userId}:sessions`, token);
+
+    sessionLRU.set(token, sessionData);
+
+    return sessionData;
 };
 
 export const verifySessionToken = async (token: string) => {
@@ -47,17 +61,28 @@ export const verifySessionToken = async (token: string) => {
     );
     if (expectedSignature !== signature) return null;
 
-    const raw = await redis.get(`rest:sessions:${token}`);
-    if (!raw) return null;
+    let session = sessionLRU.get(token);
+    if (!session) {
+        const raw = await redis.get(`rest:sessions:${token}`);
+        if (!raw) return null;
 
-    const session: RESTSession = JSON.parse(raw);
-    session.lastUsedAt = Date.now();
+        session = JSON.parse(raw as string);
+        if (!session) return null;
 
-    await redis.set(
-        `rest:sessions:${token}`,
-        JSON.stringify(session),
-        "KEEPTTL",
-    );
+        sessionLRU.set(token, session);
+    }
+
+    if (!session) return null;
+
+    const now = Date.now();
+    if (!session.lastUsedAt || now - session.lastUsedAt > 300000) {
+        session.lastUsedAt = now;
+        await redis.set(
+            `rest:sessions:${token}`,
+            JSON.stringify(session),
+            "KEEPTTL",
+        );
+    }
 
     return session;
 };
@@ -71,6 +96,8 @@ export const revokeSession = async (token: string) => {
     await redis.del(`rest:sessions:${token}`);
     await redis.srem(`users:${userId}:sessions`, token);
 
+    sessionLRU.delete(token);
+
     return true;
 };
 
@@ -80,6 +107,7 @@ export const revokeAllSessions = async (userId: string) => {
 
     for (const token of tokens) {
         await redis.del(`rest:sessions:${token}`);
+        sessionLRU.delete(token);
     }
 
     await redis.del(`users:${userId}:sessions`);

@@ -1,9 +1,9 @@
 import { GatewayCloseCodes } from "@mutualzz/types";
-import { createCompressor } from "gateway/util/Compressor";
 import type { IncomingMessage } from "http";
 import type { WebSocketServer } from "ws";
 import { logger } from "../Logger";
 import { createCodec } from "../util/Codec";
+import { createCompressor } from "../util/Compressor";
 import { HEARTBEAT_INTERVAL } from "../util/Constants";
 import { parseNegotiationParams } from "../util/Negotation";
 import { Send } from "../util/Send";
@@ -45,6 +45,7 @@ export default async function Connection(
     socket.compress = compress;
     socket.codec = await createCodec(encoding);
     socket.compressor = await createCompressor(compress);
+    socket.rateLimits = new Map();
 
     try {
         // @ts-expect-error The types errors do not matter in this case
@@ -64,7 +65,10 @@ export default async function Connection(
         });
 
         socket.readyTimeout = setTimeout(() => {
-            socket.close(1008, "Connection timed out");
+            socket.close(
+                GatewayCloseCodes.InvalidConnection,
+                "Connection timed out",
+            );
         }, HEARTBEAT_INTERVAL * 2);
     } catch (err) {
         logger.error(err);

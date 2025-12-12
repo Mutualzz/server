@@ -2,24 +2,17 @@ import {
     GatewayDispatchEvents,
     GatewayOpcodes,
     type GatewayPayload,
-    type WireGatewayPayload,
 } from "@mutualzz/types";
 import { JSONReplacer } from "@mutualzz/util";
 import type { WebSocket } from "./WebSocket";
 
 export function Send(socket: WebSocket, data: GatewayPayload) {
-    const payload: WireGatewayPayload = JSON.parse(
-        JSON.stringify(
-            {
-                op: GatewayOpcodes[data.op],
-                d: data.d,
-                s: data.s,
-                t: data.t ? GatewayDispatchEvents[data.t] : undefined,
-            },
-            JSONReplacer,
-        ),
-        JSONReplacer,
-    );
+    const payload = {
+        op: GatewayOpcodes[data.op],
+        d: data.d,
+        s: data.s,
+        t: data.t ? GatewayDispatchEvents[data.t] : undefined,
+    };
 
     return new Promise((resolve, reject) => {
         if (socket.readyState !== socket.OPEN)

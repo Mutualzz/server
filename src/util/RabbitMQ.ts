@@ -1,5 +1,5 @@
 import { Logger } from "@mutualzz/logger";
-import type { APIPrivateUser, APISpace, APIUser } from "@mutualzz/types";
+import type { BaseEvent, EVENT } from "@mutualzz/types";
 import amqplib, { type Channel, type ChannelModel } from "amqplib";
 import EventEmitter from "events";
 import { JSONReplacer } from "./JSON";
@@ -29,26 +29,6 @@ export class RabbitMQ {
     }
 }
 
-export type EVENT = "Ready" | "UserUpdate" | "SpaceAdded";
-
-export interface BaseEvent<T extends EVENT = EVENT, D = any> {
-    user_id?: string;
-    event: T;
-    data: D;
-}
-
-export interface ReadyEventData {
-    v: number;
-    user: APIPrivateUser;
-    session_id: string;
-}
-
-export type ReadyEvent = BaseEvent<"Ready", ReadyEvent>;
-export type UserUpdateEvent = BaseEvent<"UserUpdate", APIPrivateUser & APIUser>;
-export type SpaceAddedEvent = BaseEvent<"SpaceAdded", APISpace>;
-
-export type AllEvents = ReadyEventData | UserUpdateEvent | SpaceAddedEvent;
-
 export interface EventOpts extends BaseEvent {
     acknowledge?: () => unknown;
     channel?: Channel;
@@ -63,7 +43,11 @@ export interface ListenEventOpts {
 export const events = new EventEmitter();
 
 export const emitEvent = async (payload: BaseEvent) => {
-    const id = payload.user_id;
+    const id = (
+        payload.space_id ||
+        payload.channel_id ||
+        payload.user_id
+    )?.toString();
     if (!id) {
         logger.error("No id provided for event emission");
         return;
@@ -87,17 +71,15 @@ export const emitEvent = async (payload: BaseEvent) => {
         );
 
         if (!success) {
-            logger.error(
-                `Failed to publish event ${payload.event} for user ${id}`,
-            );
+            logger.error(`Failed to publish event ${payload.event} to ${id}`);
         } else {
-            logger.debug(`Published event ${payload.event} for user ${id}`);
+            logger.debug(`Published event ${payload.event} to ${id}`);
         }
 
         return;
     }
 
-    events.emit(payload.event, payload);
+    events.emit(id, payload);
 };
 
 const rabbitListen = async (
@@ -151,22 +133,19 @@ export const listenEvent = async (
 ) => {
     if (RabbitMQ.connection) {
         const channel = opts?.channel ?? RabbitMQ.channel;
-        if (!channel) {
-            logger.error("No channel available for listening to events");
-            return;
-        }
+        if (!channel)
+            throw new Error("No channel available for listening to events");
 
         return await rabbitListen(channel, event, callback, {
             acknowledge: opts?.acknowledge,
         });
     }
 
+    const listener = (opts: EventOpts) => callback({ ...opts, cancel });
     const cancel = async () => {
         events.removeListener(event, listener);
         events.setMaxListeners(events.getMaxListeners() - 1);
     };
-    const listener = (opts: EventOpts) => callback({ ...opts, cancel });
-
     events.setMaxListeners(events.getMaxListeners() + 1);
     events.addListener(event, listener);
 

@@ -15,16 +15,16 @@ import SentryController from "./controllers/sentry.controller";
 import { logger } from "./Logger";
 import authMiddleware from "./middlewares/auth.middleware";
 import errorMiddleware from "./middlewares/error.middleware";
-import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./utils";
+import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./util";
 
 declare global {
     interface BigInt {
-        toJSON(): Number;
+        toJSON(): String;
     }
 }
 
 BigInt.prototype.toJSON = function () {
-    return Number(this);
+    return String(this);
 };
 
 export const upload = multer({
@@ -117,6 +117,7 @@ export class Server {
 
         const routeFiles = await fg("**/*.routes.{ts,js,mjs}", {
             cwd: routesBaseDir,
+            onlyFiles: true,
         });
 
         logger.debug(`Found ${routeFiles.length} route files`);
@@ -135,6 +136,7 @@ export class Server {
             }
 
             const rawPath = routeFile.replace(/\.routes\.(ts|js|mjs)$/, "");
+
             const cleanedPath = rawPath
                 .replace(/\/index$/, "") // remove trailing /index
                 .split(path.sep)
@@ -145,6 +147,7 @@ export class Server {
                     if (segment.startsWith("[") && segment.endsWith("]")) {
                         return `:${segment.slice(1, -1)}`;
                     }
+
                     return segment;
                 })
                 .join("/");
