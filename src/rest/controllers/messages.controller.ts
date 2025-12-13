@@ -335,10 +335,12 @@ export default class MessagesController {
                     "After parameter cannot be in the future",
                 );
 
-            let messages = await getCache(
-                "messages",
-                `${channel.id}-${around}-${before}-${after}-${limit}`,
-            );
+            let cacheKey = `${channel.id}`;
+            if (around) cacheKey += `-around-${around}`;
+            if (before) cacheKey += `-before-${before}`;
+            if (after) cacheKey += `-after-${after}`;
+            cacheKey += `-limit-${limit}`;
+            let messages = await getCache("messages", cacheKey);
 
             if (messages)
                 return res.status(HttpStatusCode.Success).json(messages);
@@ -420,6 +422,8 @@ export default class MessagesController {
                     }),
                 );
             }
+
+            await setCache("messages", cacheKey, messages);
 
             res.status(HttpStatusCode.Success).json(messages);
         } catch (err) {
