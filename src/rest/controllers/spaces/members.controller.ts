@@ -16,6 +16,13 @@ import {
     getMember,
     getSpace,
 } from "@mutualzz/util";
+import {
+    validateMembersAddParams,
+    validateMembersGetAllParams,
+    validateMembersGetAllQuery,
+    validateMembersGetOneParams,
+    validateMembersRemoveMeParams,
+} from "@mutualzz/validators";
 import { and, eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
@@ -29,7 +36,8 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params;
+            const { spaceId } = validateMembersGetAllParams.parse(req.params);
+            const { limit } = validateMembersGetAllQuery.parse(req.query);
 
             const space = await getSpace(spaceId);
 
@@ -53,6 +61,7 @@ export default class MembersController {
                             user: true,
                         },
                         where: eq(spaceMembersTable.spaceId, BigInt(space.id)),
+                        limit,
                     }),
                 );
 
@@ -71,7 +80,9 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params;
+            const { spaceId, memberId } = validateMembersGetOneParams.parse(
+                req.params,
+            );
 
             const space = await getSpace(spaceId);
 
@@ -81,9 +92,7 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            const { userId } = req.params;
-
-            const member = await getMember(space.id, userId || user.id);
+            const member = await getMember(space.id, memberId || user.id);
 
             if (!member)
                 throw new HttpException(
@@ -106,7 +115,7 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params;
+            const { spaceId } = validateMembersAddParams.parse(req.params);
 
             const space = await getSpace(spaceId);
 
@@ -215,7 +224,7 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params;
+            const { spaceId } = validateMembersRemoveMeParams.parse(req.params);
 
             const space = await getSpace(spaceId);
 

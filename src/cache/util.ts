@@ -39,6 +39,7 @@ export const setCache = async <T extends CacheName>(
 ) => {
     try {
         cacheKey = cacheKeyPrefix(type, cacheKey);
+        // @ts-ignore -- TS cannot infer type here
         caches[type]?.set(cacheKey, value as any);
         if (redis) {
             const ttlMs = caches[type]?.ttl;

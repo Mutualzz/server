@@ -22,7 +22,10 @@ import {
     genRandColor,
     s3Client,
 } from "@mutualzz/util";
-import { validateMePatch, validateMeSettingsPatch } from "@mutualzz/validators";
+import {
+    validateMeSettingsUpdate,
+    validateMeUpdate,
+} from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
@@ -38,7 +41,7 @@ export default class MeController {
                 );
 
             const { username, avatar, defaultAvatar, globalName } =
-                validateMePatch.parse(req.body);
+                validateMeUpdate.parse(req.body);
 
             const { file: avatarFile } = req;
 
@@ -254,7 +257,6 @@ export default class MeController {
             if (defaultAvatar) {
                 if (
                     user.avatar &&
-                    user.avatar !== null &&
                     !user.previousAvatars.includes(user.avatar)
                 ) {
                     user.previousAvatars.unshift(user.avatar);
@@ -281,6 +283,9 @@ export default class MeController {
                 user.defaultAvatar.color = defaultAvatar.color ?? null;
                 user.accentColor = defaultAvatar.color ?? genRandColor();
             }
+
+            user.createdAt = new Date(user.createdAt);
+            user.updatedAt = new Date();
 
             const newUser = await execNormalized<APIPrivateUser>(
                 db
@@ -329,7 +334,7 @@ export default class MeController {
                 );
 
             const { spacePositions, ...validatedSettings } =
-                validateMeSettingsPatch.parse(req.body);
+                validateMeSettingsUpdate.parse(req.body);
 
             await db
                 .insert(userSettingsTable)

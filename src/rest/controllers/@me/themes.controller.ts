@@ -4,9 +4,9 @@ import type { APITheme } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { execNormalized, Snowflake } from "@mutualzz/util";
 import {
-    validateThemePatchBody,
-    validateThemePatchQuery,
-    validateThemePut,
+    validateThemeCreate,
+    validateThemeUpdateBody,
+    validateThemeUpdateQuery,
 } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -21,7 +21,7 @@ export default class MeThemesController {
                     "Unauthorized",
                 );
 
-            const validatedTheme = validateThemePut.parse(req.body);
+            const validatedTheme = validateThemeCreate.parse(req.body);
 
             const newTheme = await execNormalized<APITheme>(
                 db
@@ -58,7 +58,7 @@ export default class MeThemesController {
                     "Unauthorized",
                 );
 
-            const { id: themeId } = validateThemePatchQuery.parse(req.params);
+            const { id: themeId } = validateThemeUpdateQuery.parse(req.params);
 
             let theme = await getCache("theme", themeId);
             if (!theme)
@@ -80,7 +80,7 @@ export default class MeThemesController {
                     "You are not allowed to update this theme",
                 );
 
-            const validatedTheme = validateThemePatchBody.parse(req.body);
+            const validatedTheme = validateThemeUpdateBody.parse(req.body);
 
             const updatedTheme = await execNormalized<APITheme>(
                 db
@@ -117,7 +117,7 @@ export default class MeThemesController {
                     "Unauthorized",
                 );
 
-            const { id: themeId } = validateThemePatchQuery.parse(req.params);
+            const { id: themeId } = validateThemeUpdateQuery.parse(req.params);
 
             let theme = await getCache("theme", themeId);
             if (!theme)

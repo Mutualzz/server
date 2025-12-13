@@ -33,7 +33,13 @@ import {
     s3Client,
     Snowflake,
 } from "@mutualzz/util";
-import { validateSpaceGet, validateSpacePut } from "@mutualzz/validators";
+import {
+    fileValidator,
+    validateSpaceCreate,
+    validateSpaceDeleteParams,
+    validateSpaceGetBulkQuery,
+    validateSpaceGetOneParams,
+} from "@mutualzz/validators";
 import { eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
@@ -48,9 +54,14 @@ export default class SpacesController {
                     "Unauthorized",
                 );
 
-            const { name } = validateSpacePut.parse(req.body);
+            let rawCrop;
+            if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
+            const { crop, name } = validateSpaceCreate.parse({
+                ...req.body,
+                crop: rawCrop,
+            });
 
-            const { file: iconFile } = req;
+            const iconFile = fileValidator.optional().parse(req.file);
 
             const spaceId = BigInt(Snowflake.generate());
 
@@ -61,9 +72,6 @@ export default class SpacesController {
             };
 
             if (iconFile) {
-                let crop = null;
-                if (req.body.crop) crop = JSON.parse(req.body.crop);
-
                 const isGif = iconFile.mimetype === "image/gif";
 
                 let iconSharp: sharp.Sharp;
@@ -151,7 +159,7 @@ export default class SpacesController {
                         "Failed to create default role",
                     );
 
-                const newMember = await execNormalized<APISpaceMember>(
+                let newMember = await execNormalized<APISpaceMember>(
                     tx
                         .insert(spaceMembersTable)
                         .values({
@@ -250,7 +258,12 @@ export default class SpacesController {
 
                 const channels = [category, defaultChannel];
                 const roles = [everyoneRole];
-                const members = [newMember];
+                const members = [
+                    {
+                        ...newMember,
+                        user: toPublicUser(user),
+                    },
+                ];
 
                 return {
                     space: {
@@ -291,7 +304,7 @@ export default class SpacesController {
                     "Unauthorized",
                 );
 
-            const { id: spaceId } = req.params;
+            const { id: spaceId } = validateSpaceDeleteParams.parse(req.params);
 
             const space = await getSpace(spaceId);
 
@@ -422,7 +435,7 @@ export default class SpacesController {
                     "Unauthorized",
                 );
 
-            const { id: spaceId } = validateSpaceGet.parse(req.params);
+            const { id: spaceId } = validateSpaceGetOneParams.parse(req.params);
 
             let space = await getSpace(spaceId);
 
@@ -453,7 +466,7 @@ export default class SpacesController {
                     "Unauthorized",
                 );
 
-            const { limit } = req.query;
+            const { limit } = validateSpaceGetBulkQuery.parse(req.query);
 
             const spaces = await execNormalizedMany<APISpace>(
                 db.query.spacesTable.findMany({
