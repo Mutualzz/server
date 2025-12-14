@@ -3,11 +3,15 @@ import {
     channelsTable,
     db,
     invitesTable,
-    spaceMemberRolesTable,
     spaceMembersTable,
     toPublicUser,
+    userSettingsTable,
 } from "@mutualzz/database";
-import type { APIChannel, APISpaceMember } from "@mutualzz/types";
+import type {
+    APIChannel,
+    APISpaceMember,
+    APIUserSettings,
+} from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     emitEvent,
@@ -23,7 +27,7 @@ import {
     validateMembersGetOneParams,
     validateMembersRemoveMeParams,
 } from "@mutualzz/validators";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class MembersController {
@@ -106,7 +110,7 @@ export default class MembersController {
         }
     }
 
-    static async add(req: Request, res: Response, next: NextFunction) {
+    static async addMe(req: Request, res: Response, next: NextFunction) {
         try {
             const { user } = req;
             if (!user)
@@ -162,13 +166,6 @@ export default class MembersController {
                     "Failed to add member to space",
                 );
 
-            await db.insert(spaceMemberRolesTable).values({
-                id: BigInt(space.id),
-                spaceId: BigInt(space.id),
-                userId: BigInt(user.id),
-                assignedAt: new Date(),
-            });
-
             let members = await getCache("spaceMembers", space.id);
             let channels = await getCache("channels", space.id);
             if (!channels)
@@ -210,6 +207,32 @@ export default class MembersController {
             });
 
             res.status(HttpStatusCode.Created).json(newMember);
+
+            const settings = await execNormalized<APIUserSettings>(
+                db
+                    .insert(userSettingsTable)
+                    .values({
+                        userId: BigInt(user.id),
+                        spacePositions: [BigInt(space.id)],
+                    })
+                    .onConflictDoUpdate({
+                        target: userSettingsTable.userId,
+                        set: {
+                            spacePositions: sql`array_prepend(${space.id}, COALESCE(${userSettingsTable.spacePositions}, ARRAY[]::bigint[]))`,
+                        },
+                    })
+                    .returning()
+                    .then((results) => results[0]),
+            );
+
+            if (settings) {
+                await setCache("userSettings", user.id, settings);
+                await emitEvent({
+                    event: "UserSettingsUpdate",
+                    user_id: user.id,
+                    data: settings,
+                });
+            }
         } catch (err) {
             next(err);
         }
@@ -251,15 +274,6 @@ export default class MembersController {
             await db
                 .delete(spaceMembersTable)
                 .where(eq(spaceMembersTable.userId, BigInt(member.userId)));
-
-            await db
-                .delete(spaceMemberRolesTable)
-                .where(
-                    and(
-                        eq(spaceMemberRolesTable.spaceId, BigInt(space.id)),
-                        eq(spaceMemberRolesTable.userId, BigInt(member.userId)),
-                    ),
-                );
 
             await deleteCache("spaceMember", `${space.id}:${member.userId}`);
 

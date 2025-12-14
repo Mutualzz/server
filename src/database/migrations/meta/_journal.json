@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1765342871602,
-      "tag": "0000_old_silver_fox",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1765362040395,
-      "tag": "0001_busy_cassandra_nova",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1765428189395,
-      "tag": "0002_cute_red_ghost",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1765508564861,
-      "tag": "0003_nebulous_thundra",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1765508788308,
-      "tag": "0004_flat_oracle",
+      "when": 1765679569154,
+      "tag": "0000_eminent_hairball",
       "breakpoints": true
     }
   ]

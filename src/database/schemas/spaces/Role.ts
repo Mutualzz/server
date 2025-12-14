@@ -1,4 +1,4 @@
-import { relations, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
     bigint,
     boolean,
@@ -47,10 +47,3 @@ export const rolesTable = pgTable(
         index("roles_created_at_idx").on(table.createdAt),
     ],
 );
-
-export const roleRelations = relations(rolesTable, ({ one }) => ({
-    space: one(spacesTable, {
-        fields: [rolesTable.spaceId],
-        references: [spacesTable.id],
-    }),
-}));

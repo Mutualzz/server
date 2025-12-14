@@ -1,6 +1,4 @@
-import { channelsTable, spaceMembersTable } from "@mutualzz/database/schemas";
-import { spaceMemberRolesTable } from "@mutualzz/database/schemas/spaces/SpaceMemberRoles.ts";
-import { relations, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
     bigint,
     index,
@@ -45,13 +43,3 @@ export const spacesTable = pgTable(
         index("space_created_at_idx").on(table.createdAt),
     ],
 );
-
-export const spaceRelations = relations(spacesTable, ({ one, many }) => ({
-    owner: one(usersTable, {
-        fields: [spacesTable.ownerId],
-        references: [usersTable.id],
-    }),
-    members: many(spaceMembersTable),
-    channels: many(channelsTable),
-    roles: many(spaceMemberRolesTable),
-}));

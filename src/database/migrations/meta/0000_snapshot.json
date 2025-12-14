@@ -1,5 +1,5 @@
 {
-  "id": "d7a83c36-cf6e-4626-8ceb-6b9a8c37069c",
+  "id": "0089ebb9-a33b-4cd7-a436-2a29f009c802",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -808,13 +808,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "roles": {
-          "name": "roles",
-          "type": "bigint[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'"
-        },
         "flags": {
           "name": "flags",
           "type": "bigint",
@@ -918,6 +911,141 @@
           "columns": [
             "spaceId",
             "userId"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.space_member_roles": {
+      "name": "space_member_roles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spaceId": {
+          "name": "spaceId",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "userId": {
+          "name": "userId",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assignedAt": {
+          "name": "assignedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "smr_space_id_idx": {
+          "name": "smr_space_id_idx",
+          "columns": [
+            {
+              "expression": "spaceId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "smr_user_id_idx": {
+          "name": "smr_user_id_idx",
+          "columns": [
+            {
+              "expression": "userId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "smr_role_id_idx": {
+          "name": "smr_role_id_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "space_member_roles_id_roles_id_fk": {
+          "name": "space_member_roles_id_roles_id_fk",
+          "tableFrom": "space_member_roles",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_member_roles_spaceId_spaces_id_fk": {
+          "name": "space_member_roles_spaceId_spaces_id_fk",
+          "tableFrom": "space_member_roles",
+          "tableTo": "spaces",
+          "columnsFrom": [
+            "spaceId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "smr_space_member_fkey": {
+          "name": "smr_space_member_fkey",
+          "tableFrom": "space_member_roles",
+          "tableTo": "space_members",
+          "columnsFrom": [
+            "spaceId",
+            "userId"
+          ],
+          "columnsTo": [
+            "spaceId",
+            "userId"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "space_member_roles_spaceId_userId_id_pk": {
+          "name": "space_member_roles_spaceId_userId_id_pk",
+          "columns": [
+            "spaceId",
+            "userId",
+            "id"
           ]
         }
       },
@@ -1247,8 +1375,8 @@
           "notNull": true,
           "default": "'{}'"
         },
-        "updated": {
-          "name": "updated",
+        "updatedAt": {
+          "name": "updatedAt",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,

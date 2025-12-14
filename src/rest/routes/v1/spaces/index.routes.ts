@@ -64,7 +64,7 @@ router.get(
 router.put(
     "/:spaceId/members",
     createLimiter(60_000, 30),
-    MembersController.add,
+    MembersController.addMe,
 );
 router.delete(
     "/:spaceId/members/@me",

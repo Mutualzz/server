@@ -67,11 +67,18 @@ CREATE TABLE "space_members" (
 	"nickname" text,
 	"avatar" text,
 	"banner" text,
-	"roles" bigint[] DEFAULT '{}' NOT NULL,
 	"flags" bigint DEFAULT 0 NOT NULL,
 	"joinedAt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "space_members_spaceId_userId_pk" PRIMARY KEY("spaceId","userId")
+);
+--> statement-breakpoint
+CREATE TABLE "space_member_roles" (
+	"id" bigint NOT NULL,
+	"spaceId" bigint NOT NULL,
+	"userId" bigint NOT NULL,
+	"assignedAt" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "space_member_roles_spaceId_userId_id_pk" PRIMARY KEY("spaceId","userId","id")
 );
 --> statement-breakpoint
 CREATE TABLE "themes" (
@@ -112,7 +119,7 @@ CREATE TABLE "user_settings" (
 	"currentIcon" text,
 	"preferredMode" "preferred_mode" DEFAULT 'spaces' NOT NULL,
 	"spacePositions" bigint[] DEFAULT '{}' NOT NULL,
-	"updated" timestamp DEFAULT now() NOT NULL
+	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "messages" (
@@ -141,6 +148,9 @@ ALTER TABLE "roles" ADD CONSTRAINT "roles_spaceId_spaces_id_fk" FOREIGN KEY ("sp
 ALTER TABLE "spaces" ADD CONSTRAINT "spaces_ownerId_users_id_fk" FOREIGN KEY ("ownerId") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_members" ADD CONSTRAINT "space_members_spaceId_spaces_id_fk" FOREIGN KEY ("spaceId") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_members" ADD CONSTRAINT "space_members_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "space_member_roles" ADD CONSTRAINT "space_member_roles_id_roles_id_fk" FOREIGN KEY ("id") REFERENCES "public"."roles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "space_member_roles" ADD CONSTRAINT "space_member_roles_spaceId_spaces_id_fk" FOREIGN KEY ("spaceId") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "space_member_roles" ADD CONSTRAINT "smr_space_member_fkey" FOREIGN KEY ("spaceId","userId") REFERENCES "public"."space_members"("spaceId","userId") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "themes" ADD CONSTRAINT "themes_authorId_users_id_fk" FOREIGN KEY ("authorId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE cascade;--> statement-breakpoint
 ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE cascade;--> statement-breakpoint
 ALTER TABLE "messages" ADD CONSTRAINT "messages_channelId_channels_id_fk" FOREIGN KEY ("channelId") REFERENCES "public"."channels"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -165,6 +175,9 @@ CREATE INDEX "space_created_at_idx" ON "spaces" USING btree ("createdAt");--> st
 CREATE INDEX "space_members_space_id_idx" ON "space_members" USING btree ("spaceId");--> statement-breakpoint
 CREATE INDEX "space_members_user_id_idx" ON "space_members" USING btree ("userId");--> statement-breakpoint
 CREATE INDEX "space_members_joined_at_idx" ON "space_members" USING btree ("joinedAt");--> statement-breakpoint
+CREATE INDEX "smr_space_id_idx" ON "space_member_roles" USING btree ("spaceId");--> statement-breakpoint
+CREATE INDEX "smr_user_id_idx" ON "space_member_roles" USING btree ("userId");--> statement-breakpoint
+CREATE INDEX "smr_role_id_idx" ON "space_member_roles" USING btree ("id");--> statement-breakpoint
 CREATE INDEX "theme_author_id_idx" ON "themes" USING btree ("authorId");--> statement-breakpoint
 CREATE INDEX "theme_type_idx" ON "themes" USING btree ("type");--> statement-breakpoint
 CREATE INDEX "theme_style_idx" ON "themes" USING btree ("style");--> statement-breakpoint
@@ -173,3 +186,17 @@ CREATE INDEX "user_created_at_idx" ON "users" USING btree ("createdAt");--> stat
 CREATE INDEX "message_channel_id_idx" ON "messages" USING btree ("channelId");--> statement-breakpoint
 CREATE INDEX "message_created_at_idx" ON "messages" USING btree ("createdAt");--> statement-breakpoint
 CREATE INDEX "message_channel_created_at_idx" ON "messages" USING btree ("channelId","createdAt");
+
+CREATE OR REPLACE FUNCTION assign_default_role()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO space_member_roles (spaceId, userId, id, assignedAt)
+    VALUES (NEW.spaceId, NEW.userId, NEW.spaceId, NOW()); -- 12345 is your default role id
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER after_member_insert
+AFTER INSERT ON space_members
+FOR EACH ROW
+EXECUTE FUNCTION assign_default_role();
