@@ -1,4 +1,4 @@
-import { onLazyRequest } from "@mutualzz/gateway/opcodes/LazyRequest.ts";
+import { onLazyRequest } from "@mutualzz/gateway/opcodes/LazyRequest";
 import { GatewayOpcodes, type GatewayPayload } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
 import { onHeartbeat } from "./Heartbeat";

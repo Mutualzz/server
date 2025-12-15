@@ -7,8 +7,8 @@ import {
     text,
     timestamp,
 } from "drizzle-orm/pg-core";
-import { channelsTable } from "./Channel.ts";
-import { spacesTable } from "./spaces/Space.ts";
+import { channelsTable } from "./Channel";
+import { spacesTable } from "./spaces/Space";
 import { usersTable } from "./users";
 
 // Enums for invite types

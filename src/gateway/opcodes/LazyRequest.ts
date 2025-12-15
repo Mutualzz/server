@@ -1,5 +1,5 @@
 import { db, spaceMembersTable } from "@mutualzz/database";
-import { logger } from "@mutualzz/gateway/Logger.ts";
+import { logger } from "@mutualzz/gateway/Logger";
 import { Send } from "@mutualzz/gateway/util";
 import type { APIRole, APISpaceMember, GatewayPayload } from "@mutualzz/types";
 import {

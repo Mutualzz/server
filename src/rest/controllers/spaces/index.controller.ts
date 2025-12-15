@@ -13,7 +13,7 @@ import {
     toPublicUser,
     userSettingsTable,
 } from "@mutualzz/database";
-import { spaceMemberRolesTable } from "@mutualzz/database/schemas/spaces/SpaceMemberRoles.ts";
+import { spaceMemberRolesTable } from "@mutualzz/database/schemas/spaces/SpaceMemberRoles";
 import { generateHash } from "@mutualzz/rest/util";
 import type {
     APIChannel,

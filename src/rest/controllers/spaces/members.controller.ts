@@ -3,6 +3,7 @@ import {
     channelsTable,
     db,
     invitesTable,
+    spaceMemberRolesTable,
     spaceMembersTable,
     toPublicUser,
     userSettingsTable,
@@ -165,6 +166,12 @@ export default class MembersController {
                     HttpStatusCode.InternalServerError,
                     "Failed to add member to space",
                 );
+
+            await db.insert(spaceMemberRolesTable).values({
+                id: BigInt(space.id),
+                userId: BigInt(user.id),
+                spaceId: BigInt(space.id),
+            });
 
             let members = await getCache("spaceMembers", space.id);
             let channels = await getCache("channels", space.id);
