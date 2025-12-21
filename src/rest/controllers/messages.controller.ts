@@ -9,6 +9,7 @@ import {
     execNormalizedMany,
     getChannel,
     getMember,
+    getSpace,
     getUser,
     Snowflake,
 } from "@mutualzz/util";
@@ -130,6 +131,7 @@ export default class MessagesController {
                 ...newMessage,
                 channel: channel,
                 author: user,
+                space: channel.spaceId ? await getSpace(channel.spaceId) : null,
             };
 
             await setCache("message", message.id, message);
@@ -351,6 +353,7 @@ export default class MessagesController {
                         with: {
                             channel: true,
                             author: true,
+                            space: true,
                         },
                         where: and(
                             eq(messagesTable.channelId, BigInt(channelId)),
@@ -365,6 +368,7 @@ export default class MessagesController {
                         with: {
                             channel: true,
                             author: true,
+                            space: true,
                         },
                         where: and(
                             eq(messagesTable.channelId, BigInt(channelId)),
@@ -385,6 +389,7 @@ export default class MessagesController {
                         with: {
                             channel: true,
                             author: true,
+                            space: true,
                         },
                         where: and(
                             eq(messagesTable.channelId, BigInt(channelId)),
@@ -400,6 +405,7 @@ export default class MessagesController {
                         with: {
                             channel: true,
                             author: true,
+                            space: true,
                         },
                         where: and(
                             eq(messagesTable.channelId, BigInt(channelId)),
@@ -415,6 +421,7 @@ export default class MessagesController {
                         with: {
                             channel: true,
                             author: true,
+                            space: true,
                         },
                         where: eq(messagesTable.channelId, BigInt(channelId)),
                         orderBy: desc(messagesTable.createdAt),
