@@ -20,7 +20,7 @@ import {
     validateChannelParamsUpdate,
     validateChannelQueryDelete,
 } from "@mutualzz/validators";
-import { eq, isNull, max } from "drizzle-orm";
+import { eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class ChannelsController {
@@ -301,12 +301,14 @@ export default class ChannelsController {
                             `Channel with ID ${id} not found`,
                         );
 
-                    let newParentId;
-                    if (parentId != undefined) newParentId = BigInt(parentId);
-                    else
-                        newParentId = channel.parentId
-                            ? BigInt(channel.parentId)
-                            : null;
+                    const newParentId =
+                        parentId === undefined
+                            ? undefined
+                            : parentId === null
+                              ? sql`NULL`
+                              : BigInt(parentId);
+
+                    console.log(parentId, newParentId);
 
                     const newChannel = await execNormalized<APIChannel>(
                         db
@@ -323,6 +325,8 @@ export default class ChannelsController {
                             .then((res) => res[0]),
                     );
 
+                    console.log(newChannel);
+
                     if (!newChannel)
                         throw new HttpException(
                             HttpStatusCode.InternalServerError,
@@ -337,6 +341,7 @@ export default class ChannelsController {
 
             await emitEvent({
                 event: "BulkChannelUpdate",
+                space_id: channels[0].spaceId,
                 data: updatedChannels,
             });
 
