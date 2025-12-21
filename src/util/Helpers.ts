@@ -41,7 +41,14 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
             with: {
                 members: {
                     with: {
-                        user: true,
+                        user: {
+                            columns: {
+                                hash: false,
+                                dateOfBirth: false,
+                                previousAvatars: false,
+                                email: false,
+                            },
+                        },
                     },
                 },
                 channels: {
@@ -49,7 +56,14 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
                         parent: true,
                         lastMessage: {
                             with: {
-                                author: true,
+                                author: {
+                                    columns: {
+                                        hash: false,
+                                        dateOfBirth: false,
+                                        previousAvatars: false,
+                                        email: false,
+                                    },
+                                },
                             },
                         },
                     },

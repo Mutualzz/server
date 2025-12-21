@@ -19,7 +19,14 @@ async function getMembers(spaceId: string, range: [number, number]) {
         db.query.spaceMembersTable.findMany({
             where: eq(spaceMembersTable.spaceId, BigInt(spaceId)),
             with: {
-                user: true,
+                user: {
+                    columns: {
+                        hash: false,
+                        dateOfBirth: false,
+                        previousAvatars: false,
+                        email: false,
+                    },
+                },
                 roles: true,
             },
             offset: Number(range[0]) || 0,
