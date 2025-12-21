@@ -192,19 +192,21 @@ async function consume(this: WebSocket, opts: EventOpts) {
                 this.events[cid]?.();
                 delete this.events[cid];
             }
+
             break;
         }
         case "BulkChannelUpdate": {
             for (const channel of data) {
                 const cid = String(channel.id);
                 const exists = this.events[cid];
-                if (!exists) continue; // skip hidden/untracked channels
+                if (!exists) continue;
                 opts.cancel?.(cid);
                 delete this.events[cid];
 
                 // recreate listener so consumers stay healthy after updates
                 this.events[cid] = await listenEvent(cid, consumer, listenOpts);
             }
+
             break;
         }
         default:
