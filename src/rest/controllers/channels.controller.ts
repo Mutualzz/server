@@ -150,7 +150,15 @@ export default class ChannelsController {
                     })
                     .returning()
                     .then((res) => res[0]),
-            );
+            ).then(async (channel) => {
+                if (!channel) return null;
+                return channel.parentId
+                    ? {
+                          ...channel,
+                          parent: await getChannel(channel.parentId),
+                      }
+                    : channel;
+            });
 
             if (!channel)
                 throw new HttpException(
