@@ -66,12 +66,12 @@
     "name": "@mutualzz/server",
     "private": true,
     "scripts": {
-        "build": "pnpm drizzle:migration && pnpm typecheck && tsdown",
+        "build": "pnpm typecheck && tsdown",
+        "db:generate": "drizzle-kit generate",
+        "db:migrate": "drizzle-kit migrate",
+        "db:migration": "pnpm db:generate && pnpm db:migrate",
+        "db:push": "drizzle-kit push",
         "dev": "cross-env NODE_ENV=development tsx watch -r dotenv/config ./src/bundle/index.ts",
-        "drizzle:generate": "drizzle-kit generate",
-        "drizzle:migrate": "drizzle-kit migrate",
-        "drizzle:migration": "pnpm drizzle:generate && pnpm drizzle:migrate",
-        "drizzle:push": "drizzle-kit push",
         "prestart": "pnpm build",
         "start": "cross-env NODE_ENV=production node -r dotenv/config ./dist/bundle/index.mjs",
         "typecheck": "tsc --noEmit"
