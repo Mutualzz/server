@@ -1,8 +1,8 @@
 {
     "author": "",
     "dependencies": {
-        "@aws-sdk/client-s3": "^3.958.0",
-        "@faker-js/faker": "^10.1.0",
+        "@aws-sdk/client-s3": "^3.965.0",
+        "@faker-js/faker": "^10.2.0",
         "@mutualzz/logger": "workspace:*",
         "@mutualzz/validators": "workspace:*",
         "@sentry/node": "^10.32.1",
@@ -13,7 +13,7 @@
         "@yukikaze-bot/erlpack": "^1.0.1",
         "amqplib": "^0.10.9",
         "bcrypt": "^6.0.0",
-        "body-parser": "^2.2.1",
+        "body-parser": "^2.2.2",
         "bufferutil": "^4.1.0",
         "color": "^5.0.3",
         "cors": "^2.8.5",
@@ -26,7 +26,7 @@
         "fast-glob": "^3.3.3",
         "fast-zlib": "^2.0.1",
         "helmet": "^8.1.0",
-        "ioredis": "^5.8.2",
+        "ioredis": "^5.9.1",
         "json-bigint": "^1.0.0",
         "lru-cache": "^11.2.4",
         "morgan": "^1.10.1",
@@ -37,9 +37,9 @@
         "rabbitmq-stream-js-client": "^0.6.2",
         "sharp": "^0.34.5",
         "url-metadata": "^5.4.1",
-        "ws": "^8.18.3",
+        "ws": "^8.19.0",
         "zlib-sync": "^0.1.10",
-        "zod": "^4.2.1"
+        "zod": "^4.3.5"
     },
     "description": "",
     "devDependencies": {
@@ -58,7 +58,7 @@
         "dotenv": "^17.2.3",
         "drizzle-kit": "0.31.8",
         "eslint": "^9.39.2",
-        "tsdown": "^0.18.3",
+        "tsdown": "^0.18.4",
         "tsx": "^4.21.0"
     },
     "keywords": [],
