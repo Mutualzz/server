@@ -1,4 +1,9 @@
-import { deleteCache, getCache, setCache } from "@mutualzz/cache";
+import {
+    deleteCache,
+    getCache,
+    invalidateCache,
+    setCache,
+} from "@mutualzz/cache";
 import { channelsTable, db, messagesTable } from "@mutualzz/database";
 import type { APIMessage } from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
@@ -489,6 +494,7 @@ export default class MessagesController {
                 .where(eq(messagesTable.id, BigInt(message.id)));
 
             await deleteCache("message", messageId);
+            await invalidateCache("messages", `${channel.id}*`);
 
             await emitEvent({
                 event: "MessageDelete",
