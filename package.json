@@ -55,6 +55,7 @@
         "@types/node": "^25.0.3",
         "@types/pg": "^8.16.0",
         "@types/ws": "^8.18.1",
+        "cross-env": "10.1.0",
         "dotenv": "^17.2.3",
         "drizzle-kit": "0.31.8",
         "eslint": "^9.39.2",
@@ -66,13 +67,13 @@
     "private": true,
     "scripts": {
         "build": "pnpm drizzle:migration && pnpm typecheck && tsdown",
-        "dev": "tsx watch -r dotenv/config ./src/bundle/index.ts",
+        "dev": "cross-env NODE_ENV=development tsx watch -r dotenv/config ./src/bundle/index.ts",
         "drizzle:generate": "drizzle-kit generate",
         "drizzle:migrate": "drizzle-kit migrate",
         "drizzle:migration": "pnpm drizzle:generate && pnpm drizzle:migrate",
         "drizzle:push": "drizzle-kit push",
         "prestart": "pnpm build",
-        "start": "node -r dotenv/config ./dist/bundle/index.mjs",
+        "start": "cross-env NODE_ENV=production node -r dotenv/config ./dist/bundle/index.mjs",
         "typecheck": "tsc --noEmit"
     },
     "type": "module",
