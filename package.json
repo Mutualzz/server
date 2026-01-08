@@ -66,13 +66,13 @@
     "private": true,
     "scripts": {
         "build": "pnpm drizzle:migration && pnpm typecheck && tsdown",
-        "dev": "tsdown --watch ./src --env.NODE_ENV development --on-success \"tsx -r dotenv/config ./dist/bundle/index.mjs\"",
+        "dev": "tsx watch -r dotenv/config ./src/bundle/index.ts",
         "drizzle:generate": "drizzle-kit generate",
         "drizzle:migrate": "drizzle-kit migrate",
         "drizzle:migration": "pnpm drizzle:generate && pnpm drizzle:migrate",
         "drizzle:push": "drizzle-kit push",
         "prestart": "pnpm build",
-        "start": "tsx -r dotenv/config ./dist/bundle/index.mjs",
+        "start": "node -r dotenv/config ./dist/bundle/index.mjs",
         "typecheck": "tsc --noEmit"
     },
     "type": "module",
