@@ -111,7 +111,10 @@ export class Server {
     }
 
     private async initRoutes() {
-        const routesBaseDir = path.join(import.meta.dirname, "rest", "routes");
+        const routesBaseDir =
+            process.env.NODE_ENV === "development"
+                ? path.join(import.meta.dirname, "routes")
+                : path.join(import.meta.dirname, "rest", "routes");
 
         logger.debug(`Loading routes from ${routesBaseDir}`);
 
