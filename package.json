@@ -73,7 +73,7 @@
         "db:push": "drizzle-kit push",
         "dev": "cross-env NODE_ENV=development tsx watch -r dotenv/config ./src/bundle/index.ts",
         "prestart": "pnpm build",
-        "start": "cross-env NODE_ENV=production node -r dotenv/config ./dist/bundle/index.mjs",
+        "start": "node -r dotenv/config ./dist/bundle/index.mjs",
         "typecheck": "tsc --noEmit"
     },
     "type": "module",
