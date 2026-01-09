@@ -15,7 +15,7 @@ export class RabbitMQ {
     static async init() {
         this.connection = await amqplib.connect(
             {
-                hostname: "localhost",
+                hostname: "0.0.0.0",
                 username: process.env.RABBIT_USERNAME,
                 password: process.env.RABBIT_PASSWORD,
             },
