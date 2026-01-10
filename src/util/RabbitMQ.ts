@@ -18,6 +18,7 @@ export class RabbitMQ {
                 hostname: process.env.RABBIT_HOST,
                 username: process.env.RABBIT_USERNAME,
                 password: process.env.RABBIT_PASSWORD,
+                port: Number(process.env.RABBIT_PORT) || 5672,
             },
             {
                 timeout: 10000,
