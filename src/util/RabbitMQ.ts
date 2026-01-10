@@ -8,19 +8,17 @@ const logger = new Logger({
     tag: "RabbitMQ",
 });
 
-console.log(process.env);
+const URI = `amqp://${process.env.RABBIT_USERNAME}:${process.env.RABBIT_PASSWORD}@${process.env.RABBIT_HOSTNAME}:${process.env.RABBIT_PORT}/%2f`;
+console.log(URI);
 
 export class RabbitMQ {
     static connection: ChannelModel;
     static channel: Channel;
 
     static async init() {
-        this.connection = await amqplib.connect(
-            `amqp://${process.env.RABBIT_USERNAME}:${process.env.RABBIT_PASSWORD}@${process.env.RABBIT_HOSTNAME}:${process.env.RABBIT_PORT}/%2f`,
-            {
-                timeout: 10000,
-            },
-        );
+        this.connection = await amqplib.connect(URI, {
+            timeout: 10000,
+        });
         logger.info("Connected to RabbitMQ");
         this.channel = await this.connection.createChannel();
         logger.info("Channel created");
