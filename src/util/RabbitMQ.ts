@@ -23,9 +23,9 @@ export class RabbitMQ {
                 timeout: 10000,
             },
         );
-        logger.info("[RabbitMQ] Connected to RabbitMQ");
+        logger.info("Connected to RabbitMQ");
         this.channel = await this.connection.createChannel();
-        logger.info("[RabbitMQ] Channel created");
+        logger.info("Channel created");
     }
 }
 
