@@ -9,7 +9,6 @@ const logger = new Logger({
 });
 
 const URI = `amqp://${process.env.RABBIT_USERNAME}:${process.env.RABBIT_PASSWORD}@${process.env.RABBIT_HOSTNAME}:${process.env.RABBIT_PORT}/%2f`;
-console.log(URI);
 
 export class RabbitMQ {
     static connection: ChannelModel;
