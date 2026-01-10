@@ -14,12 +14,7 @@ export class RabbitMQ {
 
     static async init() {
         this.connection = await amqplib.connect(
-            {
-                hostname: process.env.RABBIT_HOST,
-                username: process.env.RABBIT_USERNAME,
-                password: process.env.RABBIT_PASSWORD,
-                port: Number(process.env.RABBIT_PORT) || 5672,
-            },
+            `amqp://${process.env.RABBIT_USERNAME}:${process.env.RABBIT_PASSWORD}@${process.env.RABBIT_HOSTNAME}:${process.env.RABBIT_PORT}/%2f`,
             {
                 timeout: 10000,
             },
