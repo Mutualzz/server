@@ -8,6 +8,8 @@ const logger = new Logger({
     tag: "RabbitMQ",
 });
 
+console.log(process.env);
+
 export class RabbitMQ {
     static connection: ChannelModel;
     static channel: Channel;
