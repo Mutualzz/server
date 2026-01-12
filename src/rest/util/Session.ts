@@ -50,6 +50,7 @@ export const createSession = async (
 
 export const verifySessionToken = async (token: string) => {
     const [base64UserId, base64Timestamp, signature] = token.split(".");
+
     if (!base64UserId || !base64Timestamp || !signature) return null;
 
     const data = `${base64UserId}.${base64Timestamp}`;
@@ -62,6 +63,7 @@ export const verifySessionToken = async (token: string) => {
     if (expectedSignature !== signature) return null;
 
     let session = sessionLRU.get(token);
+
     if (!session) {
         const raw = await redis.get(`rest:sessions:${token}`);
         if (!raw) return null;

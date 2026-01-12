@@ -15,12 +15,16 @@ export class RabbitMQ {
     static channel: Channel;
 
     static async init() {
-        this.connection = await amqplib.connect(URI, {
-            timeout: 10000,
-        });
-        logger.info("Connected to RabbitMQ");
-        this.channel = await this.connection.createChannel();
-        logger.info("Channel created");
+        try {
+            this.connection = await amqplib.connect(URI, {
+                timeout: 10000,
+            });
+            logger.info("Connected to RabbitMQ");
+            this.channel = await this.connection.createChannel();
+            logger.info("Channel created");
+        } catch (error) {
+            logger.error(`Failed to connect to RabbitMQ: ${error}`);
+        }
     }
 }
 

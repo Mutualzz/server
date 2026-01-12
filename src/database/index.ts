@@ -54,7 +54,7 @@ export const startDatabase = async () => {
             await p.query("SELECT 1");
             pool = p;
             db = drizzle(pool, {
-                logger: process.env.NODE_ENV === "development",
+                // logger: process.env.NODE_ENV === "development",
                 schema,
             });
 
