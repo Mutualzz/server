@@ -1,4 +1,4 @@
-import config from "@mutualzz/eslint-config/base";
+import { base as config } from "@mutualzz/eslint-config";
 
 export default [
     ...config,
