@@ -23,7 +23,7 @@ export default class MeThemesController {
 
             const validatedTheme = validateThemeCreate.parse(req.body);
 
-            const newTheme = await execNormalized<APITheme>(
+            const insertedTheme = await execNormalized<APITheme>(
                 db
                     .insert(themesTable)
                     .values({
@@ -35,11 +35,16 @@ export default class MeThemesController {
                     .then((results) => results[0]),
             );
 
-            if (!newTheme)
+            if (!insertedTheme)
                 throw new HttpException(
                     HttpStatusCode.InternalServerError,
                     "Failed to create theme",
                 );
+
+            const newTheme = {
+                ...insertedTheme,
+                author: user,
+            };
 
             await setCache("theme", newTheme.id, newTheme);
 
@@ -82,7 +87,7 @@ export default class MeThemesController {
 
             const validatedTheme = validateThemeUpdateBody.parse(req.body);
 
-            const updatedTheme = await execNormalized<APITheme>(
+            let updatedTheme = await execNormalized<APITheme>(
                 db
                     .update(themesTable)
                     .set({
@@ -99,6 +104,11 @@ export default class MeThemesController {
                     HttpStatusCode.InternalServerError,
                     "Failed to update theme",
                 );
+
+            updatedTheme = {
+                ...updatedTheme,
+                author: theme.author || user,
+            };
 
             await setCache("theme", themeId, updatedTheme);
 
@@ -133,7 +143,13 @@ export default class MeThemesController {
                     "Theme not found",
                 );
 
-            if (theme.authorId && BigInt(theme.authorId) !== BigInt(user.id))
+            if (!theme.authorId)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "Woah there! You can't delete an official theme",
+                );
+
+            if (BigInt(theme.authorId) !== BigInt(user.id))
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
                     "You are not allowed to delete this theme",

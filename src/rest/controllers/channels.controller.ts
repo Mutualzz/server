@@ -316,8 +316,6 @@ export default class ChannelsController {
                               ? sql`NULL`
                               : BigInt(parentId);
 
-                    console.log(parentId, newParentId);
-
                     const newChannel = await execNormalized<APIChannel>(
                         db
                             .update(channelsTable)
@@ -332,8 +330,6 @@ export default class ChannelsController {
                             .where(eq(channelsTable.id, BigInt(channel.id)))
                             .then((res) => res[0]),
                     );
-
-                    console.log(newChannel);
 
                     if (!newChannel)
                         throw new HttpException(

@@ -26,6 +26,9 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     const [themes, settings] = await Promise.all([
         execNormalizedMany<APITheme>(
             db.query.themesTable.findMany({
+                with: {
+                    author: true,
+                },
                 where: eq(themesTable.authorId, BigInt(user.id)),
             }),
         ),
