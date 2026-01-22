@@ -39,7 +39,7 @@ export const createRouter = () => express.Router({ mergeParams: true });
 export const createLimiter = (ms: number, limit: number) =>
     rateLimit({
         windowMs: ms,
-        max: limit,
+        limit,
         standardHeaders: true,
         legacyHeaders: false,
     });
