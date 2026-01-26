@@ -1,7 +1,7 @@
 {
     "author": "",
     "dependencies": {
-        "@aws-sdk/client-s3": "^3.974.0",
+        "@aws-sdk/client-s3": "^3.975.0",
         "@discordjs/builders": "^1.13.1",
         "@discordjs/opus": "^0.10.0",
         "@discordjs/voice": "^0.19.0",
@@ -25,6 +25,7 @@
         "bufferutil": "^4.1.0",
         "color": "^5.0.3",
         "cors": "^2.8.6",
+        "cron": "^4.4.0",
         "cryptr": "^6.4.0",
         "dayjs": "^1.11.19",
         "discord-logs": "^2.2.1",
@@ -68,6 +69,7 @@
         "@types/express": "^5.0.6",
         "@types/json-bigint": "^1.0.4",
         "@types/morgan": "^1.9.10",
+        "@types/ms": "^2.1.0",
         "@types/multer": "^2.0.0",
         "@types/node": "^25.0.10",
         "@types/pg": "^8.16.0",

@@ -112,6 +112,17 @@ export default class InvitesController {
                     "Invite not found",
                 );
 
+            if (invite.expiresAt && dayjs().isAfter(dayjs(invite.expiresAt))) {
+                await db
+                    .delete(invitesTable)
+                    .where(eq(invitesTable.code, code));
+                await deleteCache("invite", cacheKey);
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Invite not found",
+                );
+            }
+
             await setCache("invite", cacheKey, invite);
 
             return res.status(HttpStatusCode.Success).json(invite);
@@ -148,6 +159,18 @@ export default class InvitesController {
                     HttpStatusCode.NotFound,
                     "Invite not found",
                 );
+
+            const cacheKey = cacheKeyPrefix("invite", code);
+            if (invite.expiresAt && dayjs().isAfter(dayjs(invite.expiresAt))) {
+                await db
+                    .delete(invitesTable)
+                    .where(eq(invitesTable.code, code));
+                await deleteCache("invite", cacheKey);
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Invite not found",
+                );
+            }
 
             return res.status(HttpStatusCode.Success).json(invite);
         } catch (err) {

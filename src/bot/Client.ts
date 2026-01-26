@@ -1,14 +1,58 @@
-import { type ILogger, LogLevel, SapphireClient } from "@sapphire/framework";
-import { Collection, Partials } from "discord.js";
+import "@sapphire/plugin-subcommands/register";
+
+import {
+    ApplicationCommandRegistries,
+    type ILogger,
+    LogLevel,
+    RegisterBehavior,
+    SapphireClient,
+} from "@sapphire/framework";
+import {
+    Collection,
+    Partials,
+    type PresenceData,
+    ActivityType,
+    type Guild,
+    type TextChannel,
+    type CategoryChannel,
+    type VoiceChannel,
+} from "discord.js";
 import { Logger } from "@mutualzz/logger";
+import { pickRandom } from "@sapphire/utilities";
+import dLogs from "discord-logs";
+import path from "path";
+
+const { BOT_TOKEN } = process.env;
 
 const logger = new Logger({
     tag: "Asmodeus",
     level: process.env.NODE_ENV === "development" ? "debug" : "info",
 });
 
+if (!BOT_TOKEN)
+    throw new Error("BOT_TOKEN is not defined in environment variables");
+
+// NOTE: If I am using "!" to assert non-null, it will be because I am certain it's non-null. Since the bot is designed to run in only one guild.
 export class BotClient extends SapphireClient {
+    readonly startTime = Date.now();
+
     readonly cooldowns = new Collection<string, Collection<string, number>>();
+
+    // Deep nested collections for Join-To-Create voice channels. String -> CategoryChannel -> VoiceChannel
+    // The first string key is the category ID, mapping to another collection where the key is the voice channel ID
+    readonly joinToCreate: Collection<
+        string,
+        Collection<string, VoiceChannel>
+    > = new Collection();
+
+    // The main guild where the bot operates (primary server)
+    // readonly because metadata should not be reassigned directly, only its properties modified
+    readonly metadata: {
+        mainGuild: Guild;
+        channels: {
+            logs: TextChannel;
+        };
+    };
 
     constructor() {
         super({
@@ -61,6 +105,69 @@ export class BotClient extends SapphireClient {
             loadApplicationCommandRegistriesStatusListeners: true,
             loadDefaultErrorListeners: true,
             loadSubcommandErrorListeners: true,
+            baseUserDirectory: path.resolve(import.meta.dirname),
         });
+
+        // Initialize metadata with placeholders to be set later on ready
+        this.metadata = {
+            mainGuild: null as unknown as Guild,
+            channels: {
+                logs: null as unknown as TextChannel,
+            },
+        };
+    }
+
+    getActivities(): PresenceData[] {
+        return [
+            {
+                status: "online",
+                activities: [
+                    {
+                        name: "Visit our app at mutualzz.com",
+                        type: ActivityType.Streaming,
+                        url: "https://mutualzz.com",
+                    },
+                ],
+            },
+        ];
+    }
+
+    getActivity = () => pickRandom(this.getActivities());
+
+    async login() {
+        // ApplicationCommandRegistries.setDefaultBehaviorWhenNotIdentical(
+        //     RegisterBehavior.BulkOverwrite,
+        // );
+
+        await dLogs(this, {
+            debug: process.env.NODE_ENV === "development",
+        });
+
+        return super.login(process.env.BOT_TOKEN);
+    }
+
+    mentionCommand(
+        command: string,
+        extra: {
+            subcommand: string;
+            group: string;
+        },
+    ): string {
+        if (!this.isReady()) return "";
+        const appCommand = this.application.commands.cache.find(
+            (c) => c.name === command,
+        );
+        if (!appCommand) {
+            this.logger.error(
+                `Couldn't mention ${command}, since it doesn't exist`,
+            );
+            return "";
+        }
+
+        let commandLiteral = command;
+        if (extra.group) commandLiteral += ` ${extra.group}`;
+        if (extra.subcommand) commandLiteral += ` ${extra.subcommand}`;
+
+        return `</${commandLiteral}:${appCommand.id}>`;
     }
 }
