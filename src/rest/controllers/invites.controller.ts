@@ -2,6 +2,7 @@ import {
     cacheKeyPrefix,
     deleteCache,
     getCache,
+    invalidateCache,
     setCache,
 } from "@mutualzz/cache";
 import { db, invitesTable, spaceMembersTable } from "@mutualzz/database";
@@ -23,6 +24,7 @@ import dayjs from "dayjs";
 import { and, count, eq, gte } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
+// NOTE: Eventually we will need to implement other types of invites.
 export default class InvitesController {
     static async get(req: Request, res: Response, next: NextFunction) {
         try {
@@ -60,6 +62,19 @@ export default class InvitesController {
                     where: eq(invitesTable.spaceId, BigInt(spaceId)),
                 }),
             );
+
+            invites = invites.filter((invite) => {
+                if (
+                    invite.expiresAt &&
+                    dayjs().isAfter(dayjs(invite.expiresAt))
+                ) {
+                    db.delete(invitesTable).where(
+                        eq(invitesTable.code, invite.code),
+                    );
+                    return false;
+                }
+                return true;
+            });
 
             await setCache("invites", spaceId, invites);
 
@@ -117,6 +132,7 @@ export default class InvitesController {
                     .delete(invitesTable)
                     .where(eq(invitesTable.code, code));
                 await deleteCache("invite", cacheKey);
+                await invalidateCache("invites", spaceId);
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Invite not found",
@@ -166,6 +182,10 @@ export default class InvitesController {
                     .delete(invitesTable)
                     .where(eq(invitesTable.code, code));
                 await deleteCache("invite", cacheKey);
+
+                if (invite.spaceId)
+                    await invalidateCache("invites", invite.spaceId);
+
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Invite not found",
@@ -271,7 +291,7 @@ export default class InvitesController {
                     "Failed to create invite",
                 );
 
-            await deleteCache("invites", spaceId);
+            await invalidateCache("invites", spaceId);
             await setCache("invite", code, newInvite);
 
             await emitEvent({
@@ -362,7 +382,7 @@ export default class InvitesController {
                     );
 
                 await deleteCache("invite", code);
-                await deleteCache("invites", spaceId);
+                await invalidateCache("invites", spaceId);
 
                 await emitEvent({
                     event: "InviteDelete",
@@ -376,7 +396,7 @@ export default class InvitesController {
                 return;
             }
 
-            await deleteCache("invites", spaceId);
+            await invalidateCache("invites", spaceId);
             await setCache("invite", code, invite);
 
             await emitEvent({
@@ -442,7 +462,7 @@ export default class InvitesController {
                     ),
                 );
 
-            await deleteCache("invites", spaceId);
+            await invalidateCache("invites", spaceId);
             await deleteCache("invite", code);
 
             await emitEvent({
@@ -485,7 +505,7 @@ export default class InvitesController {
                 .delete(invitesTable)
                 .where(eq(invitesTable.spaceId, BigInt(spaceId)));
 
-            await deleteCache("invites", spaceId);
+            await invalidateCache("invites", spaceId);
 
             res.status(HttpStatusCode.NoContent).send();
         } catch (err) {
