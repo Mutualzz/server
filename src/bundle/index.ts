@@ -8,7 +8,7 @@ import * as Gateway from "@mutualzz/gateway";
 import { Logger } from "@mutualzz/logger";
 import * as REST from "@mutualzz/rest";
 import { RabbitMQ } from "@mutualzz/util";
-import { BotClient } from "../bot/Client.ts";
+import { BotClient } from "../bot/Client";
 
 const logger = new Logger({
     tag: "Bundle",
@@ -21,13 +21,15 @@ const botClient = new BotClient();
 
 process.on("SIGTERM", async () => {
     logger.warn("Shutting down due to SIGTERM");
-    await gateway.stop();
-    await rest.stop();
-    await cdn.stop();
-    await botClient.destroy();
 
-    await RabbitMQ.connection.close();
-    await closeDatabase();
+    await Promise.all([
+        gateway.stop(),
+        rest.stop(),
+        cdn.stop(),
+        botClient.destroy(),
+        RabbitMQ.connection.close(),
+        closeDatabase(),
+    ]);
 });
 
 async function main() {

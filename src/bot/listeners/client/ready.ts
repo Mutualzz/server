@@ -1,18 +1,8 @@
 import { Listener } from "@sapphire/framework";
-import {
-    ButtonBuilder,
-    ButtonStyle,
-    type Client,
-    type TextChannel,
-    WebhookClient,
-    ChannelType,
-    Collection,
-} from "discord.js";
+import { type Client, ChannelType, Collection } from "discord.js";
 import { CronJob } from "cron";
 import ms from "ms";
-import { linksPresetComponents } from "../../Presets";
-import { sendOfficialLinksMessage } from "../../util";
-import { IDs } from "../../IDs.ts";
+import { IDs } from "../../IDs";
 
 export default class ReadyEvent extends Listener {
     constructor(context: Listener.LoaderContext, options: Listener.Options) {

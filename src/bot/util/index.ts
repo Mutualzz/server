@@ -7,7 +7,7 @@ import {
 import type { SlashCommandBuilder } from "@discordjs/builders";
 import type { SlashCommandOption } from "../types";
 import { linksPresetComponents } from "../Presets";
-import { IDs } from "../IDs.ts";
+import { IDs } from "../IDs";
 
 export const addOption = (
     builder: SlashCommandBuilder | SlashCommandSubcommandBuilder,
