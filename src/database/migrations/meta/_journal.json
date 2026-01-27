@@ -8,6 +8,13 @@
       "when": 1765679569154,
       "tag": "0000_eminent_hairball",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1769552429031,
+      "tag": "0001_deep_gauntlet",
+      "breakpoints": true
     }
   ]
 }
