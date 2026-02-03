@@ -79,17 +79,21 @@ export const deleteCache = async (
     }
 };
 
-export const invalidateCache = async (type: CacheName, pattern: string) => {
+export const invalidateCache = async (
+    type: CacheName,
+    patternOrId: string | bigint,
+) => {
+    const prefix = cacheKeyPrefix(type, patternOrId);
+
     const lruCache = caches[type];
     if (lruCache) {
-        const prefix = pattern.replace(/\*/g, "");
         for (const key of lruCache.keys()) {
             if (key.startsWith(prefix)) lruCache.delete(key);
         }
     }
 
     if (redis) {
-        const redisPattern = pattern.endsWith("*") ? pattern : `${pattern}*`;
+        const redisPattern = `${prefix}*`;
         try {
             const keys = await redis.keys(redisPattern);
             if (keys && keys.length > 0) await redis.del(...keys);

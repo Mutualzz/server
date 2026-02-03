@@ -1,5 +1,4 @@
 import {
-    cacheKeyPrefix,
     deleteCache,
     getCache,
     invalidateCache,
@@ -108,8 +107,7 @@ export default class InvitesController {
                     "You don't have permission to view invites for this space",
                 );
 
-            const cacheKey = cacheKeyPrefix("invite", code);
-            let invite = await getCache("invite", cacheKey);
+            let invite = await getCache("invite", code);
             if (invite) return res.status(HttpStatusCode.Success).json(invite);
 
             invite = await execNormalized<APIInvite>(
@@ -131,7 +129,7 @@ export default class InvitesController {
                 await db
                     .delete(invitesTable)
                     .where(eq(invitesTable.code, code));
-                await deleteCache("invite", cacheKey);
+                await deleteCache("invite", code);
                 await invalidateCache("invites", spaceId);
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -139,7 +137,7 @@ export default class InvitesController {
                 );
             }
 
-            await setCache("invite", cacheKey, invite);
+            await setCache("invite", code, invite);
 
             return res.status(HttpStatusCode.Success).json(invite);
         } catch (err) {
@@ -176,12 +174,12 @@ export default class InvitesController {
                     "Invite not found",
                 );
 
-            const cacheKey = cacheKeyPrefix("invite", code);
             if (invite.expiresAt && dayjs().isAfter(dayjs(invite.expiresAt))) {
                 await db
                     .delete(invitesTable)
                     .where(eq(invitesTable.code, code));
-                await deleteCache("invite", cacheKey);
+
+                await deleteCache("invite", code);
 
                 if (invite.spaceId)
                     await invalidateCache("invites", invite.spaceId);
