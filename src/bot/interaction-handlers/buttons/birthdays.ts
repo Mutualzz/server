@@ -13,6 +13,7 @@ import {
     StringSelectMenuBuilder,
 } from "discord.js";
 import { eq } from "drizzle-orm";
+import dayjs from "dayjs";
 
 export default class BirthdaysButtonHandler extends InteractionHandler {
     constructor(
@@ -61,6 +62,16 @@ export default class BirthdaysButtonHandler extends InteractionHandler {
             return;
         }
 
+        if (dbUser.birthday) {
+            await interaction.reply({
+                content:
+                    "You already have a birthday set. Please remove it first if you want to change it.",
+                ephemeral: true,
+            });
+
+            return;
+        }
+
         const modal = new ModalBuilder()
             .setCustomId("set_birthday_modal")
             .setTitle("Add Your Birthday")
@@ -68,7 +79,7 @@ export default class BirthdaysButtonHandler extends InteractionHandler {
                 new LabelBuilder()
                     .setLabel("Enter your birthday")
                     .setDescription(
-                        "It can be any format, e.g., YYYY-MM-DD or even very specific with hours and minutes",
+                        "It can be any format, e.g., DD/MM/YYYY, MM/DD/YYYY, YYYY/MM/DD, etc.",
                     )
                     .setTextInputComponent(
                         new TextInputBuilder()
@@ -98,5 +109,69 @@ export default class BirthdaysButtonHandler extends InteractionHandler {
             );
 
         await interaction.showModal(modal);
+
+        const mInteraction = await interaction.awaitModalSubmit({
+            time: 15 * 60 * 1000,
+            filter: (i) =>
+                i.customId === "set_birthday_modal" &&
+                i.user.id === interaction.user.id,
+        });
+
+        const birthdayInput =
+            mInteraction.fields.getTextInputValue("birthday_input");
+        const timezoneSelected =
+            parseInt(
+                mInteraction.fields.getStringSelectValues("timezone_select")[0],
+            ) || 0;
+
+        const birthdayDate = dayjs(birthdayInput, [
+            "DD/MM/YYYY",
+            "MM/DD/YYYY",
+            "YYYY/MM/DD",
+            "YYYY-MM-DD",
+            "DD-MM-YYYY",
+            "MM-DD-YYYY",
+            "YYYY.MM.DD",
+            "DD.MM.YYYY",
+            "MM.DD.YYYY",
+            "YYYY MM DD",
+            "DD MM YYYY",
+            "MM DD YYYY",
+            "YYYY/MM/DD HH:mm",
+            "DD/MM/YYYY HH:mm",
+            "MM/DD/YYYY HH:mm",
+            "YYYY-MM-DD HH:mm",
+            "DD-MM-YYYY HH:mm",
+            "MM-DD-YYYY HH:mm",
+            "YYYY.MM.DD HH:mm",
+            "DD.MM.YYYY HH:mm",
+            "MM.DD.YYYY HH:mm",
+            "YYYY MM DD HH:mm",
+            "DD MM YYYY HH:mm",
+            "MM DD YYYY HH:mm",
+        ]).utcOffset(timezoneSelected);
+
+        if (!birthdayDate.isValid()) {
+            await mInteraction.reply({
+                content: "Invalid date format. Please try again.",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        await db
+            .update(discordUsersTable)
+            .set({
+                birthday: birthdayDate.toDate(),
+                utcOffsetMinutes: timezoneSelected,
+            })
+            .where(eq(discordUsersTable.id, BigInt(interaction.user.id)));
+
+        await mInteraction.reply({
+            content: `Your birthday has been set to ${birthdayDate.format(
+                "YYYY-MM-DD HH:mm",
+            )} (UTC${timezoneSelected >= 0 ? "+" : ""}${timezoneSelected / 60})`,
+            ephemeral: true,
+        });
     }
 }

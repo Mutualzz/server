@@ -57,7 +57,7 @@ export const birthdaysPresetComponents = [
     new ContainerBuilder()
         .addTextDisplayComponents((display) =>
             display.setContent(
-                "**Click one of the buttons or type your birthday in this chat to add it!**",
+                "**Click one of the buttons to manage your birthday!\n\nIf you want to add one, you can type in this chat as well**",
             ),
         )
         .addActionRowComponents((row) =>
@@ -66,12 +66,32 @@ export const birthdaysPresetComponents = [
                     .setCustomId("add_birthday")
                     .setEmoji("🎂")
                     .setLabel("Add my birthday")
-                    .setStyle(ButtonStyle.Success),
+                    .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId("remove_birthday")
                     .setEmoji("😔")
                     .setLabel("Remove my birthday")
                     .setStyle(ButtonStyle.Secondary),
+            ),
+        ),
+    new ContainerBuilder()
+        .addTextDisplayComponents((display) =>
+            display.setContent(
+                "**Manage your timezone or view your birthday**",
+            ),
+        )
+        .addActionRowComponents((row) =>
+            row.setComponents(
+                new ButtonBuilder()
+                    .setCustomId("view_birthday")
+                    .setLabel("View My Birthday")
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji("👀"),
+                new ButtonBuilder()
+                    .setCustomId("manage_timezone")
+                    .setLabel("Manage Timezone")
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji("🌍"),
             ),
         ),
 ];

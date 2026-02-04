@@ -9,6 +9,14 @@ import { Logger } from "@mutualzz/logger";
 import * as REST from "@mutualzz/rest";
 import { RabbitMQ } from "@mutualzz/util";
 import { BotClient } from "../bot/Client";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+import customParseFormat from "dayjs/plugin/customParseFormat";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(customParseFormat);
 
 const logger = new Logger({
     tag: "Bundle",

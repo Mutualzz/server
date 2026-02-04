@@ -14,7 +14,9 @@ export default class MessageDeletedEvent extends Listener {
     }
 
     async run(message: Message) {
-        if (message.author.bot) return;
+        // NOTE: author can be null, if its a webhook message
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (message.author?.bot) return;
         if (!message.inGuild()) return;
 
         const {

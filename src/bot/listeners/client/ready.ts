@@ -3,6 +3,7 @@ import { type Client, ChannelType, Collection } from "discord.js";
 import { CronJob } from "cron";
 import ms from "ms";
 import { IDS } from "../../Constants";
+import { sendBirthdaysMessage } from "bot/util";
 
 export default class ReadyListener extends Listener {
     constructor(context: Listener.LoaderContext, options: Listener.Options) {
