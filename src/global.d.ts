@@ -5,7 +5,6 @@ import type {
     InteractionContextType,
     Guild,
     TextChannel,
-    CategoryChannel,
 } from "discord.js";
 
 declare module "discord.js" {
@@ -25,6 +24,7 @@ declare module "discord.js" {
             mainGuild: Guild;
             channels: {
                 logs: TextChannel;
+                birthdays: TextChannel;
             };
         };
     }

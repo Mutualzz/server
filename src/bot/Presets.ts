@@ -1,4 +1,9 @@
-import { ContainerBuilder, TextDisplayBuilder } from "@discordjs/builders";
+import {
+    ActionRowBuilder,
+    ContainerBuilder,
+    type MessageActionRowComponentBuilder,
+    TextDisplayBuilder,
+} from "@discordjs/builders";
 import { ButtonBuilder, ButtonStyle } from "discord.js";
 
 export const linksPresetComponents = [
@@ -27,7 +32,7 @@ export const linksPresetComponents = [
             display.setContent("### Mobile Links"),
         )
         .addActionRowComponents((row) =>
-            row.addComponents(
+            row.setComponents(
                 new ButtonBuilder()
                     .setEmoji({
                         id: "1409239745665564744",
@@ -51,4 +56,27 @@ export const linksPresetComponents = [
     new TextDisplayBuilder().setContent(
         "## <:discord:1464762765158776965> [Invite Link](https://discord.gg/epDUzyWqyg)",
     ),
+];
+
+export const birthdaysPresetComponents = [
+    new ContainerBuilder()
+        .addTextDisplayComponents((display) =>
+            display.setContent(
+                "**Click one of the buttons or type your birthday in this chat to add it!**",
+            ),
+        )
+        .addActionRowComponents((row) =>
+            row.setComponents(
+                new ButtonBuilder()
+                    .setCustomId("add_birthday")
+                    .setEmoji("🎂")
+                    .setLabel("Add my birthday")
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId("remove_birthday")
+                    .setEmoji("😔")
+                    .setLabel("Remove my birthday")
+                    .setStyle(ButtonStyle.Secondary),
+            ),
+        ),
 ];

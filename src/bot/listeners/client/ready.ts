@@ -3,6 +3,7 @@ import { type Client, ChannelType, Collection } from "discord.js";
 import { CronJob } from "cron";
 import ms from "ms";
 import { IDs } from "../../IDs";
+import { sendBirthdaysMessage } from "bot/util";
 
 export default class ReadyEvent extends Listener {
     constructor(context: Listener.LoaderContext, options: Listener.Options) {
@@ -27,9 +28,15 @@ export default class ReadyEvent extends Listener {
         const mainGuild = client.guilds.cache.get(IDs.MAIN_GUILD);
         if (mainGuild) client.metadata.mainGuild = mainGuild;
 
-        const logsChannel = client.channels.cache.get(IDs.LOGS_CHANNEL);
+        const logsChannel = client.channels.cache.get(IDs.CHANNELS.LOGS);
         if (logsChannel?.type === ChannelType.GuildText)
             client.metadata.channels.logs = logsChannel;
+
+        const birthdaysChannel = client.channels.cache.get(
+            IDs.CHANNELS.BIRTHDAYS,
+        );
+        if (birthdaysChannel?.type === ChannelType.GuildText)
+            client.metadata.channels.birthdays = birthdaysChannel;
 
         // Setup join to create categories
         const joinToCreateCouchCategory = client.channels.cache.get(
@@ -40,6 +47,8 @@ export default class ReadyEvent extends Listener {
                 joinToCreateCouchCategory.id,
                 new Collection(),
             );
+
+        await sendBirthdaysMessage(client);
 
         logger.info(`[Client] Started in ${ms(Date.now() - client.startTime)}`);
         logger.info(`[Client] Ready as ${client.user.tag}`);

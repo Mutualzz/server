@@ -1,12 +1,6 @@
 import "@sapphire/plugin-subcommands/register";
 
-import {
-    ApplicationCommandRegistries,
-    type ILogger,
-    LogLevel,
-    RegisterBehavior,
-    SapphireClient,
-} from "@sapphire/framework";
+import { type ILogger, LogLevel, SapphireClient } from "@sapphire/framework";
 import {
     Collection,
     Partials,
@@ -14,7 +8,6 @@ import {
     ActivityType,
     type Guild,
     type TextChannel,
-    type CategoryChannel,
     type VoiceChannel,
 } from "discord.js";
 import { Logger } from "@mutualzz/logger";
@@ -40,10 +33,10 @@ export class BotClient extends SapphireClient {
 
     // Deep nested collections for Join-To-Create voice channels. String -> CategoryChannel -> VoiceChannel
     // The first string key is the category ID, mapping to another collection where the key is the voice channel ID
-    readonly joinToCreate: Collection<
+    readonly joinToCreate = new Collection<
         string,
         Collection<string, VoiceChannel>
-    > = new Collection();
+    >();
 
     // The main guild where the bot operates (primary server)
     // readonly because metadata should not be reassigned directly, only its properties modified
@@ -51,6 +44,7 @@ export class BotClient extends SapphireClient {
         mainGuild: Guild;
         channels: {
             logs: TextChannel;
+            birthdays: TextChannel;
         };
     };
 
@@ -113,6 +107,7 @@ export class BotClient extends SapphireClient {
             mainGuild: null as unknown as Guild,
             channels: {
                 logs: null as unknown as TextChannel,
+                birthdays: null as unknown as TextChannel,
             },
         };
     }

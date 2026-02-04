@@ -2,11 +2,11 @@ import {
     ApplicationCommandOptionType,
     ChannelType,
     type Client,
-    SlashCommandSubcommandBuilder,
+    type SlashCommandSubcommandBuilder,
 } from "discord.js";
 import type { SlashCommandBuilder } from "@discordjs/builders";
 import type { SlashCommandOption } from "../types";
-import { linksPresetComponents } from "../Presets";
+import { birthdaysPresetComponents, linksPresetComponents } from "../Presets";
 import { IDs } from "../IDs";
 
 export const addOption = (
@@ -55,6 +55,22 @@ export const sendOfficialLinksMessage = async (client: Client) => {
 
     await webhook.send({
         components: linksPresetComponents,
+        flags: "IsComponentsV2",
+    });
+
+    await webhook.delete();
+};
+
+export const sendBirthdaysMessage = async (client: Client) => {
+    const channel = client.metadata.channels.birthdays;
+
+    const webhook = await channel.createWebhook({
+        name: "Birthdays",
+        avatar: client.user?.displayAvatarURL(),
+    });
+
+    await webhook.send({
+        components: birthdaysPresetComponents,
         flags: "IsComponentsV2",
     });
 
