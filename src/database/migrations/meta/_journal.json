@@ -15,6 +15,20 @@
       "when": 1769552429031,
       "tag": "0001_deep_gauntlet",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770218958572,
+      "tag": "0002_sleepy_tiger_shark",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770222792574,
+      "tag": "0003_perfect_nico_minoru",
+      "breakpoints": true
     }
   ]
 }

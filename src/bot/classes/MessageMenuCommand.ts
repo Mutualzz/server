@@ -14,7 +14,7 @@ export abstract class AbstractMessageMenuCommand extends Command {
 
     readonly type = ApplicationCommandType.Message;
 
-    protected constructor(
+    public constructor(
         context: Command.LoaderContext,
         options: Command.Options,
     ) {

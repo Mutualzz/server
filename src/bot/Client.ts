@@ -48,6 +48,8 @@ export class BotClient extends SapphireClient {
         };
     };
 
+    readonly owner: string = "401269337924829186"; // Azrael's ID
+
     constructor() {
         super({
             intents: [

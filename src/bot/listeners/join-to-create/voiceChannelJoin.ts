@@ -1,7 +1,7 @@
 import { Listener } from "@sapphire/framework";
 import { ChannelType, type GuildMember, type VoiceChannel } from "discord.js";
 import { isCouchCategory } from "../../util";
-import { IDs } from "../../IDs";
+import { IDS } from "../../Constants";
 
 export default class VoiceChannelJoinEvent extends Listener {
     constructor(context: Listener.LoaderContext, options: Listener.Options) {
@@ -15,7 +15,7 @@ export default class VoiceChannelJoinEvent extends Listener {
 
     async run(member: GuildMember, voiceChannel: VoiceChannel) {
         if (
-            !IDs.JOIN_TO_CREATE.CREATION_VOICE_CHANNELS.includes(
+            !IDS.JOIN_TO_CREATE.CREATION_VOICE_CHANNELS.includes(
                 voiceChannel.id,
             )
         )

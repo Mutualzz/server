@@ -21,7 +21,7 @@ export abstract class AbstractSlashSubcommand extends Subcommand {
     readonly opts?: SlashCommandOption[];
     readonly subcommands?: SubcommandMappingArray;
 
-    protected constructor(
+    public constructor(
         content: Subcommand.LoaderContext,
         options: Subcommand.Options,
     ) {

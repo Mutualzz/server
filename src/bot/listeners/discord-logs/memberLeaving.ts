@@ -24,6 +24,7 @@ export default class MemberLeaveEvent extends Listener {
                 iconURL: guild.iconURL() ?? "",
             })
             .setTitle(`${member.user.displayName} Left`)
+            .setDescription(member.toString())
             .setThumbnail(member.displayAvatarURL())
             .addFields({
                 name: "Joined Discord",

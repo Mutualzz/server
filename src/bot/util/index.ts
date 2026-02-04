@@ -7,7 +7,7 @@ import {
 import type { SlashCommandBuilder } from "@discordjs/builders";
 import type { SlashCommandOption } from "../types";
 import { birthdaysPresetComponents, linksPresetComponents } from "../Presets";
-import { IDs } from "../IDs";
+import { IDS } from "../Constants";
 
 export const addOption = (
     builder: SlashCommandBuilder | SlashCommandSubcommandBuilder,
@@ -78,5 +78,5 @@ export const sendBirthdaysMessage = async (client: Client) => {
 };
 
 export const isCouchCategory = (channelId: string) => {
-    return channelId === IDs.JOIN_TO_CREATE.COUCH_CATEGORY;
+    return channelId === IDS.JOIN_TO_CREATE.COUCH_CATEGORY;
 };

@@ -12,7 +12,7 @@ export abstract class AbstractSlashCommand extends Command {
 
     readonly opts?: SlashCommandOption[];
 
-    protected constructor(
+    public constructor(
         content: Command.LoaderContext,
         options: Command.Options,
     ) {

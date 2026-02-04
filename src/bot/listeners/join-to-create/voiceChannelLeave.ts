@@ -1,6 +1,6 @@
 import { Listener } from "@sapphire/framework";
 import type { GuildMember, VoiceChannel } from "discord.js";
-import { IDs } from "../../IDs";
+import { IDS } from "../../Constants";
 
 export default class VoiceChannelLeaveEvent extends Listener {
     constructor(context: Listener.LoaderContext, options: Listener.Options) {
@@ -15,7 +15,7 @@ export default class VoiceChannelLeaveEvent extends Listener {
     // TODO: Fix it so when user switches channels, it does the same thing as leaving or joining which needs voiceChannelSwitch
     async run(member: GuildMember, voiceChannel: VoiceChannel) {
         if (
-            IDs.JOIN_TO_CREATE.CREATION_VOICE_CHANNELS.includes(voiceChannel.id)
+            IDS.JOIN_TO_CREATE.CREATION_VOICE_CHANNELS.includes(voiceChannel.id)
         )
             return;
         if (!member.hasJtc) return;

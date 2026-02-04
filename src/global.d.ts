@@ -27,6 +27,8 @@ declare module "discord.js" {
                 birthdays: TextChannel;
             };
         };
+
+        owner: string;
     }
 
     export interface GuildMember {
@@ -58,5 +60,9 @@ declare module "@sapphire/framework" {
 
     export interface ListenerOptions {
         description: string;
+    }
+
+    interface Preconditions {
+        OwnerOnly: never;
     }
 }

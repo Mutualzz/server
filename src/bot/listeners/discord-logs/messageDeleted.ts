@@ -14,7 +14,7 @@ export default class MessageDeletedEvent extends Listener {
     }
 
     async run(message: Message) {
-        if (message?.author?.bot) return;
+        if (message.author.bot) return;
         if (!message.inGuild()) return;
 
         const {

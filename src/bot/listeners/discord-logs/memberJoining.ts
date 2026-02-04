@@ -25,6 +25,7 @@ export default class MemberJoinEvent extends Listener {
             })
             .setTitle(`${member.user.displayName} Joined`)
             .setThumbnail(member.displayAvatarURL())
+            .setDescription(member.toString())
             .addFields({
                 name: "Joined Discord",
                 value: `<t:${Math.floor(
