@@ -28,18 +28,42 @@ export default class BirthdaysButtonHandler extends InteractionHandler {
 
     async run(interaction: ButtonInteraction) {
         if (
-            interaction.customId !== "remove_birthday" &&
-            interaction.customId !== "add_birthday"
+            ![
+                "add_birthday",
+                "remove_birthday",
+                "view_birthday",
+                "manage_timezone",
+            ].includes(interaction.customId)
         )
             return;
+
         if (!interaction.inCachedGuild()) return;
 
-        const dbUser = await db.query.discordUsersTable.findFirst({
+        let dbUser = await db.query.discordUsersTable.findFirst({
             where: eq(discordUsersTable.id, BigInt(interaction.user.id)),
         });
-        if (!dbUser) return;
+        if (!dbUser)
+            dbUser = await db
+                .insert(discordUsersTable)
+                .values({
+                    id: BigInt(interaction.user.id),
+                })
+                .returning()
+                .then((r) => r[0]);
 
-        if (interaction.customId === "remove_birthday") {
+        if (!dbUser) {
+            await interaction.reply({
+                content: "An error occurred while accessing your data.",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        if (
+            interaction.customId === "remove_birthday" ||
+            interaction.customId === "view_birthday" ||
+            interaction.customId === "manage_timezone"
+        ) {
             if (!dbUser.birthday) {
                 await interaction.reply({
                     content: "You don't have a birthday set.",
@@ -48,7 +72,9 @@ export default class BirthdaysButtonHandler extends InteractionHandler {
 
                 return;
             }
+        }
 
+        if (interaction.customId === "remove_birthday") {
             await db
                 .update(discordUsersTable)
                 .set({ birthday: null })
@@ -62,10 +88,17 @@ export default class BirthdaysButtonHandler extends InteractionHandler {
             return;
         }
 
-        if (dbUser.birthday) {
+        if (interaction.customId === "view_birthday") {
+            const birthdayDate = dayjs(dbUser.birthday).utcOffset(
+                dbUser.utcOffsetMinutes,
+            );
+
             await interaction.reply({
-                content:
-                    "You already have a birthday set. Please remove it first if you want to change it.",
+                content: `Your birthday is set to ${birthdayDate.format(
+                    "YYYY-MM-DD HH:mm",
+                )} (UTC${
+                    dbUser.utcOffsetMinutes >= 0 ? "+" : ""
+                }${dbUser.utcOffsetMinutes / 60})`,
                 ephemeral: true,
             });
 

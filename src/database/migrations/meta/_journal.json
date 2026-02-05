@@ -29,6 +29,13 @@
       "when": 1770222792574,
       "tag": "0003_perfect_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1770237855947,
+      "tag": "0004_stale_power_pack",
+      "breakpoints": true
     }
   ]
 }

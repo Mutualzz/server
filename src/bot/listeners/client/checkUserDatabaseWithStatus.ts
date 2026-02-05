@@ -16,6 +16,7 @@ export default class CheckUserDatabaseWithStatusListener extends Listener {
     }
 
     async run(member: GuildMember, newStatus: string) {
+        if (member.user.bot) return;
         if (newStatus !== "online") return;
 
         const userExists = await db.query.discordUsersTable.findFirst({
