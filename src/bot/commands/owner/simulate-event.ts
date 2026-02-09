@@ -37,7 +37,7 @@ export default class SimulateEventCommand extends AbstractSlashCommand {
                 this.container.client.emit(event, member);
                 await interaction.reply({
                     content: `Simulated event: ${event}`,
-                    ephemeral: true,
+                    flags: "Ephemeral",
                 });
                 break;
             }
@@ -50,7 +50,7 @@ export default class SimulateEventCommand extends AbstractSlashCommand {
                 this.container.client.emit(event, member, newStatus);
                 await interaction.reply({
                     content: `Simulated event: ${event}`,
-                    ephemeral: true,
+                    flags: "Ephemeral",
                 });
                 break;
             }
@@ -58,14 +58,14 @@ export default class SimulateEventCommand extends AbstractSlashCommand {
             case "clientReady": {
                 await interaction.reply({
                     content: "Cannot use that",
-                    ephemeral: true,
+                    flags: "Ephemeral",
                 });
                 break;
             }
             default: {
                 await interaction.reply({
                     content: `Event not supported for simulation: ${event} *yet*`,
-                    ephemeral: true,
+                    flags: "Ephemeral",
                 });
                 break;
             }

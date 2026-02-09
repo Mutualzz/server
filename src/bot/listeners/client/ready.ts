@@ -47,6 +47,23 @@ export default class ReadyListener extends Listener {
                 new Collection(),
             );
 
+        const officialServersChatChannel = client.channels.cache.get(
+            IDS.CHANNELS.OFFICIAL_SERVERS_CHAT,
+        );
+        if (officialServersChatChannel?.type === ChannelType.GuildText) {
+            client.metadata.channels.officialServersChat =
+                officialServersChatChannel;
+
+            const threads = await officialServersChatChannel.threads.fetch();
+            if (threads.threads.size > 0) {
+                const lobbyThread = threads.threads.get(IDS.CHATS.LOBBY_MC);
+                if (lobbyThread) client.metadata.chats.lobbyMC = lobbyThread;
+
+                const smpThread = threads.threads.get(IDS.CHATS.SMP_MC);
+                if (smpThread) client.metadata.chats.smpMC = smpThread;
+            }
+        }
+
         logger.info(`[Client] Started in ${ms(Date.now() - client.startTime)}`);
         logger.info(`[Client] Ready as ${client.user.tag}`);
     }

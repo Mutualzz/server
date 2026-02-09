@@ -1,5 +1,6 @@
 import { db, discordUsersTable } from "@mutualzz/database";
 import { Listener } from "@sapphire/framework";
+import dayjs from "dayjs";
 import type { GuildMember } from "discord.js";
 import { eq } from "drizzle-orm";
 
@@ -16,17 +17,27 @@ export default class CheckUserDatabaseWithStatusListener extends Listener {
     }
 
     async run(member: GuildMember, newStatus: string) {
-        if (member.user.bot) return;
+        const user = member.user;
+        if (user.bot) return;
         if (newStatus !== "online") return;
 
         const userExists = await db.query.discordUsersTable.findFirst({
-            where: eq(discordUsersTable.id, BigInt(member.user.id)),
+            where: eq(discordUsersTable.id, BigInt(user.id)),
         });
 
-        if (userExists) return;
+        if (userExists) {
+            user.birthday = dayjs(userExists.birthday).toDate();
+            return;
+        }
 
-        await db.insert(discordUsersTable).values({
-            id: BigInt(member.user.id),
-        });
+        const newUser = await db
+            .insert(discordUsersTable)
+            .values({
+                id: BigInt(user.id),
+            })
+            .returning()
+            .then((r) => r[0]);
+
+        user.birthday = dayjs(newUser.birthday).toDate();
     }
 }

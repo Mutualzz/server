@@ -9,6 +9,7 @@ import {
     type Guild,
     type TextChannel,
     type VoiceChannel,
+    type ThreadChannel,
 } from "discord.js";
 import { Logger } from "@mutualzz/logger";
 import { pickRandom } from "@sapphire/utilities";
@@ -41,10 +42,15 @@ export class BotClient extends SapphireClient {
     // The main guild where the bot operates (primary server)
     // readonly because metadata should not be reassigned directly, only its properties modified
     readonly metadata: {
-        mainGuild: Guild;
+        mainGuild: Guild | null;
         channels: {
-            logs: TextChannel;
-            birthdays: TextChannel;
+            logs: TextChannel | null;
+            birthdays: TextChannel | null;
+            officialServersChat: TextChannel | null;
+        };
+        chats: {
+            lobbyMC: ThreadChannel | null;
+            smpMC: ThreadChannel | null;
         };
     };
 
@@ -106,10 +112,15 @@ export class BotClient extends SapphireClient {
 
         // Initialize metadata with placeholders to be set later on ready
         this.metadata = {
-            mainGuild: null as unknown as Guild,
+            mainGuild: null,
             channels: {
-                logs: null as unknown as TextChannel,
-                birthdays: null as unknown as TextChannel,
+                logs: null,
+                birthdays: null,
+                officialServersChat: null,
+            },
+            chats: {
+                lobbyMC: null,
+                smpMC: null,
             },
         };
     }

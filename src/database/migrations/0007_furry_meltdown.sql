@@ -1,0 +1,1 @@
+ALTER TABLE "discord_users" ADD COLUMN "birthdayMessage" bigint;

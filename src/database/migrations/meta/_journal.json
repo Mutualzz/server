@@ -36,6 +36,27 @@
       "when": 1770237855947,
       "tag": "0004_stale_power_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770343672552,
+      "tag": "0005_chief_sasquatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1770344795162,
+      "tag": "0006_good_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1770548501267,
+      "tag": "0007_furry_meltdown",
+      "breakpoints": true
     }
   ]
 }

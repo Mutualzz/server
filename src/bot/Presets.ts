@@ -57,11 +57,16 @@ export const birthdaysPresetComponents = [
     new ContainerBuilder()
         .addTextDisplayComponents((display) =>
             display.setContent(
-                "**Click one of the buttons to manage your birthday!\n\nIf you want to add one, you can type in this chat as well**",
+                "**Click one of the buttons to manage your birthday!\n\nIf you want to add one, you can type in this chat as well**\n*If you do type in this chat, please use the format MM/DD, DD/MM, etc. (e.g. 12/31)*",
             ),
         )
         .addActionRowComponents((row) =>
             row.setComponents(
+                new ButtonBuilder()
+                    .setCustomId("view_birthday")
+                    .setLabel("View my birthday")
+                    .setEmoji("👀")
+                    .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId("add_birthday")
                     .setEmoji("🎂")
@@ -72,26 +77,6 @@ export const birthdaysPresetComponents = [
                     .setEmoji("😔")
                     .setLabel("Remove my birthday")
                     .setStyle(ButtonStyle.Secondary),
-            ),
-        ),
-    new ContainerBuilder()
-        .addTextDisplayComponents((display) =>
-            display.setContent(
-                "**Manage your timezone or view your birthday**",
-            ),
-        )
-        .addActionRowComponents((row) =>
-            row.setComponents(
-                new ButtonBuilder()
-                    .setCustomId("view_birthday")
-                    .setLabel("View My Birthday")
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji("👀"),
-                new ButtonBuilder()
-                    .setCustomId("manage_timezone")
-                    .setLabel("Manage Timezone")
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji("🌍"),
             ),
         ),
 ];

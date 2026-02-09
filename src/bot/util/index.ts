@@ -1,13 +1,17 @@
 import {
     ApplicationCommandOptionType,
     ChannelType,
+    type User,
     type Client,
     type SlashCommandSubcommandBuilder,
+    ThreadAutoArchiveDuration,
 } from "discord.js";
 import type { SlashCommandBuilder } from "@discordjs/builders";
 import type { SlashCommandOption } from "../types";
 import { birthdaysPresetComponents, linksPresetComponents } from "../Presets";
 import { IDS } from "../Constants";
+import { db, discordUsersTable } from "@mutualzz/database";
+import { eq } from "drizzle-orm";
 
 export const addOption = (
     builder: SlashCommandBuilder | SlashCommandSubcommandBuilder,
@@ -46,7 +50,7 @@ export const addOption = (
 
 export const sendOfficialLinksMessage = async (client: Client) => {
     const channel = client.channels.cache.get("1409043388052803634");
-    if (!channel || channel.type !== ChannelType.GuildText) return;
+    if (channel?.type !== ChannelType.GuildText) return;
 
     const webhook = await channel.createWebhook({
         name: "Official Links",
@@ -63,6 +67,7 @@ export const sendOfficialLinksMessage = async (client: Client) => {
 
 export const sendBirthdaysMessage = async (client: Client) => {
     const channel = client.metadata.channels.birthdays;
+    if (channel?.type !== ChannelType.GuildText) return;
 
     const webhook = await channel.createWebhook({
         name: "Birthdays",
@@ -77,6 +82,45 @@ export const sendBirthdaysMessage = async (client: Client) => {
     await webhook.delete();
 };
 
+export const createMinecraftServersChatThreads = async (client: Client) => {
+    const channel = client.channels.cache.get(
+        IDS.CHANNELS.OFFICIAL_SERVERS_CHAT,
+    );
+    if (channel?.type !== ChannelType.GuildText) return;
+
+    await Promise.all(
+        ["Lobby Chat", "SMP Chat"].map(async (threadName) => {
+            const message = await channel.send({
+                content: `**This is the ${threadName} minecraft chat bridge**`,
+            });
+
+            return message.startThread({
+                name: threadName,
+                autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+            });
+        }),
+    );
+};
+
 export const isCouchCategory = (channelId: string) => {
     return channelId === IDS.JOIN_TO_CREATE.COUCH_CATEGORY;
+};
+
+export const getUserBirthday = async (user: User) => {
+    if (!user.birthday) {
+        const dbUser = await db.query.discordUsersTable.findFirst({
+            where: eq(discordUsersTable.id, BigInt(user.id)),
+        });
+
+        if (!dbUser) return user.birthday;
+
+        if (dbUser.birthday) {
+            user.birthday = new Date(dbUser.birthday);
+            return user.birthday;
+        }
+
+        return user.birthday;
+    }
+
+    return user.birthday;
 };

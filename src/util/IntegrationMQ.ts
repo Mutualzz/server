@@ -10,6 +10,9 @@ const logger = new Logger({
 export const INTEGRATION_EXCHANGE = "mz.integration";
 
 export type IntegrationType = "discord-bot" | "minecraft-bridge" | "api";
+export type IntegrationTarget =
+    | { kind: "minecraft"; serverId: "lobby" | "smp"; scope?: "chat" | "all" }
+    | { kind: "none" };
 
 export interface IntegrationEnvelope<T = unknown> {
     v: 1;
@@ -17,6 +20,7 @@ export interface IntegrationEnvelope<T = unknown> {
     ts: number;
     id: string;
     source: IntegrationType;
+    target?: IntegrationTarget;
     traceId?: string;
     data: T;
 }

@@ -21,10 +21,15 @@ declare module "discord.js" {
         getActivity(): PresenceData;
 
         metadata: {
-            mainGuild: Guild;
+            mainGuild: Guild | null;
             channels: {
-                logs: TextChannel;
-                birthdays: TextChannel;
+                logs: TextChannel | null;
+                birthdays: TextChannel | null;
+                officialServersChat: TextChannel | null;
+            };
+            chats: {
+                lobbyMC: ThreadChannel | null;
+                smpMC: ThreadChannel | null;
             };
         };
 
@@ -33,6 +38,11 @@ declare module "discord.js" {
 
     export interface GuildMember {
         hasJtc: boolean;
+    }
+
+    export interface User {
+        birthday?: Date;
+        birthdayMessage?: Message;
     }
 
     export interface VoiceChannel {

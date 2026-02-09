@@ -1,0 +1,1 @@
+ALTER TABLE "discord_users" DROP COLUMN "utcOffsetMinutes";

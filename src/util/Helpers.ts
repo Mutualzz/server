@@ -2,7 +2,6 @@ import { getCache, setCache } from "@mutualzz/cache";
 import {
     channelsTable,
     db,
-    discordUsersTable,
     spaceMembersTable,
     spacesTable,
     themesTable,

@@ -1,7 +1,7 @@
-import { bigint, date, integer, pgTable } from "drizzle-orm/pg-core";
+import { bigint, pgTable, text } from "drizzle-orm/pg-core";
 
 export const discordUsersTable = pgTable("discord_users", {
     id: bigint({ mode: "bigint" }).primaryKey(),
-    birthday: date({ mode: "date" }),
-    utcOffsetMinutes: integer().notNull().default(0),
+    birthday: text(),
+    birthdayMessage: bigint({ mode: "bigint" }),
 });

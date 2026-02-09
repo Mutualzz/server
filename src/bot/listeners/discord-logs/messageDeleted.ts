@@ -16,7 +16,8 @@ export default class MessageDeletedEvent extends Listener {
     async run(message: Message) {
         // NOTE: author can be null, if its a webhook message
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (message.author?.bot) return;
+        if (!message.author) return;
+        if (message.author.bot) return;
         if (!message.inGuild()) return;
 
         const {
@@ -25,7 +26,7 @@ export default class MessageDeletedEvent extends Listener {
         } = this.container.client.metadata;
 
         const audit = await guild
-            .fetchAuditLogs({
+            ?.fetchAuditLogs({
                 type: AuditLogEvent.MessageDelete,
             })
             .then((audit) => audit.entries.first());
@@ -43,8 +44,8 @@ export default class MessageDeletedEvent extends Listener {
 
         const embed = new Embed()
             .setAuthor({
-                name: `${guild.name} Message Logs`,
-                iconURL: guild.iconURL()!,
+                name: `${guild?.name} Message Logs`,
+                iconURL: guild?.iconURL() || undefined,
             })
             .setTitle(title)
             .setDescription(
@@ -55,6 +56,6 @@ export default class MessageDeletedEvent extends Listener {
             .setThumbnail(message.author.displayAvatarURL())
             .setFooter({ text: `ID: ${message.id}` });
 
-        await logs.send({ embeds: [embed], files: attachments });
+        await logs?.send({ embeds: [embed], files: attachments });
     }
 }

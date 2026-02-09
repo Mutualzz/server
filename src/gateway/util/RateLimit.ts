@@ -7,8 +7,8 @@ export interface RateLimitBucket {
 
 export function checkGlobalRateLimit(
     socket: WebSocket,
-    limit: number = 120,
-    window: number = 60_000,
+    limit = 120,
+    window = 60_000,
 ): boolean {
     const key = `${socket.sessionId}:global`;
     const now = Date.now();
@@ -29,8 +29,8 @@ export function checkGlobalRateLimit(
 export function checkRateLimit(
     socket: WebSocket,
     opcode: number,
-    limit: number = 60,
-    window: number = 60_000,
+    limit = 60,
+    window = 60_000,
 ) {
     const key = `${socket.sessionId}:${opcode}`;
     const now = Date.now();
