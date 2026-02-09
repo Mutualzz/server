@@ -19,7 +19,7 @@ export const getCache = async <T extends CacheName>(
         ) as unknown as CacheValue<T>;
         const cacheToSet = caches[type];
         if (!cacheToSet) return null;
-        // @ts-ignore -- TS cannot infer type here
+        // @ts-expect-error-- TS cannot infer type here
         cacheToSet.set(cacheKey, parsed);
         return parsed;
     } catch {
@@ -39,7 +39,6 @@ export const setCache = async <T extends CacheName>(
 ) => {
     try {
         cacheKey = cacheKeyPrefix(type, cacheKey);
-        // @ts-ignore -- TS cannot infer type here
         caches[type]?.set(cacheKey, value as any);
         if (redis) {
             const ttlMs = caches[type]?.ttl;

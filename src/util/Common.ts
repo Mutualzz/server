@@ -6,6 +6,9 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import sharp from "sharp";
 import urlMetadata from "url-metadata";
+import appleMusicMetadata from "apple-music-metadata";
+
+type Services = "spotify" | "youtube" | "apple" | "other";
 
 export const spotifySdk = SpotifyApi.withClientCredentials(
     process.env.SPOTIFY_CLIENT_ID!,
@@ -72,20 +75,15 @@ export const generateInviteCode = () => {
 };
 
 export const getUrls = (text: string) => {
-    const urlPattern = /\bhttps?:\/\/[^\s/$.?#].[^\s]*\b/g;
-    const urls = text.match(urlPattern) || []; // Find all URLs or return an empty array if none
-
-    // Convert each URL to valid format (ensure it has https://)
-    const validUrls = urls.map((url) => {
-        // If the URL doesn't start with 'http' (or 'https'), add 'https://'
-        if (!/^https?:\/\//i.test(url)) {
-            url = "https://" + url;
-        }
-        return url;
-    });
+    const urlPattern = /([*_|~`]*)(https?:\/\/[^\s<>()]+)([*_|~`]*)/g;
+    const matches = [];
+    let match;
+    while ((match = urlPattern.exec(text)) !== null) {
+        matches.push(match[0]);
+    }
 
     // Remove duplicates using Set
-    return [...new Set(validUrls)];
+    return [...new Set(matches)];
 };
 
 export const fetchSpotifyMetadata = async (
@@ -186,9 +184,40 @@ export const fetchYoutubeMetadata = async (
     }
 };
 
-export const detectService = (url: string): "spotify" | "youtube" | "other" => {
+export const fetchAppleMusicMetadata = async (
+    url: string,
+): Promise<APIMessageEmbed | null> => {
+    const metadata = await appleMusicMetadata(url);
+    if (!metadata) return null;
+
+    let embed: APIMessageEmbed = {
+        title: metadata.title,
+        url,
+    };
+
+    switch (metadata.type) {
+        case "album": {
+            embed = {
+                ...embed,
+                url,
+                description: metadata.description,
+                author: {
+                    name: metadata.artist.name,
+                },
+                color: "#FA57C1",
+                apple: {
+                    type: metadata.type,
+                    embedUrl: `https://music.apple.com/${metadat}/${metadata.type}/${metadata.id}`,
+                },
+            };
+        }
+    }
+};
+
+export const detectService = (url: string): Services => {
     if (/open\.spotify\.com/.test(url)) return "spotify";
     if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
+    if (/music\.apple\.com/.test(url)) return "apple";
     return "other";
 };
 
@@ -196,15 +225,25 @@ export const buildEmbed = async (
     url: string,
 ): Promise<APIMessageEmbed | null> => {
     const service = detectService(url);
+    const spoiler = url.startsWith("||") && url.endsWith("||");
     let embed: APIMessageEmbed | null = null;
 
     if (service === "spotify") {
-        embed = await fetchSpotifyMetadata(url);
+        embed = { ...(await fetchSpotifyMetadata(url)), spoiler };
     } else if (service === "youtube") {
-        embed = await fetchYoutubeMetadata(url);
+        embed = { ...(await fetchYoutubeMetadata(url)), spoiler };
+    } else if (service === "apple") {
+        embed = { ...(await fetchAppleMusicMetadata(url)), spoiler };
     } else {
+        // TODO: Create a proper regex for this and apply to the links detection as well
+        const normalizedUrl = url
+            .replaceAll("||", "")
+            .replaceAll("**", "")
+            .replaceAll("__", "")
+            .replaceAll("~~", "");
+
         // Fallback to Open Graph
-        const metadata = await urlMetadata(url).catch(() => null);
+        const metadata = await urlMetadata(normalizedUrl).catch(() => null);
         if (!metadata) return null;
 
         const limit = 500;
@@ -220,6 +259,7 @@ export const buildEmbed = async (
             description,
             url: metadata["og:url"] ?? url,
             image: metadata["og:image"] ?? null,
+            spoiler,
             media:
                 metadata["og:video:secure_url"] ??
                 metadata["og:video:url"] ??
@@ -240,11 +280,14 @@ export const buildEmbed = async (
         };
     }
 
+    console.log(embed);
+
     return embed;
 };
 
 export const buildEmbeds = async (content: string) => {
-    const urls = Array.from(getUrls(content)).slice(0, 5); // Limit to first 5 URLs
+    const urls = getUrls(content).slice(0, 5); // Limit to first 5 URLs
+    console.log(urls);
     const embeds: APIMessageEmbed[] = [];
     for (const url of urls) {
         const embed = await buildEmbed(url);

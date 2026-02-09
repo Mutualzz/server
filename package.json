@@ -20,6 +20,7 @@
         "@toondepauw/node-zstd": "^1.2.0",
         "@yukikaze-bot/erlpack": "^1.0.1",
         "amqplib": "^0.10.9",
+        "apple-music-metadata": "^2.0.1",
         "bcrypt": "^6.0.0",
         "body-parser": "^2.2.2",
         "bufferutil": "^4.1.0",

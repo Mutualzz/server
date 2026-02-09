@@ -106,14 +106,14 @@ export default class MessagesController {
                 db
                     .insert(messagesTable)
                     .values({
-                        // @ts-ignore for some reason ID is not recognized as a field
+                        // @ts-expect-error for some reason ID is not recognized as a field
                         id: BigInt(Snowflake.generate()),
                         authorId: user.id,
                         nonce: nonce ? BigInt(nonce) : undefined,
                         channelId: channel.id,
-                        spaceId: channel.spaceId ?? null,
-                        content: content ?? null,
-                        embeds: await buildEmbeds(content),
+                        spaceId: channel.spaceId,
+                        content,
+                        embeds: await buildEmbeds(content || ""),
                     })
                     .returning()
                     .then((r) => r[0]),
@@ -215,8 +215,8 @@ export default class MessagesController {
                 db
                     .update(messagesTable)
                     .set({
-                        content: content ?? message.content,
-                        embeds: await buildEmbeds(content),
+                        content: content || message.content,
+                        embeds: await buildEmbeds(content || ""),
                         updatedAt: new Date(),
                     })
                     .where(eq(messagesTable.id, BigInt(message.id)))
