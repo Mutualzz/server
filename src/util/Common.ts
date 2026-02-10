@@ -4,16 +4,37 @@ import Color from "color";
 import crypto from "crypto";
 import express from "express";
 import { rateLimit } from "express-rate-limit";
+import { Client as AppleMusicClient } from "@yujinakayama/apple-music";
 import sharp from "sharp";
 import urlMetadata from "url-metadata";
-import appleMusicMetadata from "apple-music-metadata";
+import jwt from "jsonwebtoken";
+import fs from "fs";
+import path from "path";
 
 type Services = "spotify" | "youtube" | "apple" | "other";
+
+const privateKey = fs.readFileSync(path.resolve(process.cwd(), "KitKey.p8"));
+
+const token = jwt.sign({}, privateKey, {
+    algorithm: "ES256",
+    expiresIn: "180d",
+    issuer: process.env.APPLE_TEAM_ID,
+    header: {
+        alg: "ES256",
+        kid: process.env.APPLE_KEY_ID,
+    },
+});
 
 export const spotifySdk = SpotifyApi.withClientCredentials(
     process.env.SPOTIFY_CLIENT_ID!,
     process.env.SPOTIFY_CLIENT_SECRET!,
 );
+
+export const appleMusicSdk = new AppleMusicClient({
+    developerToken: token,
+    defaultStorefront: "us",
+    defaultLanguageTag: "en-US",
+});
 
 export const base64UrlEncode = (input: Buffer | string) =>
     Buffer.from(input)
@@ -76,14 +97,20 @@ export const generateInviteCode = () => {
 
 export const getUrls = (text: string) => {
     const urlPattern = /([*_|~`]*)(https?:\/\/[^\s<>()]+)([*_|~`]*)/g;
-    const matches = [];
+    const matches: { url: string; spoiler: boolean }[] = [];
     let match;
     while ((match = urlPattern.exec(text)) !== null) {
-        matches.push(match[0]);
+        const raw = match[0];
+        const spoiler = raw.startsWith("||") && raw.endsWith("||");
+        // Remove markdown and spoiler formatting
+        const url = raw
+            .replace(/^[*_|~`]+|[*_|~`]+$/g, "")
+            .replace(/^(\|\|)|(\|\|)$/g, "");
+        matches.push({ url, spoiler });
     }
-
     // Remove duplicates using Set
-    return [...new Set(matches)];
+    const unique = Array.from(new Map(matches.map((m) => [m.url, m])).values());
+    return unique;
 };
 
 export const fetchSpotifyMetadata = async (
@@ -118,6 +145,8 @@ export const fetchSpotifyMetadata = async (
                 return null;
         }
 
+        if (!data) return null;
+
         return {
             title: data.name,
             url,
@@ -140,8 +169,7 @@ export const fetchSpotifyMetadata = async (
                 embedUrl: `https://open.spotify.com/embed/${type}/${id}`,
             },
         };
-    } catch (err) {
-        console.error(err);
+    } catch {
         return null;
     }
 };
@@ -178,8 +206,7 @@ export const fetchYoutubeMetadata = async (
                 embedUrl: `https://www.youtube.com/embed/${videoId}`,
             },
         };
-    } catch (err) {
-        console.error(err);
+    } catch {
         return null;
     }
 };
@@ -187,30 +214,131 @@ export const fetchYoutubeMetadata = async (
 export const fetchAppleMusicMetadata = async (
     url: string,
 ): Promise<APIMessageEmbed | null> => {
-    const metadata = await appleMusicMetadata(url);
-    if (!metadata) return null;
+    const match = url.match(
+        /music\.apple\.com\/[a-z]{2}\/(album|playlist|artist|song)\/[^/]+\/([^/?#]+)/,
+    );
+    if (!match) return null;
+    const [, type, id] = match;
 
-    let embed: APIMessageEmbed = {
-        title: metadata.title,
-        url,
-    };
+    try {
+        switch (type) {
+            case "album": {
+                const album = await appleMusicSdk.albums
+                    .get(id)
+                    .then((res) => res.data[0]);
 
-    switch (metadata.type) {
-        case "album": {
-            embed = {
-                ...embed,
-                url,
-                description: metadata.description,
-                author: {
-                    name: metadata.artist.name,
-                },
-                color: "#FA57C1",
-                apple: {
-                    type: metadata.type,
-                    embedUrl: `https://music.apple.com/${metadat}/${metadata.type}/${metadata.id}`,
-                },
-            };
+                const artist = album.relationships?.artists?.data[0];
+
+                return {
+                    title: album.attributes?.name,
+                    url,
+                    author: {
+                        name: artist?.attributes?.name || "Unknown Artist",
+                        url: album.attributes?.url,
+                    },
+                    description: album.attributes?.genreNames.join(", "),
+                    image:
+                        album.attributes && "artwork" in album.attributes
+                            ? (album.attributes.artwork as any).url
+                                  .replace("{w}", "2000")
+                                  .replace("{h}", "2000")
+                            : undefined,
+                    apple: {
+                        id: album.id,
+                        type: "album",
+                        embedUrl: `https://embed.music.apple.com/us/album/${album.id}`,
+                    },
+                };
+            }
+            case "artist": {
+                const artist = await appleMusicSdk.artists
+                    .get(id)
+                    .then((res) => res.data[0]);
+
+                const artwork =
+                    artist.attributes && "artwork" in artist.attributes
+                        ? (artist.attributes.artwork as any).url
+                              .replace("{w}", "2000")
+                              .replace("{h}", "2000")
+                        : undefined;
+
+                return {
+                    url,
+                    author: {
+                        name: artist.attributes?.name || "Unknown Artist",
+                        url: artist.attributes?.url,
+                        iconUrl: artwork,
+                    },
+                    description: artist.attributes?.genreNames.join(", "),
+                    image: artwork,
+                    apple: {
+                        id: artist.id,
+                        type: "artist",
+                        embedUrl: `https://music.apple.com/us/artist/${artist.id}`,
+                    },
+                };
+            }
+            case "playlist": {
+                const playlist = await appleMusicSdk.playlists
+                    .get(id)
+                    .then((res) => res.data[0]);
+
+                return {
+                    title: playlist.attributes?.name,
+                    url,
+                    author: {
+                        name:
+                            playlist.attributes?.curatorName ||
+                            "Unknown Curator",
+                        url: playlist.attributes?.url,
+                    },
+                    description: playlist.attributes?.description?.standard,
+                    image:
+                        playlist.attributes && "artwork" in playlist.attributes
+                            ? (playlist.attributes.artwork as any).url
+                                  .replace("{w}", "2000")
+                                  .replace("{h}", "2000")
+                            : undefined,
+                    apple: {
+                        id: playlist.id,
+                        type: "playlist",
+                        embedUrl: `https://embed.music.apple.com/us/playlist/${playlist.id}`,
+                    },
+                };
+            }
+            case "song": {
+                const song = await appleMusicSdk.songs
+                    .get(id)
+                    .then((res) => res.data[0]);
+
+                const artist = song.relationships?.artists?.data[0];
+
+                return {
+                    title: song.attributes?.name,
+                    url,
+                    author: {
+                        name: artist?.attributes?.name || "Unknown Artist",
+                        url: song.attributes?.url,
+                    },
+                    description: song.attributes?.genreNames.join(", "),
+                    image:
+                        song.attributes && "artwork" in song.attributes
+                            ? (song.attributes.artwork as any).url
+                                  .replace("{w}", "2000")
+                                  .replace("{h}", "2000")
+                            : undefined,
+                    apple: {
+                        id: song.id,
+                        type: "song",
+                        embedUrl: `https://embed.music.apple.com/us/song/${song.id}`,
+                    },
+                };
+            }
+            default:
+                return null;
         }
+    } catch {
+        return null;
     }
 };
 
@@ -223,9 +351,9 @@ export const detectService = (url: string): Services => {
 
 export const buildEmbed = async (
     url: string,
+    spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
     const service = detectService(url);
-    const spoiler = url.startsWith("||") && url.endsWith("||");
     let embed: APIMessageEmbed | null = null;
 
     if (service === "spotify") {
@@ -280,17 +408,15 @@ export const buildEmbed = async (
         };
     }
 
-    console.log(embed);
-
     return embed;
 };
 
 export const buildEmbeds = async (content: string) => {
     const urls = getUrls(content).slice(0, 5); // Limit to first 5 URLs
-    console.log(urls);
+
     const embeds: APIMessageEmbed[] = [];
-    for (const url of urls) {
-        const embed = await buildEmbed(url);
+    for (const { url, spoiler } of urls) {
+        const embed = await buildEmbed(url, spoiler);
         if (embed) embeds.push(embed);
     }
     return embeds;
