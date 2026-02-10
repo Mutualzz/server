@@ -20,8 +20,8 @@ export default class MemberLeaveEvent extends Listener {
 
         const embed = new Embed()
             .setAuthor({
-                name: `${guild.name} Member Logs`,
-                iconURL: guild.iconURL() ?? "",
+                name: `${guild?.name} Member Logs`,
+                iconURL: guild?.iconURL() ?? "",
             })
             .setTitle(`${member.user.displayName} Left`)
             .setDescription(member.toString())
@@ -42,6 +42,6 @@ export default class MemberLeaveEvent extends Listener {
                 inline: true,
             });
 
-        await logs.send({ embeds: [embed] });
+        await logs?.send({ embeds: [embed] });
     }
 }

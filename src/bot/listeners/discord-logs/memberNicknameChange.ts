@@ -25,8 +25,8 @@ export default class MemberNicknameChangeEvent extends Listener {
 
         const embed = new Embed()
             .setAuthor({
-                name: `${guild.name} Member Logs`,
-                iconURL: guild.iconURL() ?? "",
+                name: `${guild?.name} Member Logs`,
+                iconURL: guild?.iconURL() ?? "",
             })
             .setTitle(`${member.user.displayName} Changed Nickname`)
             .setThumbnail(member.displayAvatarURL())
@@ -36,6 +36,6 @@ export default class MemberNicknameChangeEvent extends Listener {
                 }`,
             );
 
-        await logs.send({ embeds: [embed] });
+        await logs?.send({ embeds: [embed] });
     }
 }

@@ -45,8 +45,8 @@ export default class MessageEditedEvent extends Listener {
 
         const embed = new Embed()
             .setAuthor({
-                name: `${guild.name} Message Logs`,
-                iconURL: guild.iconURL() ?? undefined,
+                name: `${guild?.name} Message Logs`,
+                iconURL: guild?.iconURL() ?? undefined,
             })
             .setTitle(`${newMessage.author.displayName} edited a message`)
             .setThumbnail(newMessage.author.displayAvatarURL())
@@ -55,6 +55,6 @@ export default class MessageEditedEvent extends Listener {
             )
             .setFooter({ text: `ID: ${newMessage.id}` });
 
-        await logs.send({ embeds: [embed] });
+        await logs?.send({ embeds: [embed] });
     }
 }

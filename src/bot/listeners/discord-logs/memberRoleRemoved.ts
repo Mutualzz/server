@@ -20,7 +20,7 @@ export default class MemberRoleRemovedEvent extends Listener {
         } = this.container.client.metadata;
 
         const audit = await guild
-            .fetchAuditLogs({
+            ?.fetchAuditLogs({
                 type: AuditLogEvent.MemberRoleUpdate,
             })
             .then((audit) => audit.entries.first());
@@ -34,13 +34,13 @@ export default class MemberRoleRemovedEvent extends Listener {
 
         const embed = new Embed()
             .setAuthor({
-                name: `${guild.name} Member Logs`,
-                iconURL: guild.iconURL() ?? "",
+                name: `${guild?.name} Member Logs`,
+                iconURL: guild?.iconURL() ?? "",
             })
             .setTitle(title)
             .setThumbnail(member.displayAvatarURL())
             .setDescription(`${role} was removed`);
 
-        await logs.send({ embeds: [embed] });
+        await logs?.send({ embeds: [embed] });
     }
 }
