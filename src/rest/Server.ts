@@ -19,7 +19,7 @@ import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./util";
 
 declare global {
     interface BigInt {
-        toJSON(): String;
+        toJSON(): string;
     }
 }
 
@@ -88,6 +88,7 @@ export class Server {
         );
 
         this.app.disable("x-powered-by");
+        this.app.set("trust proxy", true);
     }
 
     private initSentry() {
