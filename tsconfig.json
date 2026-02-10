@@ -24,6 +24,8 @@
         "noUnusedLocals": false,
         "noUnusedParameters": false,
         "noPropertyAccessFromIndexSignature": false,
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": false,
 
         "baseUrl": "./src",
 
