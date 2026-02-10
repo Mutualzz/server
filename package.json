@@ -54,6 +54,8 @@
         "pako": "^2.1.0",
         "pg": "^8.17.2",
         "rabbitmq-stream-js-client": "^1.0.0",
+        "rate-limit-redis": "^4.3.1",
+        "redis": "^5.10.0",
         "sharp": "^0.34.5",
         "url-metadata": "^5.4.1",
         "ws": "^8.19.0",
