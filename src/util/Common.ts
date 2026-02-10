@@ -3,7 +3,7 @@ import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import Color from "color";
 import crypto from "crypto";
 import express from "express";
-import { rateLimit } from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { Client as AppleMusicClient } from "@yujinakayama/apple-music";
 import sharp from "sharp";
 import urlMetadata from "url-metadata";
@@ -76,7 +76,13 @@ export const createLimiter = (ms: number, limit: number) =>
                 redis.call(command, ...args) as Promise<RedisReply>,
         }),
 
-        keyGenerator: (req) => (req.user ? `u:${req.user.id}` : `ip:${req.ip}`),
+        keyGenerator: (req) => {
+            if (req.user) return `u:${req.user.id}`;
+
+            const ip = req.ip ?? req.socket.remoteAddress ?? "0.0.0.0";
+
+            return ipKeyGenerator(ip, 64);
+        },
     });
 
 export const genRandColor = () =>
