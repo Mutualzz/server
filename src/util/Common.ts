@@ -10,6 +10,8 @@ import urlMetadata from "url-metadata";
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
+import { RedisStore, type RedisReply } from "rate-limit-redis";
+import { redis } from "./Redis";
 
 type Services = "spotify" | "youtube" | "apple" | "other";
 
@@ -66,6 +68,15 @@ export const createLimiter = (ms: number, limit: number) =>
         limit,
         standardHeaders: true,
         legacyHeaders: false,
+        message: {
+            error: "Too many requests",
+        },
+        store: new RedisStore({
+            sendCommand: (command: string, ...args: string[]) =>
+                redis.call(command, ...args) as Promise<RedisReply>,
+        }),
+
+        keyGenerator: (req) => (req.user ? `u:${req.user.id}` : `ip:${req.ip}`),
     });
 
 export const genRandColor = () =>
