@@ -13,7 +13,7 @@ export const spaceRelations = relations(spacesTable, ({ one, many }) => ({
     }),
     members: many(spaceMembersTable),
     channels: many(channelsTable),
-    roles: many(spaceMemberRolesTable),
+    roles: many(rolesTable),
 }));
 
 export const spaceMemberRoleRelations = relations(

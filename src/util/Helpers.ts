@@ -2,6 +2,8 @@ import { getCache, setCache } from "@mutualzz/cache";
 import {
     channelsTable,
     db,
+    rolesTable,
+    spaceMemberRolesTable,
     spaceMembersTable,
     spacesTable,
     themesTable,
@@ -9,15 +11,16 @@ import {
     userSettingsTable,
     usersTable,
 } from "@mutualzz/database";
-import type {
-    APIChannel,
-    APIPrivateUser,
-    APISpace,
-    APISpaceMember,
-    APITheme,
-    APIUser,
-    APIUserSettings,
-    Snowflake,
+import {
+    roleFlags,
+    type APIChannel,
+    type APIPrivateUser,
+    type APISpace,
+    type APISpaceMember,
+    type APITheme,
+    type APIUser,
+    type APIUserSettings,
+    type Snowflake,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
@@ -218,4 +221,46 @@ export async function getMember(
     await setCache("spaceMember", cacheKey, member);
 
     return member;
+}
+
+export async function getEveryoneRole(spaceId: Snowflake) {
+    const role = await db
+        .select({
+            id: rolesTable.id,
+            permissions: rolesTable.permissions,
+            flags: rolesTable.flags,
+            position: rolesTable.position,
+        })
+        .from(rolesTable)
+        .where(
+            and(
+                eq(rolesTable.spaceId, BigInt(spaceId)),
+                sql`${rolesTable.flags} & ${roleFlags.Everyone} = ${roleFlags.Everyone}`,
+            ),
+        )
+        .limit(1)
+        .then((res) => res[0])
+        .catch(() => null);
+
+    return role;
+}
+
+export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
+    const rows = await db
+        .select({
+            id: rolesTable.id,
+            permissions: rolesTable.permissions,
+            flags: rolesTable.flags,
+            position: rolesTable.position,
+        })
+        .from(spaceMemberRolesTable)
+        .innerJoin(rolesTable, eq(spaceMemberRolesTable.id, rolesTable.id))
+        .where(
+            and(
+                eq(spaceMemberRolesTable.spaceId, BigInt(spaceId)),
+                eq(spaceMemberRolesTable.userId, BigInt(userId)),
+            ),
+        );
+
+    return rows;
 }

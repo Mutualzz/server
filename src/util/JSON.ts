@@ -12,9 +12,9 @@ export const JSONReplacer = function (
 
     // Handle objects with custom .toJSON
     // erlpack doesn't use JSON.stringify so force it manually
-    // @ts-ignore
+    // @ts-expect-error doesnt exist on certain but can exist
     if (value?.toJSON) {
-        //@ts-ignore
+        //@ts-expect-error doesnt exist on certain but can exist
         return value.toJSON();
     }
 
