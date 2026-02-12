@@ -39,6 +39,6 @@ export const spaceMemberRolesTable = pgTable(
                 spaceMembersTable.userId,
             ],
             name: "smr_space_member_fkey",
-        }),
+        }).onDelete("cascade"),
     ],
 );

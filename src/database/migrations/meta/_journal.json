@@ -5,57 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1765679569154,
-      "tag": "0000_eminent_hairball",
+      "when": 1770878468994,
+      "tag": "0000_fresh_drax",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1769552429031,
-      "tag": "0001_deep_gauntlet",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1770218958572,
-      "tag": "0002_sleepy_tiger_shark",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1770222792574,
-      "tag": "0003_perfect_nico_minoru",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1770237855947,
-      "tag": "0004_stale_power_pack",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1770343672552,
-      "tag": "0005_chief_sasquatch",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1770344795162,
-      "tag": "0006_good_shiva",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1770548501267,
-      "tag": "0007_furry_meltdown",
+      "when": 1770879732610,
+      "tag": "0001_talented_malcolm_colcord",
       "breakpoints": true
     }
   ]

@@ -14,9 +14,13 @@ import {
     generateInviteCode,
     getSpace,
     getUser,
+    requireChannelPermissions,
+    requireSpacePermissions,
 } from "@mutualzz/util";
 import {
+    validateInviteBodyPatch,
     validateInviteBodyPost,
+    validateInviteParamsCode,
     validateInviteParamsGet,
 } from "@mutualzz/validators";
 import dayjs from "dayjs";
@@ -43,11 +47,11 @@ export default class InvitesController {
                     "Space not found",
                 );
 
-            if (BigInt(space.ownerId) !== BigInt(user.id))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You don't have permission to view invites for this space",
-                );
+            await requireSpacePermissions({
+                spaceId: space.id,
+                userId: user.id,
+                needed: ["ManageInvites"],
+            });
 
             let invites = await getCache("invites", spaceId);
             if (invites)
@@ -62,20 +66,25 @@ export default class InvitesController {
                 }),
             );
 
-            invites = invites.filter((invite) => {
-                if (
-                    invite.expiresAt &&
-                    dayjs().isAfter(dayjs(invite.expiresAt))
-                ) {
-                    db.delete(invitesTable).where(
-                        eq(invitesTable.code, invite.code),
-                    );
-                    return false;
-                }
-                return true;
-            });
+            invites = await Promise.all(
+                invites.map(async (invite) => {
+                    if (
+                        invite.expiresAt &&
+                        dayjs().isAfter(dayjs(invite.expiresAt))
+                    ) {
+                        await db
+                            .delete(invitesTable)
+                            .where(eq(invitesTable.code, invite.code));
+                        await deleteCache("invite", invite.code);
 
-            await setCache("invites", spaceId, invites);
+                        return null;
+                    }
+
+                    return invite;
+                }),
+            ).then((invs) => invs.filter((inv) => !!inv));
+
+            await setCache("invites", spaceId, invites || []);
 
             return res.status(HttpStatusCode.Success).json(invites);
         } catch (err) {
@@ -92,7 +101,7 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId, code } = req.params;
+            const { spaceId, code } = validateInviteParamsCode.parse(req.body);
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -101,11 +110,11 @@ export default class InvitesController {
                     "Space not found",
                 );
 
-            if (BigInt(space.ownerId) !== BigInt(user.id))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You don't have permission to view invites for this space",
-                );
+            await requireSpacePermissions({
+                spaceId: space.id,
+                userId: user.id,
+                needed: ["ManageInvites"],
+            });
 
             let invite = await getCache("invite", code);
             if (invite) return res.status(HttpStatusCode.Success).json(invite);
@@ -216,6 +225,12 @@ export default class InvitesController {
 
             const { channelId } = validateInviteBodyPost.parse(req.body);
 
+            await requireChannelPermissions({
+                channelId,
+                userId: user.id,
+                needed: ["CreateInvites"],
+            });
+
             const reuseWindowSecs = 60;
 
             const recentInvite = await execNormalized<APIInvite>(
@@ -276,9 +291,7 @@ export default class InvitesController {
                     .then(async (invite) => {
                         return {
                             ...invite,
-                            inviter: await getUser(
-                                invite.inviterId?.toString(),
-                            ),
+                            inviter: await getUser(invite.inviterId.toString()),
                         };
                     }),
             );
@@ -288,6 +301,12 @@ export default class InvitesController {
                     HttpStatusCode.InternalServerError,
                     "Failed to create invite",
                 );
+
+            const editSessionId = generateInviteCode();
+
+            await setCache("inviteEdit", `${code}:${editSessionId}`, {
+                inviterId: newInvite.inviterId,
+            });
 
             await invalidateCache("invites", spaceId);
             await setCache("invite", code, newInvite);
@@ -299,7 +318,58 @@ export default class InvitesController {
                 data: newInvite,
             });
 
-            return res.status(HttpStatusCode.Created).json(newInvite);
+            return res.status(HttpStatusCode.Created).json({
+                ...newInvite,
+                editSessionId,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async keepAlive(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { code } = req.params;
+
+            const invite = await execNormalized<APIInvite>(
+                db.query.invitesTable.findFirst({
+                    where: eq(invitesTable.code, code),
+                }),
+            );
+            if (!invite)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Invite not found",
+                );
+
+            const sessionId = req.header("x-invite-edit-session");
+            if (!sessionId)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Missing edit session",
+                );
+
+            const sessionKey = `${code}:${sessionId}`;
+            const session = await getCache("inviteEdit", sessionKey);
+
+            if (!session || BigInt(session.inviterId) !== BigInt(user.id))
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "Edit session expired",
+                );
+
+            await setCache("inviteEdit", sessionKey, {
+                inviterId: session.inviterId,
+            });
+
+            return res.status(HttpStatusCode.NoContent).send();
         } catch (err) {
             next(err);
         }
@@ -314,7 +384,9 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId, code } = req.params;
+            const { spaceId, code } = validateInviteParamsCode.parse(
+                req.params,
+            );
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -340,9 +412,57 @@ export default class InvitesController {
                     "Invite not found",
                 );
 
-            const { maxUses, expiresAt } = req.body;
+            let canModerate = false;
+            if (invite.channelId) {
+                try {
+                    await requireChannelPermissions({
+                        channelId: invite.channelId,
+                        userId: user.id,
+                        needed: ["ManageInvites"],
+                    });
 
-            const neverExpires = expiresAt === null;
+                    canModerate = true;
+                } catch {
+                    canModerate = false;
+                }
+            }
+
+            const isInviter = BigInt(invite.inviterId) === BigInt(user.id);
+
+            if (!canModerate) {
+                if (!isInviter)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Missing permission",
+                    );
+
+                const sessionId = req.header("x-invite-edit-session");
+                if (!sessionId)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Edit session expired",
+                    );
+
+                const session = await getCache(
+                    "inviteEdit",
+                    `${invite.code}:${sessionId}`,
+                );
+                if (!session || BigInt(session.inviterId) !== BigInt(user.id))
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Edit session expired",
+                    );
+
+                await setCache("inviteEdit", `${invite.code}:${sessionId}`, {
+                    inviterId: session.inviterId,
+                });
+            }
+
+            const { maxUses, expiresAt } = validateInviteBodyPatch.parse(
+                req.body,
+            );
+
+            const neverExpires = expiresAt == null;
 
             invite = await execNormalized<APIInvite>(
                 db
@@ -428,12 +548,6 @@ export default class InvitesController {
                     "Space not found",
                 );
 
-            if (BigInt(space.ownerId) !== BigInt(user.id))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You don't have permission to delete invites for this space",
-                );
-
             let invite = await getCache("invite", code);
             if (!invite)
                 invite = await execNormalized<APIInvite>(
@@ -493,11 +607,11 @@ export default class InvitesController {
                     "Space not found",
                 );
 
-            if (BigInt(space.ownerId) !== BigInt(user.id))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You don't have permission to delete invites for this space",
-                );
+            await requireSpacePermissions({
+                spaceId: space.id,
+                userId: user.id,
+                needed: ["ManageInvites"],
+            });
 
             await db
                 .delete(invitesTable)

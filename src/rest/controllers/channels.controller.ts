@@ -7,9 +7,10 @@ import {
     execNormalized,
     execNormalizedMany,
     getChannel,
-    getMember,
     getSpace,
     Snowflake,
+    requireChannelPermissions,
+    requireSpacePermissions,
 } from "@mutualzz/util";
 import {
     validateChannelBodyCreate,
@@ -20,7 +21,7 @@ import {
     validateChannelParamsUpdate,
     validateChannelQueryDelete,
 } from "@mutualzz/validators";
-import { eq, isNull, max, sql } from "drizzle-orm";
+import { eq, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class ChannelsController {
@@ -43,14 +44,12 @@ export default class ChannelsController {
                     "Channel not found",
                 );
 
-            if (
-                channel.spaceId &&
-                !(await getMember(channel.spaceId, user.id, true))
-            )
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You do not have permission to view this channel",
-                );
+            if (channel.spaceId)
+                await requireChannelPermissions({
+                    channelId: channel.id,
+                    userId: user.id,
+                    needed: ["ViewChannel"],
+                });
 
             if (channel.recipientIds && !channel.recipientIds.includes(user.id))
                 throw new HttpException(
@@ -73,13 +72,18 @@ export default class ChannelsController {
                     "Unauthorized",
                 );
 
-            const { name, type, parentId, spaceId } =
+            const { name, type, parentId, spaceId, ownerId, recipientIds } =
                 validateChannelBodyCreate.parse(req.body);
 
             switch (type) {
                 case ChannelType.Text:
                 case ChannelType.Voice:
                 case ChannelType.Category:
+                    if (ownerId || recipientIds)
+                        throw new HttpException(
+                            HttpStatusCode.BadRequest,
+                            "Space channels cannot have an owner or recipient ids",
+                        );
                     break;
                 case ChannelType.DM:
                 case ChannelType.GroupDM: {
@@ -94,6 +98,12 @@ export default class ChannelsController {
                                         "Cannot create DM or Group DM channels in spaces",
                                 },
                             ],
+                        );
+
+                    if (parentId)
+                        throw new HttpException(
+                            HttpStatusCode.BadRequest,
+                            "DM or Group DM channels cannot have parent id",
                         );
                     break;
                 }
@@ -110,6 +120,7 @@ export default class ChannelsController {
                     );
             }
 
+            let position = 0;
             if (spaceId) {
                 const space = await getSpace(spaceId);
 
@@ -119,34 +130,39 @@ export default class ChannelsController {
                         "Space not found",
                     );
 
-                if (BigInt(space.ownerId) !== BigInt(user.id))
-                    throw new HttpException(
-                        HttpStatusCode.Forbidden,
-                        "You do not have permission to create channels in this space",
-                    );
-            }
+                await requireSpacePermissions({
+                    spaceId: space.id,
+                    userId: user.id,
+                    needed: ["ManageChannels"],
+                });
 
-            const maxPosition = await db
-                .select({ max: max(channelsTable.position) })
-                .from(channelsTable)
-                .where(
-                    parentId
-                        ? eq(channelsTable.parentId, BigInt(parentId))
-                        : isNull(channelsTable.parentId),
-                )
-                .then((res) => res[0]?.max ?? 0);
+                const maxPosition = await execNormalized<{
+                    max: number | null;
+                }>(
+                    db
+                        .select({ max: max(channelsTable.position) })
+                        .from(channelsTable)
+                        .where(eq(channelsTable.spaceId, BigInt(space.id))),
+                );
+
+                position = (maxPosition?.max ?? 0) + 1;
+            }
 
             const channel = await execNormalized<APIChannel>(
                 db
                     .insert(channelsTable)
                     .values({
-                        // @ts-expect-error For some odd reason "id" is not recognized as a valid field
                         id: BigInt(Snowflake.generate()),
-                        name,
                         type,
-                        spaceId: spaceId ?? null,
-                        parentId: parentId ?? null,
-                        position: maxPosition + 1,
+                        spaceId: spaceId ? BigInt(spaceId) : undefined,
+                        name,
+                        ownerId: ownerId ? BigInt(ownerId) : undefined,
+                        position,
+                        parentId: parentId ? BigInt(parentId) : undefined,
+                        recipientIds: recipientIds
+                            ? recipientIds.map((id) => BigInt(id))
+                            : undefined,
+                        flags: 0n,
                     })
                     .returning()
                     .then((res) => res[0]),
@@ -166,15 +182,14 @@ export default class ChannelsController {
                     "Failed to create channel",
                 );
 
-            await setCache("channel", `channel:${channel.id}`, channel);
+            await setCache("channel", channel.id, channel);
 
-            if (channel.spaceId) {
+            if (channel.spaceId)
                 await emitEvent({
                     event: "ChannelCreate",
                     space_id: channel.spaceId,
                     data: channel,
                 });
-            }
 
             res.status(HttpStatusCode.Created).json(channel);
         } catch (err) {
@@ -207,16 +222,26 @@ export default class ChannelsController {
                     "You cannot update DM channels",
                 );
 
-            if (channel.ownerId && BigInt(channel.ownerId) !== BigInt(user.id))
+            if (channel.spaceId) {
+                await requireSpacePermissions({
+                    spaceId: channel.spaceId,
+                    userId: user.id,
+                    needed: ["ManageChannels"],
+                });
+            } else if (
+                channel.ownerId &&
+                BigInt(channel.ownerId) !== BigInt(user.id)
+            ) {
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
                     "You do not have permission to update this channel",
                 );
+            }
 
             const { name, topic, nsfw, parentId, position } =
                 validateChannelBodyUpdate.parse(req.body);
 
-            let newParentId;
+            let newParentId: bigint | null;
             if (parentId != undefined) newParentId = BigInt(parentId);
             else
                 newParentId = channel.parentId
@@ -267,89 +292,72 @@ export default class ChannelsController {
                     "Unauthorized",
                 );
 
-            const channels = validateChannelBulkBodyPatch.parse(req.body);
+            const { spaceId, channels } = validateChannelBulkBodyPatch.parse(
+                req.body,
+            );
 
-            const updatedChannels = await Promise.all(
-                channels.map(async (channelData) => {
-                    const {
-                        id,
-                        name,
-                        topic,
-                        nsfw,
-                        parentId,
-                        position,
-                        spaceId,
-                    } = channelData;
+            const space = await getSpace(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
 
-                    if (!spaceId)
-                        throw new HttpException(
-                            HttpStatusCode.BadRequest,
-                            "spaceId is required for bulk channel update",
-                        );
+            await requireSpacePermissions({
+                spaceId: space.id,
+                userId: user.id,
+                needed: ["ManageChannels"],
+            });
 
-                    const space = await getSpace(spaceId);
-
-                    if (!space)
-                        throw new HttpException(
-                            HttpStatusCode.NotFound,
-                            `Space with ID ${spaceId} not found`,
-                        );
-
-                    if (BigInt(space.ownerId) !== BigInt(user.id))
-                        throw new HttpException(
-                            HttpStatusCode.Forbidden,
-                            "You do not have permission to update channels in this space",
-                        );
-
-                    const channel = await getChannel(id);
-
-                    if (!channel)
-                        throw new HttpException(
-                            HttpStatusCode.NotFound,
-                            `Channel with ID ${id} not found`,
-                        );
-
-                    const newParentId =
-                        parentId === undefined
-                            ? undefined
-                            : parentId === null
-                              ? sql`NULL`
-                              : BigInt(parentId);
-
-                    const newChannel = await execNormalized<APIChannel>(
-                        db
-                            .update(channelsTable)
-                            .set({
-                                name: name ?? channel.name,
-                                topic: topic ?? channel.topic,
-                                nsfw: nsfw ?? channel.nsfw,
-                                parentId: newParentId,
-                                position: position ?? channel.position,
-                            })
-                            .returning()
-                            .where(eq(channelsTable.id, BigInt(channel.id)))
-                            .then((res) => res[0]),
+            const newChannels: APIChannel[] = [];
+            for (const chBody of channels) {
+                const channel = await getChannel(chBody.id);
+                if (!channel)
+                    throw new HttpException(
+                        HttpStatusCode.NotFound,
+                        `Channel with ID ${chBody.id} not found`,
                     );
 
-                    if (!newChannel)
-                        throw new HttpException(
-                            HttpStatusCode.InternalServerError,
-                            `Failed to update channel with ID ${id}`,
-                        );
+                const newParentId =
+                    chBody.parentId === undefined
+                        ? undefined
+                        : chBody.parentId === null
+                          ? sql`NULL`
+                          : BigInt(chBody.parentId);
 
-                    await setCache("channel", newChannel.id, newChannel);
+                const newChannel = await execNormalized<APIChannel>(
+                    db
+                        .update(channelsTable)
+                        .set({
+                            name: chBody.name ?? channel.name,
+                            topic: chBody.topic ?? channel.topic,
+                            nsfw: chBody.nsfw ?? channel.nsfw,
+                            parentId: newParentId,
+                            position: chBody.position ?? channel.position,
+                        })
+                        .returning()
+                        .where(eq(channelsTable.id, BigInt(channel.id)))
+                        .then((res) => res[0]),
+                );
 
-                    return newChannel;
-                }),
-            );
+                if (!newChannel)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        `Failed to update channel with ID ${chBody.id}`,
+                    );
+
+                await setCache("channel", newChannel.id, newChannel);
+
+                newChannels.push(newChannel);
+            }
 
             await emitEvent({
                 event: "BulkChannelUpdate",
-                space_id: channels[0].spaceId,
-                data: updatedChannels,
+                space_id: spaceId,
+                data: newChannels,
             });
 
-            res.status(HttpStatusCode.Success).json(updatedChannels);
+            res.status(HttpStatusCode.Success).json(newChannels);
         } catch (err) {
             next(err);
         }
@@ -366,25 +374,7 @@ export default class ChannelsController {
 
             const { channelId } = validateChannelParamsDelete.parse(req.params);
 
-            const { parentOnly, spaceId } = validateChannelQueryDelete.parse(
-                req.query,
-            );
-
-            if (spaceId) {
-                const space = await getSpace(spaceId);
-
-                if (!space)
-                    throw new HttpException(
-                        HttpStatusCode.NotFound,
-                        "Space not found",
-                    );
-
-                if (BigInt(space.ownerId) !== BigInt(user.id))
-                    throw new HttpException(
-                        HttpStatusCode.Forbidden,
-                        "You do not have permission to delete channels in this space",
-                    );
-            }
+            const { parentOnly } = validateChannelQueryDelete.parse(req.query);
 
             const channel = await getChannel(channelId);
 
@@ -394,16 +384,31 @@ export default class ChannelsController {
                     "Channel not found",
                 );
 
+            if (channel.spaceId) {
+                await requireSpacePermissions({
+                    spaceId: channel.spaceId,
+                    userId: user.id,
+                    needed: ["ManageChannels"],
+                });
+            } else if (
+                channel.ownerId &&
+                BigInt(channel.ownerId) !== BigInt(user.id)
+            ) {
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You do not have permission to delete this channel",
+                );
+            }
+
             let deletedChannels: APIChannel[] = [];
 
-            if (parentOnly === false && channel.type === ChannelType.Category) {
+            if (parentOnly === false && channel.type === ChannelType.Category)
                 deletedChannels = await execNormalizedMany<APIChannel>(
                     db
                         .delete(channelsTable)
                         .where(eq(channelsTable.parentId, BigInt(channel.id)))
                         .returning(),
                 );
-            }
 
             await db
                 .delete(channelsTable)

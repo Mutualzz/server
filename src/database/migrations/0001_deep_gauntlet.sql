@@ -1,1 +1,0 @@
-ALTER TABLE "user_settings" ADD COLUMN "preferEmbossed" boolean DEFAULT false NOT NULL;

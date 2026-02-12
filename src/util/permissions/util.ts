@@ -1,45 +1,38 @@
+import type { Snowflake } from "@mutualzz/types";
+import type { getChannelOverwrites } from "../Helpers";
+
 export const ALL_BITS = BigInt("0xffffffffffffffff");
 
 export type RequireMode = "All" | "Any";
 
-const applyOverwrite = (perms: bigint, allow: bigint, deny: bigint): bigint => {
-    perms &= ~deny;
-    perms |= allow;
-    return perms;
-};
-
-interface Overwrites {
-    roleId: string | null;
-    userId: string | null;
-    allow: bigint;
-    deny: bigint;
-}
 interface ChannelOverwritesOptions {
-    basePerms: bigint;
-    everyoneRoleId: string | null;
-    memberRoleIds: string[];
-    userId: string;
-    overwrites: Overwrites[];
+    baseBits: bigint;
+    everyoneRoleId: bigint | null;
+    memberRoleIds: bigint[];
+    userId: Snowflake;
+    overwrites: Awaited<ReturnType<typeof getChannelOverwrites>>;
 }
-const applyChannelOverwrites = ({
-    basePerms,
+export const applyChannelOverwrites = ({
+    baseBits,
     everyoneRoleId,
     memberRoleIds,
     userId,
     overwrites,
 }: ChannelOverwritesOptions): bigint => {
-    let perms = basePerms;
+    let bits = baseBits;
+
+    const apply = (allow: bigint, deny: bigint) => {
+        bits &= ~deny;
+        bits |= allow;
+    };
 
     if (everyoneRoleId) {
         const everyoneOverwrite = overwrites.find(
-            (ow) => ow.roleId === everyoneRoleId,
+            (ow) => BigInt(ow.roleId ?? 0) === everyoneRoleId,
         );
+
         if (everyoneOverwrite)
-            perms = applyOverwrite(
-                perms,
-                everyoneOverwrite.allow,
-                everyoneOverwrite.deny,
-            );
+            apply(everyoneOverwrite.allow, everyoneOverwrite.deny);
     }
 
     let roleAllow = 0n;
@@ -47,21 +40,16 @@ const applyChannelOverwrites = ({
 
     for (const overwrite of overwrites) {
         if (!overwrite.roleId) continue;
-        if (!memberRoleIds.includes(overwrite.roleId)) continue;
+        if (!memberRoleIds.includes(BigInt(overwrite.roleId))) continue;
 
         roleAllow |= overwrite.allow;
         roleDeny |= overwrite.deny;
     }
 
-    perms = applyOverwrite(perms, roleAllow, roleDeny);
+    apply(roleAllow, roleDeny);
 
-    const memberOverwrite = overwrites.find((ow) => ow.userId === userId);
-    if (memberOverwrite)
-        perms = applyOverwrite(
-            perms,
-            memberOverwrite.allow,
-            memberOverwrite.deny,
-        );
+    const memberOverwrite = overwrites.find((o) => o.userId === BigInt(userId));
+    if (memberOverwrite) apply(memberOverwrite.allow, memberOverwrite.deny);
 
-    return perms;
+    return bits;
 };

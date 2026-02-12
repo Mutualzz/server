@@ -11,9 +11,9 @@ import {
     spaceMembersTable,
     spacesTable,
     toPublicUser,
+    spaceMemberRolesTable,
     userSettingsTable,
 } from "@mutualzz/database";
-import { spaceMemberRolesTable } from "@mutualzz/database/schemas/spaces/SpaceMemberRoles";
 import { generateHash } from "@mutualzz/rest/util";
 import type {
     APIChannel,
@@ -22,7 +22,13 @@ import type {
     APISpaceMember,
     APIUserSettings,
 } from "@mutualzz/types";
-import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
+import {
+    ChannelType,
+    HttpException,
+    HttpStatusCode,
+    permissionFlags,
+    roleFlags,
+} from "@mutualzz/types";
 import {
     bucketName,
     emitEvent,
@@ -148,6 +154,11 @@ export default class SpacesController {
                             id: BigInt(newSpace.id),
                             name: "@everyone",
                             spaceId: BigInt(newSpace.id),
+                            flags: roleFlags.Everyone,
+                            permissions:
+                                permissionFlags.ViewChannel |
+                                permissionFlags.SendMessages |
+                                permissionFlags.CreateInvites,
                         })
                         .returning()
                         .then((res) => res[0]),
@@ -159,7 +170,7 @@ export default class SpacesController {
                         "Failed to create default role",
                     );
 
-                let newMember = await execNormalized<APISpaceMember>(
+                const newMember = await execNormalized<APISpaceMember>(
                     tx
                         .insert(spaceMembersTable)
                         .values({
@@ -207,7 +218,7 @@ export default class SpacesController {
                         .insert(channelsTable)
                         .values({
                             id: BigInt(Snowflake.generate()),
-                            type: ChannelType.Text, // Text
+                            type: ChannelType.Text,
                             spaceId: BigInt(newSpace.id),
                             name: "General",
                             position: 0,
@@ -437,7 +448,7 @@ export default class SpacesController {
 
             const { id: spaceId } = validateSpaceGetOneParams.parse(req.params);
 
-            let space = await getSpace(spaceId);
+            const space = await getSpace(spaceId);
 
             if (!space)
                 throw new HttpException(

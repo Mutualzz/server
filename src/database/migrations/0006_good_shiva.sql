@@ -1,1 +1,0 @@
-ALTER TABLE "discord_users" ALTER COLUMN "birthday" SET DATA TYPE text;

@@ -20,6 +20,7 @@ import {
     execNormalizedMany,
     getMember,
     getSpace,
+    requireSpacePermissions,
 } from "@mutualzz/util";
 import {
     validateMembersAddParams,
@@ -52,11 +53,11 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            if (!(await getMember(space.id, user.id, true)))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You are not a member of this space",
-                );
+            await requireSpacePermissions({
+                spaceId: space.id,
+                userId: user.id,
+                needed: ["ViewChannel"],
+            });
 
             let members = await getCache("spaceMembers", space.id);
             if (!members)
@@ -96,6 +97,12 @@ export default class MembersController {
                     HttpStatusCode.NotFound,
                     "Space not found",
                 );
+
+            await requireSpacePermissions({
+                spaceId: space.id,
+                userId: user.id,
+                needed: ["ViewChannel"],
+            });
 
             const member = await getMember(space.id, memberId || user.id);
 
@@ -213,8 +220,6 @@ export default class MembersController {
                 },
             });
 
-            res.status(HttpStatusCode.Created).json(newMember);
-
             const settings = await execNormalized<APIUserSettings>(
                 db
                     .insert(userSettingsTable)
@@ -240,6 +245,8 @@ export default class MembersController {
                     data: settings,
                 });
             }
+
+            res.status(HttpStatusCode.Created).json(newMember);
         } catch (err) {
             next(err);
         }

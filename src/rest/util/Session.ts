@@ -68,7 +68,7 @@ export const verifySessionToken = async (token: string) => {
         const raw = await redis.get(`rest:sessions:${token}`);
         if (!raw) return null;
 
-        session = JSON.parse(raw as string);
+        session = JSON.parse(raw);
         if (!session) return null;
 
         sessionLRU.set(token, session);

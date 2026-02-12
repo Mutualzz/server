@@ -1,5 +1,5 @@
 {
-  "id": "0089ebb9-a33b-4cd7-a436-2a29f009c802",
+  "id": "dda56294-069b-45f2-af4a-73f1995cf6eb",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1368,6 +1368,13 @@
           "notNull": true,
           "default": "'spaces'"
         },
+        "preferEmbossed": {
+          "name": "preferEmbossed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "spacePositions": {
           "name": "spacePositions",
           "type": "bigint[]",
@@ -1399,6 +1406,37 @@
           "onUpdate": "cascade"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.discord_users": {
+      "name": "discord_users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "birthday": {
+          "name": "birthday",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "birthdayMessage": {
+          "name": "birthdayMessage",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1563,6 +1601,194 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.channel_permission_overwrites": {
+      "name": "channel_permission_overwrites",
+      "schema": "",
+      "columns": {
+        "channelId": {
+          "name": "channelId",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spaceId": {
+          "name": "spaceId",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "roleId": {
+          "name": "roleId",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allow": {
+          "name": "allow",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "deny": {
+          "name": "deny",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "cpo_channel_id_idx": {
+          "name": "cpo_channel_id_idx",
+          "columns": [
+            {
+              "expression": "channelId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cpo_space_id_idx": {
+          "name": "cpo_space_id_idx",
+          "columns": [
+            {
+              "expression": "spaceId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cpo_role_id_idx": {
+          "name": "cpo_role_id_idx",
+          "columns": [
+            {
+              "expression": "roleId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cpo_user_id_idx": {
+          "name": "cpo_user_id_idx",
+          "columns": [
+            {
+              "expression": "userId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "channel_permission_overwrites_channelId_channels_id_fk": {
+          "name": "channel_permission_overwrites_channelId_channels_id_fk",
+          "tableFrom": "channel_permission_overwrites",
+          "tableTo": "channels",
+          "columnsFrom": [
+            "channelId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "channel_permission_overwrites_spaceId_spaces_id_fk": {
+          "name": "channel_permission_overwrites_spaceId_spaces_id_fk",
+          "tableFrom": "channel_permission_overwrites",
+          "tableTo": "spaces",
+          "columnsFrom": [
+            "spaceId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "channel_permission_overwrites_roleId_roles_id_fk": {
+          "name": "channel_permission_overwrites_roleId_roles_id_fk",
+          "tableFrom": "channel_permission_overwrites",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "roleId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "channel_permission_overwrites_userId_users_id_fk": {
+          "name": "channel_permission_overwrites_userId_users_id_fk",
+          "tableFrom": "channel_permission_overwrites",
+          "tableTo": "users",
+          "columnsFrom": [
+            "userId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "channel_permission_overwrites_channelId_roleId_userId_pk": {
+          "name": "channel_permission_overwrites_channelId_roleId_userId_pk",
+          "columns": [
+            "channelId",
+            "roleId",
+            "userId"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

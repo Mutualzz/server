@@ -1,5 +1,6 @@
 import { getCache, setCache } from "@mutualzz/cache";
 import {
+    channelPermissionOverwritesTable,
     channelsTable,
     db,
     rolesTable,
@@ -224,7 +225,7 @@ export async function getMember(
 }
 
 export async function getEveryoneRole(spaceId: Snowflake) {
-    const role = await db
+    return db
         .select({
             id: rolesTable.id,
             permissions: rolesTable.permissions,
@@ -241,12 +242,10 @@ export async function getEveryoneRole(spaceId: Snowflake) {
         .limit(1)
         .then((res) => res[0])
         .catch(() => null);
-
-    return role;
 }
 
 export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
-    const rows = await db
+    return db
         .select({
             id: rolesTable.id,
             permissions: rolesTable.permissions,
@@ -261,6 +260,18 @@ export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
                 eq(spaceMemberRolesTable.userId, BigInt(userId)),
             ),
         );
+}
 
-    return rows;
+export async function getChannelOverwrites(channelId: Snowflake) {
+    return db
+        .select({
+            roleId: channelPermissionOverwritesTable.roleId,
+            userId: channelPermissionOverwritesTable.userId,
+            allow: channelPermissionOverwritesTable.allow,
+            deny: channelPermissionOverwritesTable.deny,
+        })
+        .from(channelPermissionOverwritesTable)
+        .where(
+            eq(channelPermissionOverwritesTable.channelId, BigInt(channelId)),
+        );
 }

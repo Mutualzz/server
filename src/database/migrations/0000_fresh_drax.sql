@@ -118,8 +118,15 @@ CREATE TABLE "user_settings" (
 	"currentTheme" text,
 	"currentIcon" text,
 	"preferredMode" "preferred_mode" DEFAULT 'spaces' NOT NULL,
+	"preferEmbossed" boolean DEFAULT false NOT NULL,
 	"spacePositions" bigint[] DEFAULT '{}' NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "discord_users" (
+	"id" bigint PRIMARY KEY NOT NULL,
+	"birthday" text,
+	"birthdayMessage" bigint
 );
 --> statement-breakpoint
 CREATE TABLE "messages" (
@@ -134,6 +141,18 @@ CREATE TABLE "messages" (
 	"nonce" bigint,
 	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "channel_permission_overwrites" (
+	"channelId" bigint NOT NULL,
+	"spaceId" bigint NOT NULL,
+	"roleId" bigint,
+	"userId" bigint,
+	"allow" bigint DEFAULT 0 NOT NULL,
+	"deny" bigint DEFAULT 0 NOT NULL,
+	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
+	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "channel_permission_overwrites_channelId_roleId_userId_pk" PRIMARY KEY("channelId","roleId","userId")
 );
 --> statement-breakpoint
 ALTER TABLE "channels" ADD CONSTRAINT "channels_spaceId_spaces_id_fk" FOREIGN KEY ("spaceId") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -155,6 +174,10 @@ ALTER TABLE "themes" ADD CONSTRAINT "themes_authorId_users_id_fk" FOREIGN KEY ("
 ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE cascade;--> statement-breakpoint
 ALTER TABLE "messages" ADD CONSTRAINT "messages_channelId_channels_id_fk" FOREIGN KEY ("channelId") REFERENCES "public"."channels"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "messages" ADD CONSTRAINT "messages_spaceId_spaces_id_fk" FOREIGN KEY ("spaceId") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "channel_permission_overwrites" ADD CONSTRAINT "channel_permission_overwrites_channelId_channels_id_fk" FOREIGN KEY ("channelId") REFERENCES "public"."channels"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "channel_permission_overwrites" ADD CONSTRAINT "channel_permission_overwrites_spaceId_spaces_id_fk" FOREIGN KEY ("spaceId") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "channel_permission_overwrites" ADD CONSTRAINT "channel_permission_overwrites_roleId_roles_id_fk" FOREIGN KEY ("roleId") REFERENCES "public"."roles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "channel_permission_overwrites" ADD CONSTRAINT "channel_permission_overwrites_userId_users_id_fk" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "channel_space_id_idx" ON "channels" USING btree ("spaceId");--> statement-breakpoint
 CREATE INDEX "channel_owner_id_idx" ON "channels" USING btree ("ownerId");--> statement-breakpoint
 CREATE INDEX "channel_parent_id_idx" ON "channels" USING btree ("parentId");--> statement-breakpoint
@@ -185,18 +208,8 @@ CREATE INDEX "theme_created_at_idx" ON "themes" USING btree ("createdAt");--> st
 CREATE INDEX "user_created_at_idx" ON "users" USING btree ("createdAt");--> statement-breakpoint
 CREATE INDEX "message_channel_id_idx" ON "messages" USING btree ("channelId");--> statement-breakpoint
 CREATE INDEX "message_created_at_idx" ON "messages" USING btree ("createdAt");--> statement-breakpoint
-CREATE INDEX "message_channel_created_at_idx" ON "messages" USING btree ("channelId","createdAt");
-
-CREATE OR REPLACE FUNCTION assign_default_role()
-RETURNS TRIGGER AS $$
-BEGIN
-    INSERT INTO space_member_roles (spaceId, userId, id, assignedAt)
-    VALUES (NEW.spaceId, NEW.userId, NEW.spaceId, NOW()); -- 12345 is your default role id
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER after_member_insert
-AFTER INSERT ON space_members
-FOR EACH ROW
-EXECUTE FUNCTION assign_default_role();
+CREATE INDEX "message_channel_created_at_idx" ON "messages" USING btree ("channelId","createdAt");--> statement-breakpoint
+CREATE INDEX "cpo_channel_id_idx" ON "channel_permission_overwrites" USING btree ("channelId");--> statement-breakpoint
+CREATE INDEX "cpo_space_id_idx" ON "channel_permission_overwrites" USING btree ("spaceId");--> statement-breakpoint
+CREATE INDEX "cpo_role_id_idx" ON "channel_permission_overwrites" USING btree ("roleId");--> statement-breakpoint
+CREATE INDEX "cpo_user_id_idx" ON "channel_permission_overwrites" USING btree ("userId");

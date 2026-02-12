@@ -3,6 +3,7 @@ import {
     authUserLRU,
     channelLRU,
     channelsLRU,
+    inviteEditLRU,
     inviteLRU,
     invitesLRU,
     messageLRU,
@@ -26,7 +27,6 @@ export const caches = {
     spaceIcon: spaceIconCache,
 
     // REST
-
     authUser: authUserLRU,
     channels: channelsLRU,
     channel: channelLRU,
@@ -36,6 +36,7 @@ export const caches = {
     spaceMembers: spaceMembersLRU,
     invites: invitesLRU,
     invite: inviteLRU,
+    inviteEdit: inviteEditLRU,
     messages: messagesLRU,
     message: messageLRU,
     user: userLRU,

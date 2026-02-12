@@ -5,8 +5,13 @@ import {
     setCache,
 } from "@mutualzz/cache";
 import { channelsTable, db, messagesTable } from "@mutualzz/database";
-import type { APIMessage } from "@mutualzz/types";
-import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
+import type { APIMessage, BitField, PermissionFlags } from "@mutualzz/types";
+import {
+    ChannelType,
+    HttpException,
+    HttpStatusCode,
+    MessageType,
+} from "@mutualzz/types";
 import {
     buildEmbeds,
     emitEvent,
@@ -17,6 +22,7 @@ import {
     getSpace,
     getUser,
     Snowflake,
+    requireChannelPermissions,
 } from "@mutualzz/util";
 import {
     validateMessageBodyPut,
@@ -82,6 +88,13 @@ export default class MessagesController {
                         );
             }
 
+            if (channel.spaceId)
+                await requireChannelPermissions({
+                    channelId: channel.id,
+                    userId: user.id,
+                    needed: ["ViewChannel", "SendMessages"],
+                });
+
             if (nonce) {
                 const existingMessage = await execNormalized<APIMessage>(
                     db.query.messagesTable.findFirst({
@@ -106,14 +119,16 @@ export default class MessagesController {
                 db
                     .insert(messagesTable)
                     .values({
-                        // @ts-expect-error for some reason ID is not recognized as a field
                         id: BigInt(Snowflake.generate()),
-                        authorId: user.id,
+                        authorId: BigInt(user.id),
                         nonce: nonce ? BigInt(nonce) : undefined,
-                        channelId: channel.id,
-                        spaceId: channel.spaceId,
+                        channelId: BigInt(channel.id),
+                        spaceId: channel.spaceId
+                            ? BigInt(channel.spaceId)
+                            : undefined,
                         content,
                         embeds: await buildEmbeds(content || ""),
+                        type: MessageType.Default,
                     })
                     .returning()
                     .then((r) => r[0]),
@@ -156,6 +171,7 @@ export default class MessagesController {
                 },
             });
 
+            await invalidateCache("messages", `${channel.id}*`);
             res.status(HttpStatusCode.Created).json(message);
         } catch (err) {
             next(err);
@@ -181,6 +197,13 @@ export default class MessagesController {
                     HttpStatusCode.NotFound,
                     "Channel not found",
                 );
+
+            if (channel.spaceId)
+                await requireChannelPermissions({
+                    channelId: channel.id,
+                    userId: user.id,
+                    needed: ["ViewChannel"],
+                });
 
             let message = await getCache("message", messageId);
             if (!message)
@@ -217,7 +240,6 @@ export default class MessagesController {
                     .set({
                         content: content || message.content,
                         embeds: await buildEmbeds(content || ""),
-                        updatedAt: new Date(),
                     })
                     .where(eq(messagesTable.id, BigInt(message.id)))
                     .returning()
@@ -244,6 +266,7 @@ export default class MessagesController {
                 data: newMessage,
             });
 
+            await invalidateCache("messages", `${channel.id}*`);
             res.status(HttpStatusCode.Success).json(newMessage);
         } catch (err) {
             next(err);
@@ -292,6 +315,13 @@ export default class MessagesController {
                     );
                 }
             }
+
+            if (channel.spaceId)
+                await requireChannelPermissions({
+                    channelId: channel.id,
+                    userId: user.id,
+                    needed: ["ViewChannel"],
+                });
 
             if (
                 channel.type !== ChannelType.Text &&
@@ -462,6 +492,17 @@ export default class MessagesController {
                     "Channel not found",
                 );
 
+            let permissions: BitField<PermissionFlags> | null = null;
+            if (channel.spaceId) {
+                const { permissions: perms } = await requireChannelPermissions({
+                    channelId: channel.id,
+                    userId: user.id,
+                    needed: ["ViewChannel"],
+                });
+
+                permissions = perms;
+            }
+
             let message = await getCache("message", messageId);
             if (!message)
                 message = await execNormalized<APIMessage>(
@@ -483,10 +524,14 @@ export default class MessagesController {
                     "Message not found",
                 );
 
-            if (BigInt(message.authorId) !== BigInt(user.id))
+            const isAuthor = BigInt(message.authorId) === BigInt(user.id);
+            const canModerate =
+                Boolean(channel.spaceId) && permissions?.has("ManageMessages");
+
+            if (!isAuthor && !canModerate)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
-                    "You can only delete your own messages",
+                    "Missing permission",
                 );
 
             await db

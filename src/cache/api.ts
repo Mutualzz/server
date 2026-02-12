@@ -67,6 +67,13 @@ export const inviteLRU = new LRUCache<string, APIInvite>({
     ttl: 1000 * 30,
 });
 
+export const inviteEditLRU = new LRUCache<string, Pick<APIInvite, "inviterId">>(
+    {
+        max: 500,
+        ttl: 1000 * 60 * 5,
+    },
+);
+
 // [END] Invite Caches
 
 // [START] Message Caches

@@ -49,6 +49,7 @@ router.delete(
     createLimiter(60_000, 10),
     InvitesController.delete,
 );
+router.post("/:spaceId/invites/:code/keepalive", InvitesController.keepAlive);
 
 // Members
 router.get(

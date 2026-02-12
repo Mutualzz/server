@@ -11,6 +11,7 @@ import {
 import { messagesTable } from "./Message";
 import { spacesTable } from "./spaces";
 import { usersTable } from "./users";
+import { channelPermissionOverwritesTable } from "./ChannelPermissionOverwrite";
 
 export const channelsTable = pgTable(
     "channels",
@@ -90,4 +91,5 @@ export const channelRelations = relations(channelsTable, ({ one, many }) => ({
         fields: [channelsTable.lastMessageId],
         references: [messagesTable.id],
     }),
+    overwrites: many(channelPermissionOverwritesTable),
 }));

@@ -23,7 +23,7 @@ router.delete(
 // Message management
 router.post(
     "/:channelId/messages",
-    createLimiter(10_000, 10),
+    createLimiter(5_000, 10),
     MessagesController.create,
 );
 router.patch(

@@ -4,6 +4,7 @@ import {
     HttpStatusCode,
     permissionFlags,
     type PermissionFlag,
+    type Snowflake,
 } from "@mutualzz/types";
 import { ALL_BITS, type RequireMode } from "./util";
 import {
@@ -14,8 +15,8 @@ import {
 } from "../Helpers";
 
 interface ResolveSpacePermsissionsOptions {
-    spaceOwnerId: string;
-    userId: string;
+    spaceOwnerId: Snowflake;
+    userId: Snowflake;
     everyonePerms: bigint;
     rolePerms: bigint[];
 }
@@ -39,8 +40,8 @@ export const resolveSpacePermissions = ({
 };
 
 interface RequireSpacePermissionsOptions {
-    spaceId: string;
-    userId: string;
+    spaceId: Snowflake;
+    userId: Snowflake;
     needed: PermissionFlag[];
     mode?: RequireMode;
 }

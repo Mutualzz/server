@@ -6,3 +6,4 @@ export * from "./users";
 export * from "./discord";
 
 export * from "./Message";
+export * from "./ChannelPermissionOverwrite";

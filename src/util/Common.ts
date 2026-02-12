@@ -68,20 +68,31 @@ export const createLimiter = (ms: number, limit: number) =>
         limit,
         standardHeaders: true,
         legacyHeaders: false,
+
+        skip: (req) => req.method === "OPTIONS",
+
         message: {
             error: "Too many requests",
         },
         store: new RedisStore({
+            prefix: `rl:${ms}:${limit}:`,
+
             sendCommand: (command: string, ...args: string[]) =>
                 redis.call(command, ...args) as Promise<RedisReply>,
         }),
 
         keyGenerator: (req) => {
-            if (req.user) return `u:${req.user.id}`;
+            if (req.user?.id) {
+                const route = req.originalUrl.split("?")[0];
+                return `u:${req.user.id}:${route}`;
+            }
 
-            const ip = req.ip ?? req.socket.remoteAddress ?? "0.0.0.0";
+            const ip = req.ip ?? req.socket.remoteAddress;
 
-            return ipKeyGenerator(ip, 64);
+            if (!ip) return `noip:${req.socket.remotePort ?? "unknown"}`;
+
+            const route = req.originalUrl.split("?")[0];
+            return `ip:${ipKeyGenerator(ip, false)}:${route}`;
         },
     });
 

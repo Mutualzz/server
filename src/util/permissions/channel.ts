@@ -4,10 +4,12 @@ import {
     HttpStatusCode,
     permissionFlags,
     type PermissionFlag,
+    type Snowflake,
 } from "@mutualzz/types";
-import type { RequireMode } from "./util";
+import { applyChannelOverwrites, type RequireMode } from "./util";
 import {
     getChannel,
+    getChannelOverwrites,
     getEveryoneRole,
     getMember,
     getMemberRoles,
@@ -16,8 +18,8 @@ import {
 import { resolveSpacePermissions } from "./space";
 
 interface RequireChannelPermissionsOptions {
-    channelId: string;
-    userId: string;
+    channelId: Snowflake;
+    userId: Snowflake;
     needed: PermissionFlag[];
     mode?: RequireMode;
 }
@@ -27,7 +29,7 @@ export const requireChannelPermissions = async ({
     needed,
     mode = "All",
 }: RequireChannelPermissionsOptions) => {
-    const channel = await getChannel(channelId);
+    const channel = await getChannel(channelId.toString());
     if (!channel)
         throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
     if (!channel.spaceId)
@@ -40,7 +42,7 @@ export const requireChannelPermissions = async ({
     if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
 
-    if (userId !== space.ownerId) {
+    if (BigInt(userId) !== BigInt(space.ownerId)) {
         const member = await getMember(space.id, userId);
         if (!member)
             throw new HttpException(
@@ -62,7 +64,15 @@ export const requireChannelPermissions = async ({
     if (userId === space.ownerId) return { space, channel, permissions: base };
     if (base.has("Administrator")) return { space, channel, permissions: base };
 
-    const effectiveBits = base.bits;
+    const overwrites = await getChannelOverwrites(channel.id);
+
+    const effectiveBits = applyChannelOverwrites({
+        baseBits: base.bits,
+        everyoneRoleId: everyoneRole?.id ?? null,
+        memberRoleIds: memberRoles.map((r) => r.id),
+        userId: userId,
+        overwrites,
+    });
 
     const permissions = BitField.fromBits(permissionFlags, effectiveBits);
 
@@ -72,10 +82,7 @@ export const requireChannelPermissions = async ({
             : permissions.hasAny(...needed);
 
     if (!ok)
-        throw new HttpException(
-            HttpStatusCode.Forbidden,
-            "Missing permissions",
-        );
+        throw new HttpException(HttpStatusCode.Forbidden, "Missing permission");
 
     return { space, channel, permissions };
 };
