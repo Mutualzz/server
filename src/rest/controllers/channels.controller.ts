@@ -120,7 +120,7 @@ export default class ChannelsController {
                     );
             }
 
-            let position = 0;
+            let position: number | undefined | null = null;
             if (spaceId) {
                 const space = await getSpace(spaceId);
 
@@ -145,7 +145,7 @@ export default class ChannelsController {
                         .where(eq(channelsTable.spaceId, BigInt(space.id))),
                 );
 
-                position = (maxPosition?.max ?? 0) + 1;
+                position = maxPosition?.max;
             }
 
             const channel = await execNormalized<APIChannel>(
@@ -157,7 +157,7 @@ export default class ChannelsController {
                         spaceId: spaceId ? BigInt(spaceId) : undefined,
                         name,
                         ownerId: ownerId ? BigInt(ownerId) : undefined,
-                        position,
+                        position: (position ?? -1) + 1,
                         parentId: parentId ? BigInt(parentId) : undefined,
                         recipientIds: recipientIds
                             ? recipientIds.map((id) => BigInt(id))

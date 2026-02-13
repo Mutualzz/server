@@ -2,6 +2,7 @@ import { upload } from "@mutualzz/rest";
 import InvitesController from "@mutualzz/rest/controllers/invites.controller";
 import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller";
 import MembersController from "@mutualzz/rest/controllers/spaces/members.controller";
+import RolesController from "@mutualzz/rest/controllers/spaces/roles.controllers";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
@@ -71,6 +72,13 @@ router.delete(
     "/:spaceId/members/@me",
     createLimiter(60_000, 30),
     MembersController.removeMe,
+);
+
+// Roles
+router.put(
+    "/:spaceId/roles",
+    createLimiter(60_000, 30),
+    RolesController.create,
 );
 
 export default router;
