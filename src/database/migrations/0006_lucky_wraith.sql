@@ -1,0 +1,1 @@
+ALTER TABLE "roles" ALTER COLUMN "color" SET DEFAULT '#99aab5';

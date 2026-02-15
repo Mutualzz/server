@@ -1,0 +1,2 @@
+ALTER TABLE "messages" ALTER COLUMN "authorId" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "messages" ADD CONSTRAINT "messages_authorId_users_id_fk" FOREIGN KEY ("authorId") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
