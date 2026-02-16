@@ -74,11 +74,43 @@ router.delete(
     MembersController.removeMe,
 );
 
+// Roles assignments
+router.put(
+    "/:spaceId/members/:userId/roles/:roleId",
+    createLimiter(60_000, 30),
+    MembersController.addRole,
+);
+router.delete(
+    "/:spaceId/members/:userId/roles/:roleId",
+    createLimiter(60_000, 30),
+    MembersController.removeRole,
+);
+
 // Roles
 router.put(
     "/:spaceId/roles",
     createLimiter(60_000, 30),
     RolesController.create,
+);
+router.delete(
+    "/:spaceId/roles/:roleId",
+    createLimiter(60_000, 30),
+    RolesController.delete,
+);
+router.patch(
+    "/:spaceId/roles/:roleId",
+    createLimiter(60_000, 30),
+    RolesController.update,
+);
+router.get(
+    "/:spaceId/roles",
+    createLimiter(60_000, 60),
+    RolesController.getAll,
+);
+router.get(
+    "/:spaceId/roles/:roleId",
+    createLimiter(60_000, 60),
+    RolesController.getOne,
 );
 
 export default router;

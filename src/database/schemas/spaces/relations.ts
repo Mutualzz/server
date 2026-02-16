@@ -27,7 +27,7 @@ export const spaceMemberRoleRelations = relations(
             references: [spaceMembersTable.spaceId, spaceMembersTable.userId],
         }),
         role: one(rolesTable, {
-            fields: [spaceMemberRolesTable.id],
+            fields: [spaceMemberRolesTable.roleId],
             references: [rolesTable.id],
         }),
     }),
@@ -48,9 +48,10 @@ export const spaceMemberRelations = relations(
     }),
 );
 
-export const roleRelations = relations(rolesTable, ({ one }) => ({
+export const roleRelations = relations(rolesTable, ({ one, many }) => ({
     space: one(spacesTable, {
         fields: [rolesTable.spaceId],
         references: [spacesTable.id],
     }),
+    memberRoles: many(spaceMemberRolesTable),
 }));

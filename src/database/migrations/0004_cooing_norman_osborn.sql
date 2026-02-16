@@ -1,0 +1,2 @@
+ALTER TABLE "channel_permission_overwrites" DROP CONSTRAINT "channel_permission_overwrites_channelId_roleId_userId_pk";--> statement-breakpoint
+ALTER TABLE "channel_permission_overwrites" ADD CONSTRAINT "channel_permission_overwrites_channelId_roleId_userId_spaceId_pk" PRIMARY KEY("channelId","roleId","userId","spaceId");

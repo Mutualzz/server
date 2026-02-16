@@ -20,7 +20,9 @@ export const messagesTable = pgTable(
         id: bigint({ mode: "bigint" }).primaryKey(),
         type: smallint().notNull().default(0),
 
-        authorId: bigint({ mode: "bigint" }).notNull(),
+        authorId: bigint({ mode: "bigint" }).references(() => usersTable.id, {
+            onDelete: "set null",
+        }),
         channelId: bigint({ mode: "bigint" })
             .notNull()
             .references(() => channelsTable.id, {

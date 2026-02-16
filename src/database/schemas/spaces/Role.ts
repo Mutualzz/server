@@ -26,7 +26,7 @@ export const rolesTable = pgTable(
             .notNull()
             .default(sql`0`),
         position: smallint().notNull().default(0),
-        color: text().notNull().default(`#99958e`),
+        color: text().notNull().default(`#99aab5`),
         mentionable: boolean().notNull().default(false),
         flags: bigint("flags", { mode: "bigint" })
             .notNull()

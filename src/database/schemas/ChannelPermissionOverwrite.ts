@@ -48,7 +48,14 @@ export const channelPermissionOverwritesTable = pgTable(
             .$onUpdate(() => new Date()),
     },
     (table) => [
-        primaryKey({ columns: [table.channelId, table.roleId, table.userId] }),
+        primaryKey({
+            columns: [
+                table.channelId,
+                table.roleId,
+                table.userId,
+                table.spaceId,
+            ],
+        }),
         index("cpo_channel_id_idx").on(table.channelId),
         index("cpo_space_id_idx").on(table.spaceId),
         index("cpo_role_id_idx").on(table.roleId),

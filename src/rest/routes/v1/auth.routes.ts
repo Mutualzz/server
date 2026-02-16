@@ -1,9 +1,9 @@
 import AuthController from "@mutualzz/rest/controllers/auth.controller";
-import { createRouter } from "@mutualzz/util";
+import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
-router.post(`/login`, AuthController.login);
-router.post(`/register`, AuthController.register);
+router.post(`/login`, createLimiter(30_000, 10), AuthController.login);
+router.post(`/register`, createLimiter(30_000, 10), AuthController.register);
 
 export default router;

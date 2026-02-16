@@ -1,25 +1,35 @@
-import { deleteCache, getCache, setCache } from "@mutualzz/cache";
+import {
+    deleteCache,
+    getCache,
+    invalidateCache,
+    setCache,
+} from "@mutualzz/cache";
 import {
     channelsTable,
     db,
     invitesTable,
+    rolesTable,
     spaceMemberRolesTable,
     spaceMembersTable,
     toPublicUser,
     userSettingsTable,
 } from "@mutualzz/database";
-import type {
-    APIChannel,
-    APISpaceMember,
-    APIUserSettings,
+import {
+    type APIChannel,
+    type APISpaceMember,
+    type APIUserSettings,
+    HttpException,
+    HttpStatusCode,
 } from "@mutualzz/types";
-import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     emitEvent,
     execNormalized,
     execNormalizedMany,
+    filterVisibleChannelsForUser,
     getMember,
-    getSpace,
+    getMemberRoles,
+    getSpaceHydrated,
+    publicUserColumns,
     requireSpacePermissions,
 } from "@mutualzz/util";
 import {
@@ -28,9 +38,17 @@ import {
     validateMembersGetAllQuery,
     validateMembersGetOneParams,
     validateMembersRemoveMeParams,
+    validateRoleMemberParams,
 } from "@mutualzz/validators";
 import { and, eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
+import { permissionFlags } from "@mutualzz/permissions";
+
+function topPos(rows: { position: number }[]) {
+    let t = -1;
+    for (const r of rows) t = Math.max(t, r.position);
+    return t;
+}
 
 export default class MembersController {
     static async getAll(req: Request, res: Response, next: NextFunction) {
@@ -45,7 +63,7 @@ export default class MembersController {
             const { spaceId } = validateMembersGetAllParams.parse(req.params);
             const { limit } = validateMembersGetAllQuery.parse(req.query);
 
-            const space = await getSpace(spaceId);
+            const space = await getSpaceHydrated(spaceId);
 
             if (!space)
                 throw new HttpException(
@@ -53,18 +71,32 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            await requireSpacePermissions({
-                spaceId: space.id,
-                userId: user.id,
-                needed: ["ViewChannel"],
-            });
+            const me = await getMember(space.id, user.id);
+            if (!me)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You are not a member of this space",
+                );
+
+            const visibleChannels = filterVisibleChannelsForUser(
+                space,
+                BigInt(user.id),
+            );
+
+            if (visibleChannels.length === 0)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You do not have access to any channels in this space",
+                );
 
             let members = await getCache("spaceMembers", space.id);
             if (!members)
                 members = await execNormalizedMany<APISpaceMember>(
                     db.query.spaceMembersTable.findMany({
                         with: {
-                            user: true,
+                            user: {
+                                with: publicUserColumns,
+                            },
                         },
                         where: eq(spaceMembersTable.spaceId, BigInt(space.id)),
                         limit,
@@ -90,7 +122,7 @@ export default class MembersController {
                 req.params,
             );
 
-            const space = await getSpace(spaceId);
+            const space = await getSpaceHydrated(spaceId);
 
             if (!space)
                 throw new HttpException(
@@ -98,18 +130,29 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            await requireSpacePermissions({
-                spaceId: space.id,
-                userId: user.id,
-                needed: ["ViewChannel"],
-            });
-
-            const member = await getMember(space.id, memberId || user.id);
-
-            if (!member)
+            const me = await getMember(space.id, user.id);
+            if (!me)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
-                    "You are not a member of this space",
+                    "Not a member of this space",
+                );
+
+            const visibleChannels = filterVisibleChannelsForUser(
+                space,
+                BigInt(user.id),
+            );
+
+            if (visibleChannels.length === 0)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You do not have access to any channels in this space",
+                );
+
+            const member = await getMember(space.id, memberId || user.id);
+            if (!member)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Member not found",
                 );
 
             return res.status(HttpStatusCode.Success).json(member);
@@ -129,7 +172,7 @@ export default class MembersController {
 
             const { spaceId } = validateMembersAddParams.parse(req.params);
 
-            const space = await getSpace(spaceId);
+            const space = await getSpaceHydrated(spaceId);
 
             if (!space)
                 throw new HttpException(
@@ -175,7 +218,7 @@ export default class MembersController {
                 );
 
             await db.insert(spaceMemberRolesTable).values({
-                id: BigInt(space.id),
+                roleId: BigInt(space.id),
                 userId: BigInt(user.id),
                 spaceId: BigInt(space.id),
             });
@@ -186,6 +229,16 @@ export default class MembersController {
                 channels = await execNormalizedMany<APIChannel>(
                     db.query.channelsTable.findMany({
                         where: eq(channelsTable.spaceId, BigInt(space.id)),
+                        with: {
+                            parent: true,
+                            lastMessage: {
+                                with: {
+                                    author: {
+                                        columns: publicUserColumns,
+                                    },
+                                },
+                            },
+                        },
                     }),
                 );
 
@@ -193,7 +246,10 @@ export default class MembersController {
                 members = await execNormalizedMany<APISpaceMember>(
                     db.query.spaceMembersTable.findMany({
                         with: {
-                            user: true,
+                            user: {
+                                columns: publicUserColumns,
+                            },
+                            roles: true,
                         },
                         where: eq(spaceMembersTable.spaceId, BigInt(space.id)),
                     }),
@@ -246,6 +302,8 @@ export default class MembersController {
                 });
             }
 
+            await invalidateCache("spaceHydrated", spaceId);
+
             res.status(HttpStatusCode.Created).json(newMember);
         } catch (err) {
             next(err);
@@ -263,7 +321,7 @@ export default class MembersController {
 
             const { spaceId } = validateMembersRemoveMeParams.parse(req.params);
 
-            const space = await getSpace(spaceId);
+            const space = await getSpaceHydrated(spaceId);
 
             if (!space)
                 throw new HttpException(
@@ -278,7 +336,6 @@ export default class MembersController {
                 );
 
             const member = await getMember(space.id, user.id);
-
             if (!member)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -287,9 +344,15 @@ export default class MembersController {
 
             await db
                 .delete(spaceMembersTable)
-                .where(eq(spaceMembersTable.userId, BigInt(member.userId)));
+                .where(
+                    and(
+                        eq(spaceMembersTable.spaceId, BigInt(space.id)),
+                        eq(spaceMembersTable.userId, BigInt(member.userId)),
+                    ),
+                );
 
             await deleteCache("spaceMember", `${space.id}:${member.userId}`);
+            await invalidateCache("spaceMembers", space.id);
 
             const data = {
                 user: toPublicUser(user),
@@ -305,10 +368,255 @@ export default class MembersController {
             await emitEvent({
                 event: "SpaceMemberRemove",
                 space_id: space.id,
-                data: data,
+                data,
             });
 
+            await invalidateCache("spaceHydrated", spaceId);
+
             res.status(HttpStatusCode.Success).json(data);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async addRole(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { spaceId, userId, roleId } = validateRoleMemberParams.parse(
+                req.params,
+            );
+
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            if (BigInt(space.ownerId) !== BigInt(user.id)) {
+                const me = await getMember(space.id, user.id);
+                if (!me)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "You are not a member of this space",
+                    );
+            }
+
+            const { permissions: actorPermissions } =
+                await requireSpacePermissions({
+                    spaceId,
+                    userId: user.id,
+                    needed: ["ManageRoles"],
+                });
+
+            const actorIsOwner = BigInt(space.ownerId) === BigInt(user.id);
+            const actorIsAdmin =
+                (actorPermissions.bits & permissionFlags.Administrator) ===
+                permissionFlags.Administrator;
+
+            const targetMember = await getMember(space.id, userId);
+            if (!targetMember)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Member not found",
+                );
+
+            if (BigInt(roleId) === BigInt(space.id))
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "Cannot assign @everyone role",
+                );
+
+            const role = await db.query.rolesTable.findFirst({
+                where: and(
+                    eq(rolesTable.id, BigInt(roleId)),
+                    eq(rolesTable.spaceId, BigInt(space.id)),
+                ),
+            });
+
+            if (!role)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Role not found",
+                );
+
+            if (!actorIsOwner && !actorIsAdmin) {
+                const [actorRoles, targetRoles] = await Promise.all([
+                    getMemberRoles(space.id, user.id),
+                    getMemberRoles(space.id, userId),
+                ]);
+
+                const actorTop = topPos(actorRoles);
+                const targetTop = topPos(targetRoles);
+
+                if (actorTop <= targetTop)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Role hierarchy prevents modifying this member",
+                    );
+
+                if (actorTop <= role.position)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Role hierarchy prevents assigning this role",
+                    );
+            }
+
+            await db
+                .insert(spaceMemberRolesTable)
+                .values({
+                    spaceId: BigInt(space.id),
+                    userId: BigInt(userId),
+                    roleId: BigInt(role.id),
+                })
+                .onConflictDoNothing();
+
+            await Promise.all([
+                invalidateCache("spaceHydrated", space.id),
+                invalidateCache("spaceMember", `${space.id}:${userId}`),
+                invalidateCache("spaceMembers", space.id),
+            ]);
+
+            await emitEvent({
+                event: "SpaceMemberRoleAdd",
+                space_id: space.id,
+                data: {
+                    spaceId,
+                    userId,
+                    roleId: role.id,
+                },
+            });
+
+            res.status(HttpStatusCode.Success).json(role);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async removeRole(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { spaceId, userId, roleId } = validateRoleMemberParams.parse(
+                req.params,
+            );
+
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            if (BigInt(space.ownerId) !== BigInt(user.id)) {
+                const me = await getMember(space.id, user.id);
+                if (!me)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "You are not a member of this space",
+                    );
+            }
+
+            const { permissions: actorPermissions } =
+                await requireSpacePermissions({
+                    spaceId,
+                    userId: user.id,
+                    needed: ["ManageRoles"],
+                });
+
+            const actorIsOwner = BigInt(space.ownerId) === BigInt(user.id);
+            const actorIsAdmin =
+                (actorPermissions.bits & permissionFlags.Administrator) ===
+                permissionFlags.Administrator;
+
+            const targetMember = await getMember(space.id, userId);
+            if (!targetMember)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Member not found",
+                );
+
+            if (BigInt(roleId) === BigInt(space.id))
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "Cannot remove @everyone role",
+                );
+
+            const role = await db.query.rolesTable.findFirst({
+                where: and(
+                    eq(rolesTable.id, BigInt(roleId)),
+                    eq(rolesTable.spaceId, BigInt(space.id)),
+                ),
+            });
+            if (!role)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Role not found",
+                );
+
+            if (!actorIsOwner && !actorIsAdmin) {
+                const [actorRoles, targetRoles] = await Promise.all([
+                    getMemberRoles(space.id, user.id),
+                    getMemberRoles(space.id, userId),
+                ]);
+
+                const actorTop = topPos(actorRoles);
+                const targetTop = topPos(targetRoles);
+
+                if (actorTop <= targetTop) {
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Role hierarchy prevents modifying this member",
+                    );
+                }
+
+                if (actorTop <= role.position) {
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Role hierarchy prevents removing this role",
+                    );
+                }
+            }
+
+            await db
+                .delete(spaceMemberRolesTable)
+                .where(
+                    and(
+                        eq(spaceMemberRolesTable.spaceId, BigInt(space.id)),
+                        eq(spaceMemberRolesTable.userId, BigInt(userId)),
+                        eq(spaceMemberRolesTable.roleId, BigInt(role.id)),
+                    ),
+                )
+                .execute();
+
+            await Promise.all([
+                invalidateCache("spaceHydrated", String(space.id)),
+                invalidateCache("spaceMember", `${space.id}:${userId}`),
+                invalidateCache("spaceMembers", String(space.id)),
+            ]);
+
+            await emitEvent({
+                event: "SpaceMemberRoleRemove",
+                space_id: space.id,
+                data: {
+                    spaceId,
+                    userId,
+                    roleId: role.id,
+                },
+            });
+
+            res.status(HttpStatusCode.NoContent).send();
         } catch (err) {
             next(err);
         }

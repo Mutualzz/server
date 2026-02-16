@@ -13,7 +13,6 @@ import {
     usersTable,
 } from "@mutualzz/database";
 import {
-    roleFlags,
     type APIChannel,
     type APIPrivateUser,
     type APISpace,
@@ -25,6 +24,14 @@ import {
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
+import { roleFlags } from "@mutualzz/permissions";
+
+export const publicUserColumns = {
+    hash: false,
+    dateOfBirth: false,
+    previousAvatars: false,
+    email: false,
+} as const;
 
 export const prepareReadyData = async (user: APIPrivateUser) => {
     const [themes, settings] = await Promise.all([
@@ -49,13 +56,9 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
                 members: {
                     with: {
                         user: {
-                            columns: {
-                                hash: false,
-                                dateOfBirth: false,
-                                previousAvatars: false,
-                                email: false,
-                            },
+                            columns: publicUserColumns,
                         },
+                        roles: true,
                     },
                 },
                 channels: {
@@ -64,17 +67,14 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
                         lastMessage: {
                             with: {
                                 author: {
-                                    columns: {
-                                        hash: false,
-                                        dateOfBirth: false,
-                                        previousAvatars: false,
-                                        email: false,
-                                    },
+                                    columns: publicUserColumns,
                                 },
                             },
                         },
+                        overwrites: true,
                     },
                 },
+                roles: true,
                 owner: true,
             },
             where: or(
@@ -150,6 +150,44 @@ export const getSpace = async (id: string) => {
     if (!space) return null;
 
     await setCache("space", id, space);
+    return space;
+};
+
+export const getSpaceHydrated = async (id: string) => {
+    let space = await getCache("spaceHydrated", id);
+    if (space) return space;
+
+    space = await execNormalized<APISpace>(
+        db.query.spacesTable.findFirst({
+            with: {
+                roles: true,
+                members: {
+                    with: {
+                        user: {
+                            columns: publicUserColumns,
+                        },
+                        roles: {
+                            with: {
+                                role: true,
+                            },
+                        },
+                    },
+                },
+                channels: {
+                    with: {
+                        parent: true,
+                        overwrites: true,
+                    },
+                },
+                owner: true,
+            },
+            where: eq(spacesTable.id, BigInt(id)),
+        }),
+    );
+
+    if (!space) return null;
+
+    await setCache("spaceHydrated", id, space);
     return space;
 };
 
@@ -245,7 +283,7 @@ export async function getEveryoneRole(spaceId: Snowflake) {
 }
 
 export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
-    return db
+    const rows = await db
         .select({
             id: rolesTable.id,
             permissions: rolesTable.permissions,
@@ -253,17 +291,22 @@ export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
             position: rolesTable.position,
         })
         .from(spaceMemberRolesTable)
-        .innerJoin(rolesTable, eq(spaceMemberRolesTable.id, rolesTable.id))
+        .innerJoin(rolesTable, eq(spaceMemberRolesTable.roleId, rolesTable.id))
         .where(
             and(
                 eq(spaceMemberRolesTable.spaceId, BigInt(spaceId)),
                 eq(spaceMemberRolesTable.userId, BigInt(userId)),
             ),
         );
+
+    return rows.map((r) => ({
+        ...r,
+        id: r.id.toString(),
+    }));
 }
 
 export async function getChannelOverwrites(channelId: Snowflake) {
-    return db
+    const rows = await db
         .select({
             roleId: channelPermissionOverwritesTable.roleId,
             userId: channelPermissionOverwritesTable.userId,
@@ -274,4 +317,11 @@ export async function getChannelOverwrites(channelId: Snowflake) {
         .where(
             eq(channelPermissionOverwritesTable.channelId, BigInt(channelId)),
         );
+
+    return rows.map((row) => ({
+        roleId: row.roleId == null ? null : row.roleId.toString(),
+        userId: row.userId == null ? null : row.userId.toString(),
+        allow: row.allow,
+        deny: row.deny,
+    }));
 }

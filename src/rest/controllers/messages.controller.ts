@@ -1,17 +1,7 @@
-import {
-    deleteCache,
-    getCache,
-    invalidateCache,
-    setCache,
-} from "@mutualzz/cache";
+import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
 import { channelsTable, db, messagesTable } from "@mutualzz/database";
-import type { APIMessage, BitField, PermissionFlags } from "@mutualzz/types";
-import {
-    ChannelType,
-    HttpException,
-    HttpStatusCode,
-    MessageType,
-} from "@mutualzz/types";
+import type { APIMessage } from "@mutualzz/types";
+import { ChannelType, HttpException, HttpStatusCode, MessageType, } from "@mutualzz/types";
 import {
     buildEmbeds,
     emitEvent,
@@ -21,16 +11,13 @@ import {
     getMember,
     getSpace,
     getUser,
-    Snowflake,
     requireChannelPermissions,
+    Snowflake,
 } from "@mutualzz/util";
-import {
-    validateMessageBodyPut,
-    validateMessageParamsPatch,
-    validateMessageParamsPut,
-} from "@mutualzz/validators";
+import { validateMessageBodyPut, validateMessageParamsPatch, validateMessageParamsPut, } from "@mutualzz/validators";
 import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
+import { BitField, type PermissionFlags } from "@mutualzz/permissions";
 
 export default class MessagesController {
     static async create(req: Request, res: Response, next: NextFunction) {

@@ -1,12 +1,13 @@
+import { HttpException, HttpStatusCode, type Snowflake } from "@mutualzz/types";
 import {
+    resolveEffectiveChannelBits,
+    hasAll,
+    hasAny,
     BitField,
-    HttpException,
-    HttpStatusCode,
-    permissionFlags,
     type PermissionFlag,
-    type Snowflake,
-} from "@mutualzz/types";
-import { applyChannelOverwrites, type RequireMode } from "./util";
+    permissionFlags,
+} from "@mutualzz/permissions";
+import type { RequireMode } from "./util";
 import {
     getChannel,
     getChannelOverwrites,
@@ -23,6 +24,7 @@ interface RequireChannelPermissionsOptions {
     needed: PermissionFlag[];
     mode?: RequireMode;
 }
+
 export const requireChannelPermissions = async ({
     channelId,
     userId,
@@ -64,22 +66,33 @@ export const requireChannelPermissions = async ({
     if (userId === space.ownerId) return { space, channel, permissions: base };
     if (base.has("Administrator")) return { space, channel, permissions: base };
 
-    const overwrites = await getChannelOverwrites(channel.id);
+    const channelOverwrites = await getChannelOverwrites(channel.id);
 
-    const effectiveBits = applyChannelOverwrites({
+    // Parent/category overwrites apply before channel overwrites.
+    const parentOverwrites = channel.parentId
+        ? await getChannelOverwrites(channel.parentId)
+        : null;
+
+    const effectiveBits = resolveEffectiveChannelBits({
         baseBits: base.bits,
-        everyoneRoleId: everyoneRole?.id ?? null,
-        memberRoleIds: memberRoles.map((r) => r.id),
-        userId: userId,
-        overwrites,
+        userId: String(userId),
+        everyoneRoleId: String(space.id), // @everyone == space.id
+        memberRoleIds: memberRoles.map((r) => String(r.id)),
+        parentOverwrites,
+        channelOverwrites,
     });
 
     const permissions = BitField.fromBits(permissionFlags, effectiveBits);
 
+    const neededBits = needed.reduce<bigint>(
+        (acc, flag) => acc | permissionFlags[flag],
+        0n,
+    );
+
     const ok =
         mode === "All"
-            ? permissions.hasAll(...needed)
-            : permissions.hasAny(...needed);
+            ? hasAll(effectiveBits, neededBits)
+            : hasAny(effectiveBits, neededBits);
 
     if (!ok)
         throw new HttpException(HttpStatusCode.Forbidden, "Missing permission");
@@ -91,6 +104,7 @@ type RequireChannelPermissionOptions = Omit<
     RequireChannelPermissionsOptions,
     "mode" | "needed"
 > & { needed: PermissionFlag };
+
 export const requireChannelPermission = ({
     channelId,
     userId,

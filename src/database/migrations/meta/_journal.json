@@ -15,6 +15,41 @@
       "when": 1770879732610,
       "tag": "0001_talented_malcolm_colcord",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770950263271,
+      "tag": "0002_flippant_machine_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770955610785,
+      "tag": "0003_conscious_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771027118795,
+      "tag": "0004_cooing_norman_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771180913290,
+      "tag": "0005_wet_vengeance",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1771182179480,
+      "tag": "0006_lucky_wraith",
+      "breakpoints": true
     }
   ]
 }

@@ -68,6 +68,8 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
         },
     });
 
+    this.memberListSubs = new Map();
+
     logger.info(
         `Session authenticated: ${this.sessionId} (user: ${this.userId})`,
     );

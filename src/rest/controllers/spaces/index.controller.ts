@@ -22,13 +22,7 @@ import type {
     APISpaceMember,
     APIUserSettings,
 } from "@mutualzz/types";
-import {
-    ChannelType,
-    HttpException,
-    HttpStatusCode,
-    permissionFlags,
-    roleFlags,
-} from "@mutualzz/types";
+import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     bucketName,
     emitEvent,
@@ -49,6 +43,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
+import { permissionFlags, roleFlags } from "@mutualzz/permissions";
 
 export default class SpacesController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -184,7 +179,7 @@ export default class SpacesController {
                 await tx.insert(spaceMemberRolesTable).values({
                     spaceId: BigInt(newSpace.id),
                     userId: BigInt(user.id),
-                    id: BigInt(everyoneRole.id),
+                    roleId: BigInt(everyoneRole.id),
                 });
 
                 if (!newMember)

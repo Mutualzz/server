@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "channel_space_parent_position_uq" ON "channels" USING btree ("spaceId","parentId","position");

@@ -39,6 +39,11 @@ export const spaceLRU = new LRUCache<string, APISpace>({
     ttl: 1000 * 60 * 5,
 });
 
+export const spaceHydratedLRU = new LRUCache<string, APISpace>({
+    max: 1000,
+    ttl: 1000 * 60 * 5,
+});
+
 export const spacesLRU = new LRUCache<string, APISpace[]>({
     max: 500,
     ttl: 1000 * 60 * 5,

@@ -7,6 +7,7 @@ import {
     smallint,
     text,
     timestamp,
+    uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { messagesTable } from "./Message";
 import { spacesTable } from "./spaces";
@@ -64,6 +65,11 @@ export const channelsTable = pgTable(
             .$onUpdate(() => new Date()),
     },
     (table) => [
+        uniqueIndex("channel_space_parent_position_uq").on(
+            table.spaceId,
+            table.parentId,
+            table.position,
+        ),
         index("channel_space_id_idx").on(table.spaceId),
         index("channel_owner_id_idx").on(table.ownerId),
         index("channel_parent_id_idx").on(table.parentId),
@@ -93,3 +99,13 @@ export const channelRelations = relations(channelsTable, ({ one, many }) => ({
     }),
     overwrites: many(channelPermissionOverwritesTable),
 }));
+
+export const channelOverwriteRelations = relations(
+    channelPermissionOverwritesTable,
+    ({ one }) => ({
+        channel: one(channelsTable, {
+            fields: [channelPermissionOverwritesTable.channelId],
+            references: [channelsTable.id],
+        }),
+    }),
+);

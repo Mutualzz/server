@@ -5,15 +5,16 @@ import {
     spacesTable,
 } from "@mutualzz/database";
 import {
-    listenEvent,
-    RabbitMQ,
     type EventOpts,
+    listenEvent,
     type ListenEventOpts,
+    RabbitMQ,
 } from "@mutualzz/util";
 import type { Channel } from "amqplib";
 import { eq } from "drizzle-orm";
 import { logger } from "./Logger";
 import { Send, type WebSocket } from "./util";
+import { resyncMemberListWindows } from "@mutualzz/gateway/opcodes/LazyRequest.ts";
 
 export async function setupListener(this: WebSocket) {
     if (!this.userId) {
@@ -27,6 +28,8 @@ export async function setupListener(this: WebSocket) {
     this.events = this.events ?? {};
     this.member_events = this.member_events ?? {};
     this.listenOptions = this.listenOptions ?? {};
+
+    this.memberListSubs = this.memberListSubs ?? new Map();
 
     const userId = BigInt(this.userId);
 
@@ -122,12 +125,14 @@ export async function setupListener(this: WebSocket) {
             Object.values(this.events).forEach((x) => x?.());
             Object.values(this.member_events).forEach((x) => x?.());
         }
+
+        this.memberListSubs?.clear();
     });
 }
 
 async function consume(this: WebSocket, opts: EventOpts) {
     const { data, event } = opts;
-    const id = String(data.id);
+    const id = String(data?.id);
 
     const consumer = consume.bind(this);
     const listenOpts = opts as ListenEventOpts;
@@ -137,6 +142,18 @@ async function consume(this: WebSocket, opts: EventOpts) {
             const mid = String(data?.user?.id);
             this.member_events?.[mid]?.();
             delete this.member_events?.[mid];
+
+            const spaceId = String(data?.spaceId ?? data?.space_id);
+            if (spaceId) {
+                try {
+                    await resyncMemberListWindows.call(this, spaceId);
+                } catch (err) {
+                    logger.error(
+                        "[MemberList] resync failed (SpaceMemberRemove):",
+                        err,
+                    );
+                }
+            }
             break;
         }
         case "SpaceMemberAdd": {
@@ -148,18 +165,52 @@ async function consume(this: WebSocket, opts: EventOpts) {
                 consumer,
                 this.listenOptions,
             );
+
+            const spaceId = String(data?.spaceId ?? data?.space_id);
+            if (spaceId) {
+                try {
+                    await resyncMemberListWindows.call(this, spaceId);
+                } catch (err) {
+                    logger.error(
+                        "[MemberList] resync failed (SpaceMemberAdd):",
+                        err,
+                    );
+                }
+            }
             break;
         }
         case "SpaceMemberUpdate": {
             const mid = String(data?.user?.id);
             if (!this.member_events?.[mid]) break;
             this.member_events[mid]();
+
+            const spaceId = String(data?.spaceId ?? data?.space_id);
+            if (spaceId) {
+                try {
+                    await resyncMemberListWindows.call(this, spaceId);
+                } catch (err) {
+                    logger.error(
+                        "[MemberList] resync failed (SpaceMemberUpdate):",
+                        err,
+                    );
+                }
+            }
             break;
         }
         case "ChannelDelete":
         case "SpaceDelete": {
             this.events[id]?.();
             delete this.events[id];
+
+            if (event === "SpaceDelete") {
+                const spaceId = String(data?.id);
+                if (spaceId && this.memberListSubs) {
+                    for (const key of this.memberListSubs.keys()) {
+                        if (key.startsWith(`${spaceId}:`))
+                            this.memberListSubs.delete(key);
+                    }
+                }
+            }
             break;
         }
         case "ChannelCreate":
@@ -207,6 +258,31 @@ async function consume(this: WebSocket, opts: EventOpts) {
                 this.events[cid] = await listenEvent(cid, consumer, listenOpts);
             }
 
+            break;
+        }
+        case "RoleCreate":
+        case "RoleUpdate":
+        case "RoleDelete": {
+            const spaceId = String(data?.spaceId ?? data?.space_id);
+            if (spaceId) {
+                try {
+                    await resyncMemberListWindows.call(this, spaceId);
+                } catch (err) {
+                    logger.error(`[MemberList] resync failed (${event}):`, err);
+                }
+            }
+            break;
+        }
+        case "SpaceMemberRoleAdd":
+        case "SpaceMemberRoleRemove": {
+            const spaceId = String(data?.spaceId ?? data?.space_id);
+            if (spaceId) {
+                try {
+                    await resyncMemberListWindows.call(this, spaceId);
+                } catch (err) {
+                    logger.error(`[MemberList] resync failed (${event}):`, err);
+                }
+            }
             break;
         }
         default:

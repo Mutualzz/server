@@ -46,5 +46,5 @@ async function main() {
 }
 
 main().catch((error) => {
-    logger.error(`Error starting server: ${error}`);
+    logger.error("Error starting server", error);
 });

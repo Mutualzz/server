@@ -1,4 +1,4 @@
-import { deleteCache, setCache } from "@mutualzz/cache";
+import { deleteCache, invalidateCache, setCache } from "@mutualzz/cache";
 import { channelsTable, db } from "@mutualzz/database";
 import type { APIChannel } from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
@@ -7,7 +7,7 @@ import {
     execNormalized,
     execNormalizedMany,
     getChannel,
-    getSpace,
+    getSpaceHydrated,
     Snowflake,
     requireChannelPermissions,
     requireSpacePermissions,
@@ -21,7 +21,7 @@ import {
     validateChannelParamsUpdate,
     validateChannelQueryDelete,
 } from "@mutualzz/validators";
-import { eq, max, sql } from "drizzle-orm";
+import { and, eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class ChannelsController {
@@ -119,62 +119,119 @@ export default class ChannelsController {
                         ],
                     );
             }
-
-            let position: number | undefined | null = null;
-            if (spaceId) {
-                const space = await getSpace(spaceId);
-
-                if (!space)
-                    throw new HttpException(
-                        HttpStatusCode.NotFound,
-                        "Space not found",
-                    );
-
-                await requireSpacePermissions({
-                    spaceId: space.id,
-                    userId: user.id,
-                    needed: ["ManageChannels"],
+            if (!spaceId) {
+                const channel = await execNormalized<APIChannel>(
+                    db
+                        .insert(channelsTable)
+                        .values({
+                            id: BigInt(Snowflake.generate()),
+                            type,
+                            name,
+                            ownerId: ownerId ? BigInt(ownerId) : undefined,
+                            parentId: null,
+                            recipientIds: recipientIds
+                                ? recipientIds.map((id) => BigInt(id))
+                                : undefined,
+                            flags: 0n,
+                        })
+                        .returning()
+                        .then((res) => res[0]),
+                ).then(async (channel) => {
+                    if (!channel) return null;
+                    return channel.parentId
+                        ? {
+                              ...channel,
+                              parent: await getChannel(channel.parentId),
+                          }
+                        : channel;
                 });
 
-                const maxPosition = await execNormalized<{
-                    max: number | null;
-                }>(
-                    db
-                        .select({ max: max(channelsTable.position) })
-                        .from(channelsTable)
-                        .where(eq(channelsTable.spaceId, BigInt(space.id))),
-                );
+                if (!channel)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to create channel",
+                    );
 
-                position = maxPosition?.max;
+                await setCache("channel", channel.id, channel);
+
+                // TODO: Implement proper events for DM and Group DM channels
+                // await emitEvent({
+                //     event: "ChannelCreate",
+                //     user_id: channel.id,
+                //     data: channel,
+                // });
+
+                res.status(HttpStatusCode.Created).json(channel);
+                return;
             }
 
-            const channel = await execNormalized<APIChannel>(
-                db
-                    .insert(channelsTable)
-                    .values({
-                        id: BigInt(Snowflake.generate()),
-                        type,
-                        spaceId: spaceId ? BigInt(spaceId) : undefined,
-                        name,
-                        ownerId: ownerId ? BigInt(ownerId) : undefined,
-                        position: (position ?? -1) + 1,
-                        parentId: parentId ? BigInt(parentId) : undefined,
-                        recipientIds: recipientIds
-                            ? recipientIds.map((id) => BigInt(id))
-                            : undefined,
-                        flags: 0n,
-                    })
-                    .returning()
-                    .then((res) => res[0]),
-            ).then(async (channel) => {
-                if (!channel) return null;
-                return channel.parentId
-                    ? {
-                          ...channel,
-                          parent: await getChannel(channel.parentId),
-                      }
-                    : channel;
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            await requireSpacePermissions({
+                spaceId,
+                userId: user.id,
+                needed: ["ManageChannels"],
             });
+
+            const created = await execNormalized<APIChannel>(
+                db.transaction(async (tx) => {
+                    const lockKey = `${space.id}:${parentId ?? "root"}`;
+                    await tx.execute(
+                        sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
+                    );
+
+                    const parentWhere =
+                        parentId == null
+                            ? isNull(channelsTable.parentId)
+                            : eq(channelsTable.parentId, BigInt(parentId));
+
+                    const maxPositionRow = await tx
+                        .select({ maxPos: max(channelsTable.position) })
+                        .from(channelsTable)
+                        .where(
+                            and(
+                                eq(channelsTable.spaceId, BigInt(space.id)),
+                                parentWhere,
+                            ),
+                        )
+                        .then((r) => r[0]);
+
+                    const positionBase = maxPositionRow?.maxPos ?? null;
+                    const nextPosition = (positionBase ?? -1) + 1;
+
+                    const inserted = await tx
+                        .insert(channelsTable)
+                        .values({
+                            id: BigInt(Snowflake.generate()),
+                            type,
+                            spaceId: BigInt(space.id),
+                            name,
+                            position: nextPosition,
+                            parentId:
+                                parentId == null ? null : BigInt(parentId),
+                            flags: 0n,
+                        })
+                        .returning()
+                        .then((res) => res[0]);
+
+                    return inserted ?? null;
+                }),
+            );
+
+            const channel = await (async () => {
+                if (!created) return null;
+                return created.parentId
+                    ? {
+                          ...created,
+                          parent: await getChannel(created.parentId),
+                      }
+                    : created;
+            })();
 
             if (!channel)
                 throw new HttpException(
@@ -182,14 +239,14 @@ export default class ChannelsController {
                     "Failed to create channel",
                 );
 
+            await invalidateCache("spaceHydrated", spaceId);
             await setCache("channel", channel.id, channel);
 
-            if (channel.spaceId)
-                await emitEvent({
-                    event: "ChannelCreate",
-                    space_id: channel.spaceId,
-                    data: channel,
-                });
+            await emitEvent({
+                event: "ChannelCreate",
+                space_id: channel.spaceId,
+                data: channel,
+            });
 
             res.status(HttpStatusCode.Created).json(channel);
         } catch (err) {
@@ -241,12 +298,14 @@ export default class ChannelsController {
             const { name, topic, nsfw, parentId, position } =
                 validateChannelBodyUpdate.parse(req.body);
 
-            let newParentId: bigint | null;
-            if (parentId != undefined) newParentId = BigInt(parentId);
-            else
-                newParentId = channel.parentId
-                    ? BigInt(channel.parentId)
-                    : null;
+            const newParentId: bigint | null | undefined =
+                parentId !== undefined
+                    ? parentId === null
+                        ? null
+                        : BigInt(parentId)
+                    : channel.parentId
+                      ? BigInt(channel.parentId)
+                      : null;
 
             const updatedChannel = await execNormalized<APIChannel>(
                 db
@@ -269,6 +328,8 @@ export default class ChannelsController {
                     "Failed to update channel",
                 );
 
+            if (updatedChannel.spaceId)
+                await invalidateCache("spaceHydrated", updatedChannel.spaceId);
             await setCache("channel", updatedChannel.id, updatedChannel);
 
             await emitEvent({
@@ -296,7 +357,7 @@ export default class ChannelsController {
                 req.body,
             );
 
-            const space = await getSpace(spaceId);
+            const space = await getSpaceHydrated(spaceId);
             if (!space)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -309,48 +370,62 @@ export default class ChannelsController {
                 needed: ["ManageChannels"],
             });
 
-            const newChannels: APIChannel[] = [];
-            for (const chBody of channels) {
-                const channel = await getChannel(chBody.id);
-                if (!channel)
-                    throw new HttpException(
-                        HttpStatusCode.NotFound,
-                        `Channel with ID ${chBody.id} not found`,
-                    );
+            const newChannels: APIChannel[] = await db.transaction(
+                async (tx) => {
+                    const updated: APIChannel[] = [];
 
-                const newParentId =
-                    chBody.parentId === undefined
-                        ? undefined
-                        : chBody.parentId === null
-                          ? sql`NULL`
-                          : BigInt(chBody.parentId);
+                    for (const chBody of channels) {
+                        const channel = await getChannel(chBody.id);
+                        if (!channel)
+                            throw new HttpException(
+                                HttpStatusCode.NotFound,
+                                `Channel with ID ${chBody.id} not found`,
+                            );
 
-                const newChannel = await execNormalized<APIChannel>(
-                    db
-                        .update(channelsTable)
-                        .set({
-                            name: chBody.name ?? channel.name,
-                            topic: chBody.topic ?? channel.topic,
-                            nsfw: chBody.nsfw ?? channel.nsfw,
-                            parentId: newParentId,
-                            position: chBody.position ?? channel.position,
-                        })
-                        .returning()
-                        .where(eq(channelsTable.id, BigInt(channel.id)))
-                        .then((res) => res[0]),
-                );
+                        if (!channel.spaceId || channel.spaceId !== spaceId)
+                            throw new HttpException(
+                                HttpStatusCode.BadRequest,
+                                `Channel ${chBody.id} does not belong to space ${spaceId}`,
+                            );
 
-                if (!newChannel)
-                    throw new HttpException(
-                        HttpStatusCode.InternalServerError,
-                        `Failed to update channel with ID ${chBody.id}`,
-                    );
+                        const nextParentId: bigint | null | undefined =
+                            chBody.parentId === undefined
+                                ? undefined
+                                : chBody.parentId === null
+                                  ? null
+                                  : BigInt(chBody.parentId);
 
-                await setCache("channel", newChannel.id, newChannel);
+                        const newChannel = await execNormalized<APIChannel>(
+                            tx
+                                .update(channelsTable)
+                                .set({
+                                    name: chBody.name ?? channel.name,
+                                    topic: chBody.topic ?? channel.topic,
+                                    nsfw: chBody.nsfw ?? channel.nsfw,
+                                    parentId: nextParentId,
+                                    position:
+                                        chBody.position ?? channel.position,
+                                })
+                                .where(eq(channelsTable.id, BigInt(channel.id)))
+                                .returning()
+                                .then((res) => res[0]),
+                        );
 
-                newChannels.push(newChannel);
-            }
+                        if (!newChannel)
+                            throw new HttpException(
+                                HttpStatusCode.InternalServerError,
+                                `Failed to update channel with ID ${chBody.id}`,
+                            );
 
+                        await setCache("channel", newChannel.id, newChannel);
+                        updated.push(newChannel);
+                    }
+
+                    return updated;
+                },
+            );
+
+            await invalidateCache("spaceHydrated", spaceId);
             await emitEvent({
                 event: "BulkChannelUpdate",
                 space_id: spaceId,
@@ -373,7 +448,6 @@ export default class ChannelsController {
                 );
 
             const { channelId } = validateChannelParamsDelete.parse(req.params);
-
             const { parentOnly } = validateChannelQueryDelete.parse(req.query);
 
             const channel = await getChannel(channelId);
@@ -430,6 +504,8 @@ export default class ChannelsController {
                 return;
             }
 
+            if (channel.spaceId)
+                await invalidateCache("spaceHydrated", channel.spaceId);
             await deleteCache("channel", channel.id);
 
             await emitEvent({

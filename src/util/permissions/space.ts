@@ -1,42 +1,39 @@
-import {
-    BitField,
-    HttpException,
-    HttpStatusCode,
-    permissionFlags,
-    type PermissionFlag,
-    type Snowflake,
-} from "@mutualzz/types";
-import { ALL_BITS, type RequireMode } from "./util";
+import { HttpException, HttpStatusCode, type Snowflake } from "@mutualzz/types";
+import { type RequireMode } from "./util.ts";
 import {
     getEveryoneRole,
     getMember,
     getMemberRoles,
     getSpace,
-} from "../Helpers";
+} from "../Helpers.ts";
+import {
+    ALL_BITS,
+    BitField,
+    type PermissionFlag,
+    permissionFlags,
+} from "@mutualzz/permissions";
 
-interface ResolveSpacePermsissionsOptions {
+interface ResolveSpacePermissionsOptions {
     spaceOwnerId: Snowflake;
     userId: Snowflake;
     everyonePerms: bigint;
     rolePerms: bigint[];
 }
+
 export const resolveSpacePermissions = ({
     userId,
     spaceOwnerId,
     everyonePerms,
     rolePerms,
-}: ResolveSpacePermsissionsOptions) => {
-    {
-        if (userId === spaceOwnerId)
-            return BitField.fromBits(permissionFlags, ALL_BITS);
+}: ResolveSpacePermissionsOptions) => {
+    if (userId === spaceOwnerId)
+        return BitField.fromBits(permissionFlags, ALL_BITS);
 
-        let bits = 0n;
+    let bits = 0n;
+    bits |= everyonePerms;
+    for (const perm of rolePerms) bits |= perm;
 
-        bits |= everyonePerms;
-        for (const p of rolePerms) bits |= p;
-
-        return BitField.fromBits(permissionFlags, bits);
-    }
+    return BitField.fromBits(permissionFlags, bits);
 };
 
 interface RequireSpacePermissionsOptions {
@@ -45,6 +42,7 @@ interface RequireSpacePermissionsOptions {
     needed: PermissionFlag[];
     mode?: RequireMode;
 }
+
 export const requireSpacePermissions = async ({
     spaceId,
     userId,
@@ -69,7 +67,7 @@ export const requireSpacePermissions = async ({
 
     const permissions = resolveSpacePermissions({
         spaceOwnerId: space.ownerId,
-        userId: userId,
+        userId,
         everyonePerms: everyoneRole?.permissions ?? 0n,
         rolePerms: memberRoles.map((r) => r.permissions),
     });
@@ -94,6 +92,7 @@ type RequireSpacePermissionOptions = Omit<
     RequireSpacePermissionsOptions,
     "mode" | "needed"
 > & { needed: PermissionFlag };
+
 export const requireSpacePermission = async ({
     spaceId,
     userId,
