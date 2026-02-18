@@ -14,7 +14,7 @@ import type { Channel } from "amqplib";
 import { eq } from "drizzle-orm";
 import { logger } from "./Logger";
 import { Send, type WebSocket } from "./util";
-import { resyncMemberListWindows } from "@mutualzz/gateway/opcodes/LazyRequest.ts";
+import { resyncMemberListWindows } from "@mutualzz/gateway/util/Calculations.ts";
 
 export async function setupListener(this: WebSocket) {
     if (!this.userId) {
@@ -26,7 +26,7 @@ export async function setupListener(this: WebSocket) {
 
     // ensure containers exist
     this.events = this.events ?? {};
-    this.member_events = this.member_events ?? {};
+    this.memberEvents = this.memberEvents ?? {};
     this.listenOptions = this.listenOptions ?? {};
 
     this.memberListSubs = this.memberListSubs ?? new Map();
@@ -123,7 +123,7 @@ export async function setupListener(this: WebSocket) {
         if (opts.channel) opts.channel.close();
         else {
             Object.values(this.events).forEach((x) => x?.());
-            Object.values(this.member_events).forEach((x) => x?.());
+            Object.values(this.memberEvents).forEach((x) => x?.());
         }
 
         this.memberListSubs?.clear();
@@ -140,8 +140,8 @@ async function consume(this: WebSocket, opts: EventOpts) {
     switch (event) {
         case "SpaceMemberRemove": {
             const mid = String(data?.user?.id);
-            this.member_events?.[mid]?.();
-            delete this.member_events?.[mid];
+            this.memberEvents?.[mid]?.();
+            delete this.memberEvents?.[mid];
 
             const spaceId = String(data?.spaceId ?? data?.space_id);
             if (spaceId) {
@@ -158,9 +158,9 @@ async function consume(this: WebSocket, opts: EventOpts) {
         }
         case "SpaceMemberAdd": {
             const mid = String(data?.user?.id);
-            if (this.member_events?.[mid]) break;
-            this.member_events = this.member_events ?? {};
-            this.member_events[mid] = await listenEvent(
+            if (this.memberEvents?.[mid]) break;
+            this.memberEvents = this.memberEvents ?? {};
+            this.memberEvents[mid] = await listenEvent(
                 mid,
                 consumer,
                 this.listenOptions,
@@ -181,8 +181,8 @@ async function consume(this: WebSocket, opts: EventOpts) {
         }
         case "SpaceMemberUpdate": {
             const mid = String(data?.user?.id);
-            if (!this.member_events?.[mid]) break;
-            this.member_events[mid]();
+            if (!this.memberEvents?.[mid]) break;
+            this.memberEvents[mid]();
 
             const spaceId = String(data?.spaceId ?? data?.space_id);
             if (spaceId) {

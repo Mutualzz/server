@@ -10,8 +10,9 @@ import urlMetadata from "url-metadata";
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
-import { RedisStore, type RedisReply } from "rate-limit-redis";
+import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
+import MurmurHash from "imurmurhash";
 
 type Services = "spotify" | "youtube" | "apple" | "other";
 
@@ -37,6 +38,9 @@ export const appleMusicSdk = new AppleMusicClient({
     defaultStorefront: "us",
     defaultLanguageTag: "en-US",
 });
+
+export const murmur = (input: string): string =>
+    MurmurHash(input).result().toString();
 
 export const base64UrlEncode = (input: Buffer | string) =>
     Buffer.from(input)

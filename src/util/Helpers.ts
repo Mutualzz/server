@@ -305,7 +305,10 @@ export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
     }));
 }
 
-export async function getChannelOverwrites(channelId: Snowflake) {
+export async function getChannelOverwrites(
+    spaceId: Snowflake,
+    channelId: Snowflake,
+) {
     const rows = await db
         .select({
             roleId: channelPermissionOverwritesTable.roleId,
@@ -315,12 +318,18 @@ export async function getChannelOverwrites(channelId: Snowflake) {
         })
         .from(channelPermissionOverwritesTable)
         .where(
-            eq(channelPermissionOverwritesTable.channelId, BigInt(channelId)),
+            and(
+                eq(channelPermissionOverwritesTable.spaceId, BigInt(spaceId)),
+                eq(
+                    channelPermissionOverwritesTable.channelId,
+                    BigInt(channelId),
+                ),
+            ),
         );
 
     return rows.map((row) => ({
-        roleId: row.roleId == null ? null : row.roleId.toString(),
-        userId: row.userId == null ? null : row.userId.toString(),
+        roleId: row.roleId ? row.roleId.toString() : null,
+        userId: row.userId ? row.userId.toString() : null,
         allow: row.allow,
         deny: row.deny,
     }));

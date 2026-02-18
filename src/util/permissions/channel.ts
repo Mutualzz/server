@@ -1,11 +1,11 @@
 import { HttpException, HttpStatusCode, type Snowflake } from "@mutualzz/types";
 import {
-    resolveEffectiveChannelBits,
+    BitField,
     hasAll,
     hasAny,
-    BitField,
     type PermissionFlag,
     permissionFlags,
+    resolveEffectiveChannelBits,
 } from "@mutualzz/permissions";
 import type { RequireMode } from "./util";
 import {
@@ -66,11 +66,11 @@ export const requireChannelPermissions = async ({
     if (userId === space.ownerId) return { space, channel, permissions: base };
     if (base.has("Administrator")) return { space, channel, permissions: base };
 
-    const channelOverwrites = await getChannelOverwrites(channel.id);
+    const channelOverwrites = await getChannelOverwrites(space.id, channel.id);
 
     // Parent/category overwrites apply before channel overwrites.
     const parentOverwrites = channel.parentId
-        ? await getChannelOverwrites(channel.parentId)
+        ? await getChannelOverwrites(space.id, channel.parentId)
         : null;
 
     const effectiveBits = resolveEffectiveChannelBits({

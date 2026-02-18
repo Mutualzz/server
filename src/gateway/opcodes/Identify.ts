@@ -9,6 +9,7 @@ import { logger } from "../Logger";
 import { saveSession } from "../util";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
+import { PresenceService } from "../presence/PresenceService.ts";
 
 export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     if (this.userId) return;
@@ -50,6 +51,11 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     this.userId = user.id.toString();
     this.sequence = 0;
 
+    this.memberListSubs = this.memberListSubs ?? new Map();
+    this.presences = this.presences ?? new Map();
+
+    await PresenceService.onSocketAuthenticated(this);
+
     await saveSession({
         sessionId: this.sessionId,
         userId: user.id,
@@ -67,8 +73,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
             sessionId: this.sessionId,
         },
     });
-
-    this.memberListSubs = new Map();
 
     logger.info(
         `Session authenticated: ${this.sessionId} (user: ${this.userId})`,

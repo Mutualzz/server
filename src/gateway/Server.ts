@@ -10,10 +10,8 @@ export class Server {
     port: number;
     server: HttpServer;
 
-    constructor() {
-        this.port = isNaN(Number(process.env.WS_PORT))
-            ? DEFAULT_PORT
-            : Number(process.env.WS_PORT);
+    constructor(port = process.env.WS_PORT || DEFAULT_PORT) {
+        this.port = Number(port);
 
         this.server = http.createServer((_, res) => {
             res.writeHead(200).end("Online");

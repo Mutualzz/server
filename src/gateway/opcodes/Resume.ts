@@ -4,6 +4,8 @@ import { logger } from "../Logger";
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
 import type { WebSocket } from "../util/WebSocket";
+import { PresenceService } from "@mutualzz/gateway/presence/PresenceService.ts";
+import { setupListener } from "@mutualzz/gateway/Listener.ts";
 
 export async function onResume(this: WebSocket, data: GatewayPayload) {
     const resume = data.d;
@@ -35,6 +37,11 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
         return this.close(GatewayCloseCodes.InvalidSession, "Invalid session");
     }
 
+    this.memberListSubs = this.memberListSubs ?? new Map();
+    this.presences = this.presences ?? new Map();
+
+    await PresenceService.onSocketAuthenticated(this);
+
     await saveSession({
         sessionId: this.sessionId,
         userId: user.id,
@@ -63,6 +70,8 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
             sessionId: this.sessionId,
         },
     });
+
+    await setupListener.call(this);
 
     logger.info(`Sent Ready event for resumed session: ${this.sessionId}`);
 }

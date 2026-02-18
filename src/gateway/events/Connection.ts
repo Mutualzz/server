@@ -10,6 +10,7 @@ import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
 import { Close } from "./Close";
 import { Message } from "./Message";
+import { PresenceBucket } from "../presence/PresenceBucket.ts";
 
 export default async function Connection(
     this: WebSocketServer,
@@ -48,6 +49,8 @@ export default async function Connection(
     socket.rateLimits = new Map();
 
     try {
+        PresenceBucket.add(socket);
+
         // @ts-expect-error The types errors do not matter in this case
         socket.on("close", Close);
         // @ts-expect-error The types errors do not matter in this case
@@ -56,6 +59,8 @@ export default async function Connection(
 
         socket.events = {};
         socket.sequence = 0;
+        socket.memberListSubs = socket.memberListSubs ?? new Map();
+        socket.presences = socket.presences ?? new Map();
 
         await Send(socket, {
             op: "Hello",

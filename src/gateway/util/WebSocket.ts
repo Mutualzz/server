@@ -29,7 +29,7 @@ export interface WebSocket extends WS {
     readyTimeout?: NodeJS.Timeout;
     sequence: number;
     events: Record<string, undefined | (() => unknown)>;
-    member_events: Record<string, () => unknown>;
+    memberEvents: Record<string, () => unknown>;
 
     encoding?: Encoding;
     compress?: Compression;
@@ -39,4 +39,5 @@ export interface WebSocket extends WS {
 
     rateLimits: Map<string, RateLimitBucket>;
     memberListSubs: Map<string, MemberListSubscription>;
+    presences: Map<string, Set<string>>;
 }
