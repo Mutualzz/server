@@ -41,7 +41,7 @@ export class PresenceStore {
     }
 
     async warmFromRedis(userId: string): Promise<void> {
-        const existing = await this.get(userId);
+        const existing = await this.get(userId as any);
         if (existing) return;
 
         const raw = await redis.get(presenceKey(userId)).catch(() => null);
@@ -50,14 +50,13 @@ export class PresenceStore {
         try {
             const parsed = JSON.parse(raw) as PresencePayload;
 
-            // Basic shape/expiry guard
             const updatedAt = Number(parsed?.updatedAt ?? 0);
             if (!updatedAt) return;
 
             const expiresAt = updatedAt + this.ttlMs;
             if (expiresAt <= Date.now()) return;
 
-            this.entries.set(userId, {
+            this.entries.set(userId as any, {
                 presence: parsed,
                 expiresAt,
             });
