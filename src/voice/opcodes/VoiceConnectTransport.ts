@@ -5,7 +5,7 @@ import { Send } from "../util/Common.ts";
 
 export default async function VoiceConnectTransport(
     server: Server,
-    room: VoiceRoom,
+    _room: VoiceRoom,
     peer: VoicePeer,
     envelope: ClientMessageEnvelope,
 ) {

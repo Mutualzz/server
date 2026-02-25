@@ -7,13 +7,6 @@ export default function Close(
     peer: VoicePeer,
 ) {
     try {
-        console.log("VOICE CLOSE", {
-            userId: peer.userId,
-            roomId: room.roomId,
-        });
-    } catch {}
-
-    try {
         server.broadcastPeerLeft(room, peer.userId);
     } catch {}
 

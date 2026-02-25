@@ -8,25 +8,18 @@ import type { VoiceWebSocket } from "./util/WebSocket";
 import { type Snowflake, VoiceDispatchEvents } from "@mutualzz/types";
 import { closeDatabase } from "@mutualzz/database";
 import Connection from "./events/Connection";
+import config from "../Config.ts";
 
 export class Server {
     readonly rooms = new Map<string, VoiceRoom>(); // roomId -> VoiceRoom
     readonly workers: types.Worker[] = [];
     nextWorkerIndex = 0;
-    readonly listenIp = "127.0.0.1";
-    readonly announcedIp = process.env.ANNOUNCED_IP || undefined;
     readonly activePeersByUserId = new Map<Snowflake, VoicePeer>();
     private readonly server: HttpServer;
     private readonly ws: WebSocketServer;
-    private readonly rtcMinPort = Number(process.env.RTC_MIN_PORT ?? "40000");
-    private readonly rtcMaxPort = Number(process.env.RTC_MAX_PORT ?? "49999");
     private workersReady = false;
 
-    constructor(
-        private readonly port: number = process.env.VOICE_PORT
-            ? Number(process.env.VOICE_PORT)
-            : 3010,
-    ) {
+    constructor() {
         this.server = http.createServer();
         this.ws = new WebSocketServer({ server: this.server });
 
@@ -72,24 +65,28 @@ export class Server {
 
         await new Promise<void>((resolve, reject) => {
             this.server.once("error", reject);
-            this.server.listen(this.port, () => resolve());
+            this.server.listen(config.listenPort, () => resolve());
         });
 
-        logger.info(`Online on port ${this.port}`);
+        logger.info(`Online on port ${config.listenIp}:${config.listenPort}`);
     }
 
     async createWorkers() {
-        if (this.workers.length > 0) return;
+        let numWorkers = config.mediasoup.numWorkers;
 
-        const os = await import("node:os");
-        const workerCount = Math.max(1, os.cpus().length - 1);
+        if (numWorkers === 0) {
+            logger.warn(
+                "Configured 0 mediasoup workers; defaulting to 1. Set numWorkers to 0 to disable this warning.",
+            );
+            numWorkers += 1;
+        }
 
-        for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+        for (let workerIndex = 0; workerIndex < numWorkers; workerIndex++) {
             const worker = await createWorker({
-                rtcMinPort: this.rtcMinPort,
-                rtcMaxPort: this.rtcMaxPort,
-                logLevel: "warn",
-                logTags: ["info", "ice", "dtls", "rtp", "srtp", "rtcp"],
+                logLevel: config.mediasoup.worker.logLevel,
+                logTags: config.mediasoup.worker.logTags,
+                rtcMinPort: config.mediasoup.worker.rtcMinPort,
+                rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
             });
 
             worker.on("died", () => {
@@ -129,6 +126,14 @@ export class Server {
                     mimeType: "audio/opus",
                     clockRate: 48000,
                     channels: 2,
+                },
+                {
+                    kind: "video",
+                    mimeType: "video/VP8",
+                    clockRate: 90000,
+                    parameters: {
+                        "x-google-start-bitrate": 1000,
+                    },
                 },
             ],
         });

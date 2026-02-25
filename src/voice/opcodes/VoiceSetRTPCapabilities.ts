@@ -11,5 +11,7 @@ export default function VoiceSetRTPCapabilities(
 ) {
     peer.rtpCapabilities = envelope.data?.rtpCapabilities as RtpCapabilities;
 
+    server.pushExistingProducers(room, peer);
+
     Send({ ok: true }, peer, envelope);
 }
