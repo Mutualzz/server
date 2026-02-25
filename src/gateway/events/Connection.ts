@@ -9,8 +9,8 @@ import { parseNegotiationParams } from "../util/Negotation";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
 import { Close } from "./Close";
-import { Message } from "./Message";
-import { PresenceBucket } from "../presence/PresenceBucket.ts";
+import Message from "./Message";
+import { PresenceBucket } from "../presence/Presence.bucket.ts";
 
 export default async function Connection(
     this: WebSocketServer,

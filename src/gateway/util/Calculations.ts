@@ -8,24 +8,10 @@ import {
     spaceMembersTable,
 } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
-import {
-    hasAny,
-    permissionFlags,
-    resolveEffectiveChannelBits,
-} from "@mutualzz/permissions";
-import {
-    arrayPartition,
-    execNormalizedMany,
-    listenEvent,
-    murmur,
-} from "@mutualzz/util";
-import type {
-    APIMemberRole,
-    APISpaceMember,
-    PresencePayload,
-    Snowflake,
-} from "@mutualzz/types";
-import { PresenceService } from "@mutualzz/gateway/presence/PresenceService.ts";
+import { hasAny, permissionFlags, resolveEffectiveChannelBits, } from "@mutualzz/permissions";
+import { arrayPartition, execNormalizedMany, listenEvent, murmur, } from "@mutualzz/util";
+import type { APIMemberRole, APISpaceMember, PresencePayload, Snowflake, } from "@mutualzz/types";
+import { PresenceService } from "../presence/Presence.service.ts";
 
 type OverwriteLike = {
     roleId?: string | null;
@@ -458,13 +444,24 @@ export function computeVisibleUserIds(
 
 export async function resyncMemberListWindows(
     this: WebSocket,
-    spaceId: Snowflake,
+    spaceIdOrSubKey: Snowflake,
 ) {
     if (!this.memberListSubs || this.memberListSubs.size === 0) return;
 
-    const subs = [...this.memberListSubs.values()].filter(
-        (s) => s.spaceId === spaceId,
-    );
+    let spaceId: string;
+    let channelId: string | null = null;
+    let listId: string | null = null;
+
+    const parts = spaceIdOrSubKey.split(":");
+    if (parts.length === 3) [spaceId, channelId, listId] = parts;
+    else spaceId = spaceIdOrSubKey;
+
+    const subs = [...this.memberListSubs.values()].filter((sub) => {
+        if (sub.spaceId !== spaceId) return false;
+        if (channelId && sub.channelId !== channelId) return false;
+        return !(listId && sub.listId !== listId);
+    });
+
     if (!subs.length) return;
 
     const memberCount = await getMemberCount(spaceId);
@@ -481,10 +478,10 @@ export async function resyncMemberListWindows(
         );
 
         const ops = await Promise.all(
-            sub.ranges.map((r) =>
+            sub.ranges.map((range) =>
                 getMembers(
                     spaceId,
-                    r,
+                    range,
                     channelOverwrites,
                     parentOverwrites,
                     everyonePerms,
@@ -493,14 +490,15 @@ export async function resyncMemberListWindows(
         );
 
         const groupsMap = new Map<string, any>();
-        for (const g of ops.flatMap((x) => x.groups)) groupsMap.set(g.id, g);
+        for (const group of ops.flatMap((x) => x.groups))
+            groupsMap.set(group.id, group);
         const groups = [...groupsMap.values()];
 
-        const subKey = `${sub.spaceId}:${sub.channelId}:${sub.listId}`;
+        const computedSubKey = `${sub.spaceId}:${sub.channelId}:${sub.listId}`;
         const visibleUserIds = computeVisibleUserIds(ops);
 
         this.presences = this.presences ?? new Map();
-        this.presences.set(subKey, visibleUserIds);
+        this.presences.set(computedSubKey, visibleUserIds);
 
         await Send(this, {
             op: "Dispatch",

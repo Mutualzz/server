@@ -41,7 +41,9 @@
             "@mutualzz/cdn": ["./cdn"],
             "@mutualzz/cdn/*": ["./cdn/*"],
             "@mutualzz/util": ["./util"],
-            "@mutualzz/util/*": ["./util/*"]
+            "@mutualzz/util/*": ["./util/*"],
+            "@mutualzz/voice": ["./voice"],
+            "@mutualzz/voice/*": ["./voice/*"]
         }
     }
 }

@@ -72,6 +72,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
                             },
                         },
                         overwrites: true,
+                        space: true,
                     },
                 },
                 roles: true,
@@ -223,31 +224,27 @@ export async function getMember(
     justChecking = false,
 ): Promise<boolean | APISpaceMember | null> {
     const cacheKey = `${spaceId}:${userId}`;
-    let member = await getCache("spaceMember", cacheKey);
 
-    if (member) return member;
-
+    // If caller only wants existence, do not return cached object.
     if (justChecking) {
         const exists = await execNormalized<APISpaceMember>(
             db.query.spaceMembersTable.findFirst({
-                columns: {
-                    userId: true,
-                },
+                columns: { userId: true },
                 where: and(
                     eq(spaceMembersTable.spaceId, BigInt(spaceId)),
                     eq(spaceMembersTable.userId, BigInt(userId)),
                 ),
             }),
         );
-
         return !!exists;
     }
 
-    member = await execNormalized<APISpaceMember>(
+    const cached = await getCache("spaceMember", cacheKey);
+    if (cached) return cached;
+
+    const member = await execNormalized<APISpaceMember>(
         db.query.spaceMembersTable.findFirst({
-            with: {
-                space: true,
-            },
+            with: { space: true },
             where: and(
                 eq(spaceMembersTable.spaceId, BigInt(spaceId)),
                 eq(spaceMembersTable.userId, BigInt(userId)),
@@ -258,7 +255,6 @@ export async function getMember(
     if (!member) return null;
 
     await setCache("spaceMember", cacheKey, member);
-
     return member;
 }
 

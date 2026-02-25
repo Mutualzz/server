@@ -47,7 +47,7 @@ export default class SpacesController {
                 targetFormat =
                     isAnimatedHash && explicitAnimated ? "webp" : "png";
 
-            let willAnimate = false;
+            let willAnimate: boolean;
             if (targetFormat === "gif")
                 willAnimate = isAnimatedHash && !explicitStatic;
             else if (targetFormat === "webp")
@@ -59,8 +59,7 @@ export default class SpacesController {
             const boundedSize = (() => {
                 const n = Number(sizeQuery);
                 if (!Number.isFinite(n)) return undefined as number | undefined;
-                const clamped = Math.max(1, Math.min(4096, Math.floor(n)));
-                return clamped;
+                return Math.max(1, Math.min(4096, Math.floor(n)));
             })();
 
             let cacheKey = `${spaceId}:${baseName}:${targetFormat}`;
@@ -83,7 +82,7 @@ export default class SpacesController {
             }
 
             const sourceExt = isAnimatedHash ? "gif" : "png";
-            const sourceKey = `icons/${spaceId}/${baseName}.${sourceExt}`;
+            const sourceKey = `icons/spaces/${spaceId}/${baseName}.${sourceExt}`;
 
             let sourceBody: Uint8Array;
             try {
@@ -98,7 +97,7 @@ export default class SpacesController {
             } catch {
                 throw new HttpException(
                     HttpStatusCode.NotFound,
-                    "Avatar not found",
+                    "Icon not found",
                 );
             }
 

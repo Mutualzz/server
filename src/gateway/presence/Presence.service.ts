@@ -1,16 +1,23 @@
 import type { WebSocket } from "../util/WebSocket";
-import { PresenceStore } from "./PresenceStore";
+import { PresenceStore } from "./Presence.store.ts";
 import { Send } from "../util/Send";
-import { GatewayCloseCodes, type PresencePayload, type PresenceSchedule, type PresenceStatus, } from "@mutualzz/types";
-import { sanitizePresence } from "./PresenceValidator";
+import {
+    GatewayCloseCodes,
+    type PresencePayload,
+    type PresenceSchedule,
+    type PresenceStatus,
+} from "@mutualzz/types";
+import { sanitizePresence } from "./Presence.validator.ts";
 import { logger } from "../Logger";
-import { PresenceBucket } from "./PresenceBucket";
+import { PresenceBucket } from "./Presence.bucket.ts";
 import { resyncMemberListWindows } from "../util/Calculations";
 import { redis } from "@mutualzz/util";
 
 type ResyncKey = string;
 
 const SCHEDULE_KEY = (userId: string) => `presence:schedule:${userId}`;
+const MANUAL_KEY = (userId: string) => `presence:manual:${userId}`;
+
 const SCHEDULE_ZSET = `presence:schedules`; // member=userId score=until(ms)
 const SCHEDULE_LOCK = `presence:schedule:worker-lock`;
 
@@ -33,30 +40,43 @@ export class PresenceService {
 
         if (!ws.userId) return;
 
-        // warm presence from redis so "existing" is consistent across gateways
         await this.store.warmFromRedis(ws.userId).catch(() => null);
 
         const scheduled = await this.getSchedule(ws.userId).catch(() => null);
+        const manual = await this.getManualStatus(ws.userId).catch(() => null);
 
-        const existing = await this.store.get(ws.userId);
+        let existing = await this.store.get(ws.userId);
+        if (existing?.status === "offline") existing = null;
+
         let presence =
             existing ??
             this.store.upsert(ws.userId, {
                 status: "online",
                 activities: [],
-                device: "desktop",
+                device: "web",
             });
 
-        if (scheduled && scheduled.until > Date.now()) {
+        if (scheduled && scheduled.until > Date.now())
             presence = this.store.upsert(ws.userId, {
                 ...(presence ?? { activities: [], device: "web" }),
                 status: scheduled.status,
             });
-        } else if (scheduled) {
+        else if (manual)
+            presence = this.store.upsert(ws.userId, {
+                ...(presence ?? { activities: [], device: "web" }),
+                status: manual,
+            });
+        else if (scheduled)
             await this.clearSchedule(ws.userId).catch(() => null);
-        }
 
         this.store.touch(ws.userId);
+
+        await Send(ws, {
+            op: "Dispatch",
+            t: "PresenceUpdate",
+            d: { userId: ws.userId, presence },
+            s: ws.sequence++,
+        }).catch(() => null);
 
         await this.broadcast(ws.userId, presence);
         await this.notifyScheduleChanged(
@@ -89,15 +109,22 @@ export class PresenceService {
             return;
         }
 
-        const clean = sanitizePresence(rawPresence);
+        const persist = Boolean(rawPresence?.persist);
+        const presenceInput = rawPresence?.presence ?? rawPresence;
+
+        const clean = sanitizePresence(presenceInput);
+
+        if (persist && clean.status === "offline") return;
 
         const scheduled = await this.getSchedule(ws.userId).catch(() => null);
-        if (scheduled && scheduled.until > Date.now()) {
+        if (scheduled && scheduled.until > Date.now())
             clean.status = scheduled.status;
-        }
+        else if (persist)
+            await this.setManualStatus(ws.userId, clean.status).catch(
+                () => null,
+            );
 
         const presence = this.store.upsert(ws.userId, clean);
-
         await this.broadcast(ws.userId, presence);
     }
 
@@ -106,10 +133,12 @@ export class PresenceService {
         this.ensureGcLoop();
         this.ensureScheduleLoop();
 
-        if (PresenceBucket.hasAnyAuthenticatedSocket(userId)) return;
+        setTimeout(async () => {
+            if (PresenceBucket.hasAnyAuthenticatedSocket(userId)) return;
 
-        const presence = this.store.setOffline(userId);
-        await this.broadcast(userId, presence);
+            const presence = this.store.setOffline(userId);
+            await this.broadcast(userId, presence);
+        }, 250).unref?.();
     }
 
     static async setScheduledStatus(
@@ -162,15 +191,35 @@ export class PresenceService {
         await this.notifyScheduleChanged(userId, null);
     }
 
+    private static async getManualStatus(
+        userId: string,
+    ): Promise<PresenceStatus | null> {
+        const raw = await redis.get(MANUAL_KEY(userId));
+        if (!raw) return null;
+        try {
+            const parsed = JSON.parse(raw) as { status?: PresenceStatus };
+            return parsed?.status ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    private static async setManualStatus(
+        userId: string,
+        status: PresenceStatus,
+    ) {
+        if (status === "offline") return;
+        await redis.set(MANUAL_KEY(userId), JSON.stringify({ status }));
+    }
+
     private static ensureGcLoop() {
         if (this.started) return;
 
         this.started = true;
 
         setInterval(() => {
-            for (const ws of PresenceBucket.authenticatedSockets()) {
+            for (const ws of PresenceBucket.authenticatedSockets())
                 if (ws.userId) this.store.touch(ws.userId);
-            }
 
             this.store.gc();
         }, 30_000).unref?.();
@@ -180,28 +229,28 @@ export class PresenceService {
         userId: string,
         targets: WebSocket[],
     ) {
-        for (const ws of targets) {
-            const visibilityBySpace = ws.presences;
-            if (!visibilityBySpace) continue;
+        for (const socket of targets) {
+            const presencesBySubKey = socket.presences;
+            if (!presencesBySubKey || presencesBySubKey.size === 0) continue;
 
-            for (const [spaceId, visibleUserIds] of visibilityBySpace) {
-                if (!visibleUserIds.has(userId)) continue;
+            for (const [subKey, visibleUserIds] of presencesBySubKey) {
+                if (!visibleUserIds?.has(userId)) continue;
 
-                const key: ResyncKey = `${ws.sessionId}:${spaceId}`;
+                const resyncKey: ResyncKey = `${socket.sessionId}:${subKey}`;
 
-                const existingTimer = this.resyncTimers.get(key);
+                const existingTimer = this.resyncTimers.get(resyncKey);
                 if (existingTimer) clearTimeout(existingTimer);
 
                 const timer = setTimeout(async () => {
-                    this.resyncTimers.delete(key);
+                    this.resyncTimers.delete(resyncKey);
                     try {
-                        await resyncMemberListWindows.call(ws, String(spaceId));
+                        await resyncMemberListWindows.call(socket, subKey);
                     } catch (error) {
                         logger.debug("[Presence] resync failed:", error);
                     }
                 }, 250);
 
-                this.resyncTimers.set(key, timer);
+                this.resyncTimers.set(resyncKey, timer);
             }
         }
     }

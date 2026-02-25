@@ -1,7 +1,7 @@
 import type { GatewayPayload } from "@mutualzz/types";
 import { GatewayCloseCodes } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
-import { PresenceService } from "../presence/PresenceService";
+import { PresenceService } from "../presence/Presence.service.ts";
 
 type Payload = {
     status: "online" | "idle" | "dnd" | "invisible";

@@ -1,6 +1,6 @@
 import { logger } from "../Logger";
 import type { WebSocket } from "../util/WebSocket";
-import { PresenceService } from "../presence/PresenceService.ts";
+import { PresenceService } from "../presence/Presence.service.ts";
 
 export async function Close(this: WebSocket, code: number, reason: Buffer) {
     logger.info(

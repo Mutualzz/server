@@ -7,7 +7,7 @@ import { OPCODE_LIMITS } from "../util";
 import { checkGlobalRateLimit, checkRateLimit } from "../util/RateLimit";
 import type { WebSocket } from "../util/WebSocket";
 
-export async function Message(this: WebSocket, buffer: Data) {
+export default async function Message(this: WebSocket, buffer: Data) {
     if (!checkGlobalRateLimit(this)) {
         logger.warn(`Rate limit exceeded ${this.sessionId ?? ""}`);
         return this.close(GatewayCloseCodes.RateLimit, "Rate limit exceeded");
@@ -81,7 +81,6 @@ export async function Message(this: WebSocket, buffer: Data) {
     const OPCodeHandler =
         OPCodeHandlers[decoded.op as keyof typeof OPCodeHandlers];
 
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!OPCodeHandler) {
         logger.error(`Unknown Opcode: ${decoded.op}`);
         return;

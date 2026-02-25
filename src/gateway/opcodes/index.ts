@@ -7,6 +7,7 @@ import { onResume } from "./Resume";
 import { onPresenceUpdate } from "./PresenceUpdate.ts";
 import { onPresenceScheduleSet } from "./PresenceScheduleSet.ts";
 import { onPresenceScheduleClear } from "./PresenceScheduleClear.ts";
+import { onVoiceStateUpdate } from "@mutualzz/gateway/opcodes/VoiceStateUpdate.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -18,4 +19,5 @@ export default {
     [GatewayOpcodes.PresenceUpdate]: onPresenceUpdate,
     [GatewayOpcodes.PresenceScheduleSet]: onPresenceScheduleSet,
     [GatewayOpcodes.PresenceScheduleClear]: onPresenceScheduleClear,
+    [GatewayOpcodes.VoiceStateUpdate]: onVoiceStateUpdate,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

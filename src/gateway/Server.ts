@@ -4,11 +4,12 @@ import { WebSocketServer } from "ws";
 import { logger } from "./Logger";
 import Connection from "./events/Connection";
 import { DEFAULT_PORT } from "./util/Constants";
+import { initVoiceState } from "@mutualzz/gateway/voice/init.ts";
 
 export class Server {
-    ws: WebSocketServer;
-    port: number;
-    server: HttpServer;
+    private readonly ws: WebSocketServer;
+    private readonly port: number;
+    private readonly server: HttpServer;
 
     constructor(port = process.env.WS_PORT || DEFAULT_PORT) {
         this.port = Number(port);
@@ -37,8 +38,10 @@ export class Server {
 
     async start() {
         if (!this.server.listening) {
-            this.server.listen(this.port);
-            logger.info(`online on port ${this.port}`);
+            this.server.listen(this.port, () => {
+                initVoiceState();
+            });
+            logger.info(`Online on port ${this.port}`);
         }
     }
 

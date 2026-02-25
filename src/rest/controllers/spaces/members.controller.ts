@@ -41,12 +41,14 @@ import {
     validateMembersGetAllParams,
     validateMembersGetAllQuery,
     validateMembersRemoveMeParams,
+    validateMemberVoiceModerationBody,
     validateRoleMemberParams,
 } from "@mutualzz/validators";
 import { and, eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import { permissionFlags } from "@mutualzz/permissions";
+import { BitField, memberFlags, permissionFlags } from "@mutualzz/permissions";
 import dayjs from "dayjs";
+import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
 
 function topPos(rows: { position: number }[]) {
     let t = -1;
@@ -122,7 +124,7 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId, memberId } = validateMembersActionParams.parse(
+            const { spaceId, userId } = validateMembersActionParams.parse(
                 req.params,
             );
 
@@ -152,7 +154,7 @@ export default class MembersController {
                     "You do not have access to any channels in this space",
                 );
 
-            const member = await getMember(space.id, memberId || user.id);
+            const member = await getMember(space.id, userId || user.id);
             if (!member)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -636,7 +638,7 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId, memberId } = validateMembersActionParams.parse(
+            const { spaceId, userId } = validateMembersActionParams.parse(
                 req.params,
             );
 
@@ -647,7 +649,7 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            const member = await getMember(space.id, memberId || user.id);
+            const member = await getMember(space.id, userId || user.id);
             if (!member)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -714,6 +716,7 @@ export default class MembersController {
         }
     }
 
+    // TODO: Add ban database schema
     static async ban(req: Request, res: Response, next: NextFunction) {
         try {
             const { user } = req;
@@ -723,7 +726,7 @@ export default class MembersController {
                     "Unauthorized",
                 );
 
-            const { spaceId, memberId } = validateMembersActionParams.parse(
+            const { spaceId, userId } = validateMembersActionParams.parse(
                 req.params,
             );
 
@@ -734,7 +737,7 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            const member = await getMember(space.id, memberId || user.id);
+            const member = await getMember(space.id, userId || user.id);
             if (!member)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -858,6 +861,106 @@ export default class MembersController {
             await invalidateCache("spaceHydrated", spaceId);
 
             res.status(HttpStatusCode.Success).json(member);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async patchVoiceModeration(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { spaceId, userId } = validateMembersActionParams.parse(
+                req.params,
+            );
+
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            const member = await getMember(space.id, userId);
+            if (!member)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Member not found",
+                );
+
+            const { spaceMute, spaceDeaf } =
+                validateMemberVoiceModerationBody.parse(req.body);
+
+            if (spaceMute != null) {
+                await requireSpacePermissions({
+                    spaceId,
+                    userId: user.id,
+                    needed: ["MuteMembers"],
+                });
+            }
+
+            if (spaceDeaf != null) {
+                await requireSpacePermissions({
+                    spaceId,
+                    userId: user.id,
+                    needed: ["DeafenMembers"],
+                });
+            }
+
+            const memberBitfield = BitField.fromString(
+                memberFlags,
+                member.flags.toString(),
+            );
+
+            if (spaceMute != null) {
+                if (spaceMute) memberBitfield.add("VoiceSpaceMuted");
+                else memberBitfield.remove("VoiceSpaceMuted");
+            }
+
+            if (spaceDeaf != null) {
+                if (spaceDeaf) memberBitfield.add("VoiceSpaceDeafened");
+                else memberBitfield.remove("VoiceSpaceDeafened");
+            }
+
+            const nextFlags = memberBitfield.toBigInt();
+
+            await db
+                .update(spaceMembersTable)
+                .set({ flags: nextFlags })
+                .where(
+                    and(
+                        eq(spaceMembersTable.spaceId, BigInt(space.id)),
+                        eq(spaceMembersTable.userId, BigInt(userId)),
+                    ),
+                );
+
+            await deleteCache("spaceMember", `${space.id}:${userId}`);
+            await invalidateCache("spaceMembers", space.id);
+            await invalidateCache("spaceHydrated", spaceId);
+
+            await VoiceStateService.applyMemberVoiceModeration(
+                space.id,
+                userId,
+                {
+                    spaceMute,
+                    spaceDeaf,
+                },
+            );
+
+            const updated = await getMember(space.id, userId);
+
+            return res
+                .status(HttpStatusCode.Success)
+                .json(updated ?? { ...member, flags: nextFlags });
         } catch (err) {
             next(err);
         }

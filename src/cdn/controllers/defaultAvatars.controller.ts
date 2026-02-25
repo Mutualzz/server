@@ -104,7 +104,7 @@ export default class DefaultAvatarsController {
                 MIME_TYPES[finalFormat] || "application/octet-stream",
             );
 
-            // Send once
+            // Common once
             res.status(HttpStatusCode.Success).end(outputBuffer);
         } catch (err) {
             next(err);

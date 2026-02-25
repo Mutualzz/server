@@ -18,6 +18,10 @@ redis.on("ready", () => {
     logger.info("Connected to Redis");
 });
 
+redis.on("error", (err) => {
+    logger.error("Redis error:", err);
+});
+
 const storeEvent = async (sessionId: string, s: number, t: string, d: any) => {
     const key = `gateway:events:${sessionId}`;
     await redis.rpush(key, JSON.stringify({ s, t, d }));

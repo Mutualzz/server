@@ -39,6 +39,8 @@ export const channelsTable = pgTable(
             },
         ),
 
+        icon: text(),
+
         // For direct messages, this will contain the list of user IDs
         recipientIds: bigint({ mode: "bigint" }).array(),
 

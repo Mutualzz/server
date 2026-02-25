@@ -9,7 +9,8 @@ import { logger } from "../Logger";
 import { saveSession } from "../util";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
-import { PresenceService } from "../presence/PresenceService.ts";
+import { PresenceService } from "../presence/Presence.service.ts";
+import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
 
 export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     if (this.userId) return;
@@ -79,4 +80,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     );
 
     await setupListener.call(this);
+
+    await VoiceStateService.sendRejoinIfNeeded(this);
 }

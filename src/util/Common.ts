@@ -140,9 +140,9 @@ export const getUrls = (text: string) => {
             .replace(/^(\|\|)|(\|\|)$/g, "");
         matches.push({ url, spoiler });
     }
+
     // Remove duplicates using Set
-    const unique = Array.from(new Map(matches.map((m) => [m.url, m])).values());
-    return unique;
+    return Array.from(new Map(matches.map((m) => [m.url, m])).values());
 };
 
 export const fetchSpotifyMetadata = async (

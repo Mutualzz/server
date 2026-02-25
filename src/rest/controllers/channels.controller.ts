@@ -3,16 +3,19 @@ import { channelsTable, db } from "@mutualzz/database";
 import type { APIChannel } from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
+    bucketName,
     emitEvent,
     execNormalized,
     execNormalizedMany,
     getChannel,
     getSpaceHydrated,
-    Snowflake,
     requireChannelPermissions,
     requireSpacePermissions,
+    s3Client,
+    Snowflake,
 } from "@mutualzz/util";
 import {
+    fileValidator,
     validateChannelBodyCreate,
     validateChannelBodyUpdate,
     validateChannelBulkBodyPatch,
@@ -23,6 +26,9 @@ import {
 } from "@mutualzz/validators";
 import { and, eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
+import sharp from "sharp";
+import { generateHash } from "@mutualzz/rest/util";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 
 export default class ChannelsController {
     static async getOne(req: Request, res: Response, next: NextFunction) {
@@ -72,8 +78,23 @@ export default class ChannelsController {
                     "Unauthorized",
                 );
 
-            const { name, type, parentId, spaceId, ownerId, recipientIds } =
-                validateChannelBodyCreate.parse(req.body);
+            let rawCrop;
+            if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
+
+            const {
+                name,
+                parentId,
+                spaceId,
+                ownerId,
+                recipientIds,
+                crop,
+                ...rest
+            } = validateChannelBodyCreate.parse({
+                ...req.body,
+                crop: rawCrop,
+            });
+
+            const type = parseInt(rest.type) as ChannelType;
 
             switch (type) {
                 case ChannelType.Text:
@@ -178,6 +199,72 @@ export default class ChannelsController {
                 needed: ["ManageChannels"],
             });
 
+            const iconFile = fileValidator.optional().parse(req.file);
+
+            const channelValues: typeof channelsTable.$inferInsert = {
+                id: BigInt(Snowflake.generate()),
+                type,
+                spaceId: BigInt(space.id),
+                name,
+                parentId: parentId == null ? null : BigInt(parentId),
+                flags: 0n,
+            };
+
+            if (iconFile) {
+                const isGif = iconFile.mimetype === "image/gif";
+
+                let iconSharp: sharp.Sharp;
+                if (isGif)
+                    iconSharp = sharp(iconFile.buffer, { animated: true });
+                else iconSharp = sharp(iconFile.buffer).toFormat("png");
+
+                if (crop) {
+                    const { x, y, width, height } = crop;
+                    iconSharp = iconSharp.extract({
+                        left: x,
+                        top: y,
+                        width,
+                        height,
+                    });
+                }
+
+                iconFile.buffer = await iconSharp.toBuffer();
+
+                const iconHash = generateHash(
+                    iconFile.buffer,
+                    iconFile.mimetype.includes("gif"),
+                );
+
+                let existingIcon = null;
+                const storedExt = isGif ? "gif" : "png";
+
+                try {
+                    const { Body } = await s3Client.send(
+                        new GetObjectCommand({
+                            Bucket: bucketName,
+                            Key: `icons/channels/${channelValues.id}/${iconHash}.${storedExt}`,
+                        }),
+                    );
+
+                    existingIcon = Body;
+                } catch {
+                    // Ignore
+                }
+
+                if (!existingIcon) {
+                    await s3Client.send(
+                        new PutObjectCommand({
+                            Bucket: bucketName,
+                            Body: iconFile.buffer,
+                            Key: `icons/channels/${channelValues.id}/${iconHash}.${storedExt}`,
+                            ContentType: isGif ? "image/gif" : "image/png",
+                        }),
+                    );
+                }
+
+                channelValues.icon = iconHash;
+            }
+
             const created = await execNormalized<APIChannel>(
                 db.transaction(async (tx) => {
                     const lockKey = `${space.id}:${parentId ?? "root"}`;
@@ -202,20 +289,12 @@ export default class ChannelsController {
                         .then((r) => r[0]);
 
                     const positionBase = maxPositionRow?.maxPos ?? null;
-                    const nextPosition = (positionBase ?? -1) + 1;
+
+                    channelValues.position = (positionBase ?? -1) + 1;
 
                     const inserted = await tx
                         .insert(channelsTable)
-                        .values({
-                            id: BigInt(Snowflake.generate()),
-                            type,
-                            spaceId: BigInt(space.id),
-                            name,
-                            position: nextPosition,
-                            parentId:
-                                parentId == null ? null : BigInt(parentId),
-                            flags: 0n,
-                        })
+                        .values(channelValues)
                         .returning()
                         .then((res) => res[0]);
 

@@ -297,7 +297,7 @@ async function consume(this: WebSocket, opts: EventOpts) {
             s: this.sequence++,
         });
     } catch (err) {
-        logger.error("[RabbitMQ] Send error:", err);
+        logger.error("[RabbitMQ] Common error:", err);
     } finally {
         opts?.acknowledge?.();
     }

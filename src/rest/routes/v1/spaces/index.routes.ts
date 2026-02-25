@@ -74,6 +74,13 @@ router.delete(
     MembersController.removeMe,
 );
 
+// Members Voice State
+router.patch(
+    "/:spaceId/members/:userId/voice",
+    createLimiter(30_000, 30),
+    MembersController.patchVoiceModeration,
+);
+
 // Roles assignments
 router.put(
     "/:spaceId/members/:userId/roles/:roleId",

@@ -8,10 +8,10 @@ import {
     channelsTable,
     db,
     rolesTable,
+    spaceMemberRolesTable,
     spaceMembersTable,
     spacesTable,
     toPublicUser,
-    spaceMemberRolesTable,
     userSettingsTable,
 } from "@mutualzz/database";
 import { generateHash } from "@mutualzz/rest/util";
@@ -104,7 +104,7 @@ export default class SpacesController {
                     const { Body } = await s3Client.send(
                         new GetObjectCommand({
                             Bucket: bucketName,
-                            Key: `icons/${spaceId}/${iconHash}.${storedExt}`,
+                            Key: `icons/spaces/${spaceId}/${iconHash}.${storedExt}`,
                         }),
                     );
 
@@ -118,7 +118,7 @@ export default class SpacesController {
                         new PutObjectCommand({
                             Bucket: bucketName,
                             Body: iconFile.buffer,
-                            Key: `icons/${spaceId}/${iconHash}.${storedExt}`,
+                            Key: `icons/spaces/${spaceId}/${iconHash}.${storedExt}`,
                             ContentType: isGif ? "image/gif" : "image/png",
                         }),
                     );
@@ -153,7 +153,9 @@ export default class SpacesController {
                             permissions:
                                 permissionFlags.ViewChannel |
                                 permissionFlags.SendMessages |
-                                permissionFlags.CreateInvites,
+                                permissionFlags.CreateInvites |
+                                permissionFlags.Connect |
+                                permissionFlags.Speak,
                         })
                         .returning()
                         .then((res) => res[0]),
@@ -188,7 +190,7 @@ export default class SpacesController {
                         "Failed to create space member",
                     );
 
-                const category = await execNormalized<APIChannel>(
+                const textCategory = await execNormalized<APIChannel>(
                     tx
                         .insert(channelsTable)
                         .values({
@@ -202,13 +204,13 @@ export default class SpacesController {
                         .then((results) => results[0]),
                 );
 
-                if (!category)
+                if (!textCategory)
                     throw new HttpException(
                         HttpStatusCode.InternalServerError,
                         "Failed to create default category",
                     );
 
-                const defaultChannel = await execNormalized<APIChannel>(
+                const defaultTextChannel = await execNormalized<APIChannel>(
                     tx
                         .insert(channelsTable)
                         .values({
@@ -217,16 +219,57 @@ export default class SpacesController {
                             spaceId: BigInt(newSpace.id),
                             name: "General",
                             position: 0,
-                            parentId: BigInt(category.id),
+                            parentId: BigInt(textCategory.id),
                         })
                         .returning()
                         .then((results) => results[0]),
                 );
 
-                if (!defaultChannel)
+                if (!defaultTextChannel)
                     throw new HttpException(
                         HttpStatusCode.InternalServerError,
                         "Failed to create default channel",
+                    );
+
+                const voiceCategory = await execNormalized<APIChannel>(
+                    tx
+                        .insert(channelsTable)
+                        .values({
+                            id: BigInt(Snowflake.generate()),
+                            type: ChannelType.Category,
+                            spaceId: BigInt(newSpace.id),
+                            name: "Voice Channels",
+                            position: 1,
+                        })
+                        .returning()
+                        .then((results) => results[0]),
+                );
+
+                if (!voiceCategory)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to create voice category",
+                    );
+
+                const defaultVoiceChannel = await execNormalized<APIChannel>(
+                    tx
+                        .insert(channelsTable)
+                        .values({
+                            id: BigInt(Snowflake.generate()),
+                            type: ChannelType.Voice,
+                            spaceId: BigInt(newSpace.id),
+                            name: "General",
+                            position: 0,
+                            parentId: BigInt(voiceCategory.id),
+                        })
+                        .returning()
+                        .then((results) => results[0]),
+                );
+
+                if (!defaultVoiceChannel)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to create default voice channel",
                     );
 
                 const settings = await execNormalized<APIUserSettings>(
@@ -252,8 +295,18 @@ export default class SpacesController {
                         "Failed to create user settings",
                     );
 
-                await setCache("channel", category.id, category);
-                await setCache("channel", defaultChannel.id, defaultChannel);
+                await setCache("channel", textCategory.id, textCategory);
+                await setCache(
+                    "channel",
+                    defaultTextChannel.id,
+                    defaultTextChannel,
+                );
+                await setCache("channel", voiceCategory.id, voiceCategory);
+                await setCache(
+                    "channel",
+                    defaultVoiceChannel.id,
+                    defaultVoiceChannel,
+                );
                 await setCache(
                     "spaceMember",
                     `${newSpace.id}:${user.id}`,
@@ -262,7 +315,12 @@ export default class SpacesController {
                 await setCache("space", newSpace.id, newSpace);
                 await setCache("userSettings", user.id, settings);
 
-                const channels = [category, defaultChannel];
+                const channels = [
+                    textCategory,
+                    defaultTextChannel,
+                    voiceCategory,
+                    defaultVoiceChannel,
+                ];
                 const roles = [everyoneRole];
                 const members = [
                     {
@@ -334,7 +392,7 @@ export default class SpacesController {
                     await s3Client.send(
                         new DeleteObjectCommand({
                             Bucket: bucketName,
-                            Key: `icons/${space.id}/${space.icon}.${storedExt}`,
+                            Key: `icons/spaces/${space.id}/${space.icon}.${storedExt}`,
                         }),
                     );
                 } catch {

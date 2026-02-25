@@ -19,13 +19,19 @@ import {
     userSettingsLRU,
     usersLRU,
 } from "./api";
-import { avatarCache, defaultAvatarCache, spaceIconCache } from "./cdn";
+import {
+    avatarCache,
+    channelIconCache,
+    defaultAvatarCache,
+    spaceIconCache,
+} from "./cdn";
 
 export const caches = {
     // CDN
     avatar: avatarCache,
     defaultAvatar: defaultAvatarCache,
     spaceIcon: spaceIconCache,
+    channelIcon: channelIconCache,
 
     // REST
     authUser: authUserLRU,
