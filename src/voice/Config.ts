@@ -1,36 +1,33 @@
 import os from "os";
-import type { TransportListenInfo, WorkerLogLevel, WorkerLogTag, } from "mediasoup/types";
-
-const ifaces = os.networkInterfaces();
+import type {
+    TransportListenInfo,
+    WorkerLogLevel,
+    WorkerLogTag,
+} from "mediasoup/types";
 
 const numWorkers = Math.max(1, os.cpus().length - 1);
 
-const getLocalIp = () => {
-    let localIp = "127.0.0.1";
+const getLocalIP = () => {
+    const ifaces = os.networkInterfaces();
 
-    const keys = Object.keys(ifaces);
-
-    for (const key of keys) {
-        const iface = ifaces[key];
-        if (!iface) continue;
-        for (const alias of iface) {
-            if (alias.family === "IPv4" && !alias.internal) {
-                localIp = alias.address;
-                break;
-            }
-        }
-    }
-
-    return localIp;
+    return Object.values(ifaces)
+        .flatMap((iface) => iface ?? [])
+        .find((iface) => iface?.family === "IPv4" && !iface?.internal)?.address;
 };
 
 const listenInfo = {
-    ip: process.env.NODE_ENV === "development" ? "127.0.0.1" : "0.0.0.0",
+    ip: "0.0.0.0",
     announcedAddress:
         process.env.NODE_ENV === "production"
             ? process.env.ANNOUNCED_IP
-            : getLocalIp(),
-};
+            : getLocalIP(),
+    port: process.env.VOICE_PORT ?? 3030,
+    portRange: {
+        min: 40000,
+        max: 49999,
+    },
+    exposeInternalIp: true,
+} as TransportListenInfo;
 
 export default {
     listenIp: "localhost",
@@ -41,8 +38,6 @@ export default {
     mediasoup: {
         numWorkers,
         worker: {
-            rtcMinPort: 40000,
-            rtcMaxPort: 49999,
             logLevel: "warn" as WorkerLogLevel,
             logTags: [
                 "info",

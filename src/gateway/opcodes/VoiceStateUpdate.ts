@@ -3,6 +3,7 @@ import { GatewayCloseCodes } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
 import type { VoiceStateUpdateBody } from "../voice/VoiceState.types";
 import { VoiceStateService } from "../voice/VoiceState.service";
+import { normalizeJSON } from "@mutualzz/util";
 
 export async function onVoiceStateUpdate(
     this: WebSocket,
@@ -13,7 +14,7 @@ export async function onVoiceStateUpdate(
         return;
     }
 
-    const body = (data.d ?? {}) as Partial<VoiceStateUpdateBody>;
+    const body = normalizeJSON<Partial<VoiceStateUpdateBody>>(data.d ?? {});
     if (!body.spaceId) return;
 
     const selfMute = body.selfMute === true;

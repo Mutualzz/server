@@ -1,4 +1,3 @@
-// backend/src/gateway/PresenceScheduleClear.ts
 import type { GatewayPayload } from "@mutualzz/types";
 import { GatewayCloseCodes } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";

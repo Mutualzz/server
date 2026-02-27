@@ -6,8 +6,7 @@ import type {
     VoiceRoom,
 } from "../types.ts";
 import { Send } from "../util/Common.ts";
-import { logger } from "@mutualzz/voice/Logger.ts";
-import config from "../../Config.ts";
+import config from "../Config.ts";
 
 export default async function VoiceCreateTransport(
     _server: Server,
@@ -19,12 +18,8 @@ export default async function VoiceCreateTransport(
 
     const direction = envelope.data?.direction as TransportDirection;
 
-    logger.debug(
-        `WebRTC transport options: info=${listenInfos}, IS_PRODUCTION=${process.env.NODE_ENV !== "development"}`,
-    );
-
     const transport = await room.router.createWebRtcTransport({
-        listenInfos: listenInfos,
+        listenInfos,
         enableUdp: true,
         enableTcp: false,
         preferUdp: true,

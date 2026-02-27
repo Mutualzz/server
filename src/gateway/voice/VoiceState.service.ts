@@ -36,13 +36,7 @@ export class VoiceStateService {
         const previous = await VoiceStateRedis.getState(userId);
 
         if (!requestedChannelId) {
-            if (previous) {
-                await VoiceStateRedis.removeState({
-                    userId,
-                    spaceId: previous.spaceId,
-                    channelId: previous.channelId,
-                });
-
+            if (previous)
                 await emitEvent({
                     space_id: previous.spaceId,
                     event: "VoiceStateUpdate",
@@ -52,7 +46,7 @@ export class VoiceStateService {
                         channelId: null,
                     },
                 });
-            }
+
             return;
         }
 

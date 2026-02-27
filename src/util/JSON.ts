@@ -6,17 +6,22 @@ export const JSONReplacer = function (
     if (key === "hash") return undefined;
 
     // Date → ISO string
-    if (value instanceof Date) {
-        return value.toISOString().replace("Z", "+00:00");
+    if (this[key] instanceof Date) {
+        return this[key].toISOString().replace("Z", "+00:00");
     }
+
+    if (typeof this[key] === "bigint") {
+        return this[key].toString();
+    }
+
+    if (this[key] === "null") return null;
+    if (this[key] === "false") return false;
+    if (this[key] === "true") return true;
 
     // Handle objects with custom .toJSON
     // erlpack doesn't use JSON.stringify so force it manually
-    // @ts-expect-error doesnt exist on certain but can exist
-    if (value?.toJSON) {
-        //@ts-expect-error doesnt exist on certain but can exist
-        return value.toJSON();
-    }
+    //@ts-ignore
+    if (this[key]?.toJSON) this[key] = this[key].toJSON();
 
     return value;
 };

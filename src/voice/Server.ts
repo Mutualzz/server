@@ -8,7 +8,7 @@ import type { VoiceWebSocket } from "./util/WebSocket";
 import { type Snowflake, VoiceDispatchEvents } from "@mutualzz/types";
 import { closeDatabase } from "@mutualzz/database";
 import Connection from "./events/Connection";
-import config from "../Config.ts";
+import config from "./Config.ts";
 
 export class Server {
     readonly rooms = new Map<string, VoiceRoom>(); // roomId -> VoiceRoom
@@ -85,8 +85,6 @@ export class Server {
             const worker = await createWorker({
                 logLevel: config.mediasoup.worker.logLevel,
                 logTags: config.mediasoup.worker.logTags,
-                rtcMinPort: config.mediasoup.worker.rtcMinPort,
-                rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
             });
 
             worker.on("died", () => {
