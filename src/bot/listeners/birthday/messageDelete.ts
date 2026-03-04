@@ -16,7 +16,6 @@ export default class BirthdayMessageDeleteListener extends Listener {
 
     async run(message: Message) {
         if (!message.inGuild()) return;
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (!message.author) return;
         if (!message.author.bot) return;
         const { client } = this.container;

@@ -8,6 +8,5 @@ export * from "./Redis";
 export * from "./S3";
 export * from "./Session";
 export * from "./Snowflake";
-export * from "./IntegrationMQ";
 export * from "./permissions";
 export * from "./Voice";

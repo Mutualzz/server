@@ -24,9 +24,6 @@ export default class CheckUserDatabaseWithMessageListener extends Listener {
             where: eq(discordUsersTable.id, BigInt(user.id)),
         });
 
-        // TOOD: FInish the birthday system
-        // where when a user deletes their birthday message
-        // it gets removed from the database, since we stored it here.
         if (userExists) {
             user.birthday = dayjs(userExists.birthday).toDate();
             const birthdayMessage =

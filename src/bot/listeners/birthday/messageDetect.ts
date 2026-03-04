@@ -1,7 +1,7 @@
 import { db, discordUsersTable } from "@mutualzz/database";
 import { Listener } from "@sapphire/framework";
 import dayjs from "dayjs";
-import { time, type Message } from "discord.js";
+import { type Message, time } from "discord.js";
 import { eq } from "drizzle-orm";
 
 export default class BirthdayMessageDetectListener extends Listener {
@@ -16,7 +16,6 @@ export default class BirthdayMessageDetectListener extends Listener {
     }
 
     async run(message: Message) {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (message.author?.bot) return;
         const { client } = this.container;
         const { channel } = message;

@@ -19,7 +19,7 @@ export default async function Message(
         return;
     }
 
-    logger.info("<-", {
+    logger.debug("<-", {
         op: envelope.op,
         id: envelope.id,
         userId: peer.userId,

@@ -1,5 +1,6 @@
 import os from "os";
 import type {
+    RouterRtpCodecCapability,
     TransportListenInfo,
     WorkerLogLevel,
     WorkerLogTag,
@@ -71,7 +72,29 @@ export default {
                     "x-google-start-bitrate": 1000,
                 },
             },
-        ],
+            {
+                kind: "video",
+                mimeType: "video/h264",
+                clockRate: 90000,
+                parameters: {
+                    "packetization-mode": 1,
+                    "profile-level-id": "4d0032",
+                    "level-asymmetry-allowed": 1,
+                    "x-google-start-bitrate": 1000,
+                },
+            },
+            {
+                kind: "video",
+                mimeType: "video/h264",
+                clockRate: 90000,
+                parameters: {
+                    "packetization-mode": 1,
+                    "profile-level-id": "42e01f",
+                    "level-asymmetry-allowed": 1,
+                    "x-google-start-bitrate": 1000,
+                },
+            },
+        ] as RouterRtpCodecCapability[],
     },
 
     webRtcTransport: {
@@ -86,6 +109,6 @@ export default {
             },
         ] as TransportListenInfo[],
         maxIncomingBitrate: 1500000,
-        initialAvailableOutgoingBitrate: 1000000,
+        initialAvailableOutgoingBitrate: 800000,
     },
 };
