@@ -116,24 +116,10 @@ export class Server {
         if (existing) return existing;
 
         const { worker, workerIndex } = this.getNextWorker();
+        const mediaCodecs = config.router.mediaCodecs;
 
         const router = await worker.createRouter({
-            mediaCodecs: [
-                {
-                    kind: "audio",
-                    mimeType: "audio/opus",
-                    clockRate: 48000,
-                    channels: 2,
-                },
-                {
-                    kind: "video",
-                    mimeType: "video/VP8",
-                    clockRate: 90000,
-                    parameters: {
-                        "x-google-start-bitrate": 1000,
-                    },
-                },
-            ],
+            mediaCodecs,
         });
 
         const room: VoiceRoom = {
