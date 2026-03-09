@@ -563,18 +563,29 @@ export default class ChannelsController {
                         .returning(),
                 );
 
-            await db
-                .delete(channelsTable)
-                .where(eq(channelsTable.id, BigInt(channel.id)))
-                .returning();
+            const deletedParent = await execNormalized<APIChannel>(
+                db
+                    .delete(channelsTable)
+                    .where(eq(channelsTable.id, BigInt(channel.id)))
+                    .returning()
+                    .then((res) => res[0]),
+            );
+
+            if (!deletedParent)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to delete channel",
+                );
+
+            deletedChannels.push(deletedParent);
 
             if (parentOnly === false && channel.type === ChannelType.Category) {
-                for (const ch of deletedChannels) {
+                for (const ch of deletedChannels)
                     await deleteCache("channel", ch.id);
-                }
 
                 await emitEvent({
                     event: "BulkChannelDelete",
+                    space_id: channel.spaceId,
                     data: deletedChannels,
                 });
 
@@ -585,6 +596,7 @@ export default class ChannelsController {
 
             if (channel.spaceId)
                 await invalidateCache("spaceHydrated", channel.spaceId);
+
             await deleteCache("channel", channel.id);
 
             await emitEvent({

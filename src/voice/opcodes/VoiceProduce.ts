@@ -12,9 +12,6 @@ export default async function VoiceProduce(
 ) {
     const { transportId, kind, rtpParameters } = envelope.data;
 
-    if (kind !== "audio")
-        throw server.error("INVALID_KIND", "Only audio is supported for now");
-
     if (!peer.sendTransport || peer.sendTransport.id !== transportId)
         throw server.error("BAD_TRANSPORT", "Send transport not ready");
 
@@ -57,7 +54,7 @@ export default async function VoiceProduce(
     const shouldStartPaused = Boolean(state.selfMute || state.spaceMute);
 
     const producer = await peer.sendTransport.produce({
-        kind: "audio",
+        kind,
         rtpParameters,
         appData: {
             userId: peer.userId,
@@ -90,7 +87,7 @@ export default async function VoiceProduce(
             data: {
                 userId: peer.userId,
                 producerId: producer.id,
-                kind: "audio",
+                kind,
             },
         },
         peer.userId,

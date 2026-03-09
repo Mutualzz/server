@@ -1,7 +1,17 @@
-import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
+import {
+    deleteCache,
+    getCache,
+    invalidateCache,
+    setCache,
+} from "@mutualzz/cache";
 import { channelsTable, db, messagesTable } from "@mutualzz/database";
 import type { APIMessage } from "@mutualzz/types";
-import { ChannelType, HttpException, HttpStatusCode, MessageType, } from "@mutualzz/types";
+import {
+    ChannelType,
+    HttpException,
+    HttpStatusCode,
+    MessageType,
+} from "@mutualzz/types";
 import {
     buildEmbeds,
     emitEvent,
@@ -14,7 +24,12 @@ import {
     requireChannelPermissions,
     Snowflake,
 } from "@mutualzz/util";
-import { validateMessageBodyPut, validateMessageParamsPatch, validateMessageParamsPut, } from "@mutualzz/validators";
+import {
+    validateChannelParamsGet,
+    validateMessageBodyPut,
+    validateMessageParamsModify,
+    validateMessageParamsPut,
+} from "@mutualzz/validators";
 import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { BitField, type PermissionFlags } from "@mutualzz/permissions";
@@ -39,14 +54,16 @@ export default class MessagesController {
                     "Channel not found",
                 );
 
-            if (
-                channel.type !== ChannelType.Text &&
-                channel.type !== ChannelType.DM &&
-                channel.type !== ChannelType.GroupDM
-            )
+            const isMessageSendable =
+                channel.type === ChannelType.Voice ||
+                channel.type === ChannelType.Text ||
+                channel.type === ChannelType.DM ||
+                channel.type === ChannelType.GroupDM;
+
+            if (!isMessageSendable)
                 throw new HttpException(
                     HttpStatusCode.BadRequest,
-                    "Messages can only be sent in text channels",
+                    "Message cannot be sent in this channel",
                 );
 
             const { content, nonce } = validateMessageBodyPut.parse(req.body);
@@ -174,7 +191,7 @@ export default class MessagesController {
                     "Unauthorized",
                 );
 
-            const { channelId, messageId } = validateMessageParamsPatch.parse(
+            const { channelId, messageId } = validateMessageParamsModify.parse(
                 req.params,
             );
 
@@ -269,7 +286,7 @@ export default class MessagesController {
                     "Unauthorized",
                 );
 
-            const { channelId } = req.params;
+            const { channelId } = validateChannelParamsGet.parse(req.params);
 
             const channel = await getChannel(channelId);
 
@@ -469,7 +486,9 @@ export default class MessagesController {
                     "Unauthorized",
                 );
 
-            const { channelId, messageId } = req.params;
+            const { channelId, messageId } = validateMessageParamsModify.parse(
+                req.params,
+            );
 
             const channel = await getChannel(channelId);
 
