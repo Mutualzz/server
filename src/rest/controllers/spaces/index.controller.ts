@@ -1,8 +1,4 @@
-import {
-    DeleteObjectCommand,
-    GetObjectCommand,
-    PutObjectCommand,
-} from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
 import { deleteCache, setCache } from "@mutualzz/cache";
 import {
     channelsTable,
@@ -15,13 +11,7 @@ import {
     userSettingsTable,
 } from "@mutualzz/database";
 import { generateHash } from "@mutualzz/rest/util";
-import type {
-    APIChannel,
-    APIRole,
-    APISpace,
-    APISpaceMember,
-    APIUserSettings,
-} from "@mutualzz/types";
+import type { APIChannel, APIRole, APISpace, APISpaceMember, APIUserSettings, } from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     bucketName,
@@ -320,7 +310,10 @@ export default class SpacesController {
                     defaultTextChannel,
                     voiceCategory,
                     defaultVoiceChannel,
-                ];
+                ].map((ch) => ({
+                    ...ch,
+                    space: newSpace,
+                }));
                 const roles = [everyoneRole];
                 const members = [
                     {
@@ -353,7 +346,9 @@ export default class SpacesController {
                 data: settings,
             });
 
-            res.status(HttpStatusCode.Success).json(space);
+            const { channels, members, owner, ...plainSpace } = space;
+
+            res.status(HttpStatusCode.Created).json(plainSpace);
         } catch (error) {
             next(error);
         }

@@ -1,5 +1,5 @@
 import { JSONReplacer, redis } from "@mutualzz/util";
-import { caches, type CacheName, type CacheValue } from "./bundle";
+import { type CacheName, caches, type CacheValue } from "./bundle";
 
 export const getCache = async <T extends CacheName>(
     type: T,
@@ -19,7 +19,7 @@ export const getCache = async <T extends CacheName>(
         ) as unknown as CacheValue<T>;
         const cacheToSet = caches[type];
         if (!cacheToSet) return null;
-        // @ts-expect-error-- TS cannot infer type here
+        // @ts-ignore
         cacheToSet.set(cacheKey, parsed);
         return parsed;
     } catch {

@@ -327,16 +327,6 @@ export default class MessagesController {
                     needed: ["ViewChannel"],
                 });
 
-            if (
-                channel.type !== ChannelType.Text &&
-                channel.type !== ChannelType.DM &&
-                channel.type !== ChannelType.GroupDM
-            )
-                throw new HttpException(
-                    HttpStatusCode.BadRequest,
-                    "Messages can only be fetched from text channels",
-                );
-
             const aroundRaw = req.query.around
                 ? `${req.query.around}`
                 : undefined;

@@ -628,7 +628,7 @@ export default class MembersController {
         }
     }
 
-    // TODO: in the future implement the reaason parameter and create logs for moderation actions on the spaces
+    // TODO: in the future implement the reason parameter and create logs for moderation actions on the spaces
     static async kick(req: Request, res: Response, next: NextFunction) {
         try {
             const { user } = req;

@@ -8,9 +8,23 @@ import {
     spaceMembersTable,
 } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
-import { hasAny, permissionFlags, resolveEffectiveChannelBits, } from "@mutualzz/permissions";
-import { arrayPartition, execNormalizedMany, listenEvent, murmur, } from "@mutualzz/util";
-import type { APIMemberRole, APISpaceMember, PresencePayload, Snowflake, } from "@mutualzz/types";
+import {
+    hasAny,
+    permissionFlags,
+    resolveEffectiveChannelBits,
+} from "@mutualzz/permissions";
+import {
+    arrayPartition,
+    execNormalizedMany,
+    listenEvent,
+    murmur,
+} from "@mutualzz/util";
+import type {
+    APIMemberRole,
+    APISpaceMember,
+    PresencePayload,
+    Snowflake,
+} from "@mutualzz/types";
 import { PresenceService } from "../presence/Presence.service.ts";
 
 type OverwriteLike = {
@@ -90,7 +104,10 @@ export async function getParentOverwrites(
             ),
         )
         .limit(1)
-        .then((res) => res[0]);
+        .then((res) => res[0])
+        .catch(() => null);
+
+    if (!parent) return null;
 
     const { parentId } = parent;
     if (parentId == null) return null;
