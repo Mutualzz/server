@@ -6,7 +6,7 @@ import {
     VOICE_STATE_TTL_SECONDS,
 } from "./VoiceState.constants";
 import type { VoiceState } from "./VoiceState.types";
-import { lastKey, membersKey, stateKey } from "./VoiceState.util";
+import { lastKey, stateKey, voiceScopeKey } from "./VoiceState.util";
 
 export class VoiceStateRedis {
     static async getState(userId: Snowflake): Promise<VoiceState | null> {
@@ -20,15 +20,17 @@ export class VoiceStateRedis {
     }
 
     static async listChannelStates(
-        spaceId: Snowflake,
+        spaceId: Snowflake | null,
         channelId: Snowflake,
     ): Promise<VoiceState[]> {
-        const userIds = await redis.smembers(membersKey(spaceId, channelId));
+        const scopeKey = voiceScopeKey(spaceId, channelId);
+        const userIds = await redis.smembers(scopeKey);
         if (!userIds.length) return [];
 
         const pipeline = redis.pipeline();
-        for (const userId of userIds)
+        for (const userId of userIds) {
             pipeline.get(stateKey(userId as Snowflake));
+        }
         const results = await pipeline.exec();
 
         const out: VoiceState[] = [];
@@ -37,10 +39,12 @@ export class VoiceStateRedis {
             try {
                 const parsed = JSON.parse(raw as string) as VoiceState;
                 if (
-                    parsed.spaceId === spaceId &&
-                    parsed.channelId === channelId
-                )
+                    String(parsed.channelId) === String(channelId) &&
+                    (spaceId == null ||
+                        String(parsed.spaceId) === String(spaceId))
+                ) {
                     out.push(parsed);
+                }
             } catch {}
         }
 
@@ -50,14 +54,14 @@ export class VoiceStateRedis {
     static async upsertState(state: VoiceState) {
         const previous = await this.getState(state.userId);
 
-        const previousMembersKey =
+        const previousScopeKey =
             previous?.channelId != null
-                ? membersKey(previous.spaceId, previous.channelId)
+                ? voiceScopeKey(previous.spaceId, previous.channelId)
                 : null;
 
-        const nextMembersKey =
+        const nextScopeKey =
             state.channelId != null
-                ? membersKey(state.spaceId, state.channelId)
+                ? voiceScopeKey(state.spaceId, state.channelId)
                 : null;
 
         const expireAtMs = Date.now() + VOICE_STATE_TTL_SECONDS * 1000;
@@ -70,9 +74,8 @@ export class VoiceStateRedis {
 
         const transaction = redis.multi();
 
-        if (previousMembersKey)
-            transaction.srem(previousMembersKey, state.userId);
-        if (nextMembersKey) transaction.sadd(nextMembersKey, state.userId);
+        if (previousScopeKey) transaction.srem(previousScopeKey, state.userId);
+        if (nextScopeKey) transaction.sadd(nextScopeKey, state.userId);
 
         transaction.set(
             stateKey(state.userId),
@@ -94,12 +97,12 @@ export class VoiceStateRedis {
 
     static async removeState(params: {
         userId: Snowflake;
-        spaceId: Snowflake;
+        spaceId: Snowflake | null;
         channelId: Snowflake | null;
     }) {
         const keyToRemoveFrom =
             params.channelId != null
-                ? membersKey(params.spaceId, params.channelId)
+                ? voiceScopeKey(params.spaceId, params.channelId)
                 : null;
 
         const transaction = redis.multi();

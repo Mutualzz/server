@@ -7,3 +7,4 @@ export * from "./discord";
 
 export * from "./Message";
 export * from "./ChannelPermissionOverwrite";
+export * from "./Expression";

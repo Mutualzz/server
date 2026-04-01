@@ -13,6 +13,7 @@ import {
 import { canVoiceConnect, canVoiceSpeak } from "../util/VoicePermissions.ts";
 import { logger } from "../Logger.ts";
 import { BitField, memberFlags } from "@mutualzz/permissions";
+import { voiceScopeKey } from "./VoiceState.util";
 
 export class VoiceStateService {
     static readonly instanceId: string =
@@ -36,7 +37,13 @@ export class VoiceStateService {
         const previous = await VoiceStateRedis.getState(userId);
 
         if (!requestedChannelId) {
-            if (previous)
+            if (previous) {
+                await VoiceStateRedis.removeState({
+                    userId,
+                    spaceId: previous.spaceId,
+                    channelId: previous.channelId,
+                });
+
                 await emitEvent({
                     space_id: previous.spaceId,
                     event: "VoiceStateUpdate",
@@ -46,6 +53,7 @@ export class VoiceStateService {
                         channelId: null,
                     },
                 });
+            }
 
             return;
         }
@@ -103,7 +111,7 @@ export class VoiceStateService {
         });
 
         if (isFirstJoin || isMove) {
-            const roomId = `${spaceId}:${requestedChannelId}`;
+            const roomId = voiceScopeKey(spaceId, requestedChannelId);
 
             const voiceToken = generateVoiceToken(
                 userId.toString(),
@@ -161,7 +169,7 @@ export class VoiceStateService {
         existing.updatedAt = Date.now();
         await VoiceStateRedis.upsertState(existing);
 
-        const roomId = `${existing.spaceId}:${existing.channelId}`;
+        const roomId = voiceScopeKey(existing.spaceId, existing.channelId);
         const voiceToken = generateVoiceToken(
             userId.toString(),
             sessionId,
@@ -232,8 +240,8 @@ export class VoiceStateService {
         );
 
         return {
-            spaceMute: memberBitfield.has("VoiceSpaceMuted"),
-            spaceDeaf: memberBitfield.has("VoiceSpaceDeafened"),
+            spaceMute: memberBitfield.has("VoiceMuted"),
+            spaceDeaf: memberBitfield.has("VoiceDeafened"),
         };
     }
 }

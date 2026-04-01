@@ -57,6 +57,13 @@
       "when": 1771710331423,
       "tag": "0007_known_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1774933005259,
+      "tag": "0008_nebulous_starfox",
+      "breakpoints": true
     }
   ]
 }

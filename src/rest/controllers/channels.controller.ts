@@ -29,7 +29,9 @@ import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
 import { generateHash } from "@mutualzz/rest/util";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { BitField, channelFlags } from "@mutualzz/permissions";
 
+// TODO: Fix the icon rounded on the frontend and finish it here (tmrw 3/31/2026)
 export default class ChannelsController {
     static async getOne(req: Request, res: Response, next: NextFunction) {
         try {
@@ -88,6 +90,7 @@ export default class ChannelsController {
                 ownerId,
                 recipientIds,
                 crop,
+                roundedIcon,
                 ...rest
             } = validateChannelBodyCreate.parse({
                 ...req.body,
@@ -140,6 +143,7 @@ export default class ChannelsController {
                         ],
                     );
             }
+
             if (!spaceId) {
                 const channel = await execNormalized<APIChannel>(
                     db
@@ -201,13 +205,14 @@ export default class ChannelsController {
 
             const iconFile = fileValidator.optional().parse(req.file);
 
+            const flags = BitField.fromBits(channelFlags, 0n);
+
             const channelValues: typeof channelsTable.$inferInsert = {
                 id: BigInt(Snowflake.generate()),
                 type,
                 spaceId: BigInt(space.id),
                 name,
                 parentId: parentId == null ? null : BigInt(parentId),
-                flags: 0n,
             };
 
             if (iconFile) {
@@ -220,12 +225,15 @@ export default class ChannelsController {
 
                 if (crop) {
                     const { x, y, width, height } = crop;
+
                     iconSharp = iconSharp.extract({
                         left: x,
                         top: y,
                         width,
                         height,
                     });
+
+                    flags.add("RoundedIcon");
                 }
 
                 iconFile.buffer = await iconSharp.toBuffer();
@@ -263,6 +271,7 @@ export default class ChannelsController {
                 }
 
                 channelValues.icon = iconHash;
+                if (roundedIcon) flags.add("RoundedIcon");
             }
 
             const created = await execNormalized<APIChannel>(
@@ -291,6 +300,7 @@ export default class ChannelsController {
                     const positionBase = maxPositionRow?.maxPos ?? null;
 
                     channelValues.position = (positionBase ?? -1) + 1;
+                    channelValues.flags = flags.bits;
 
                     const inserted = await tx
                         .insert(channelsTable)
@@ -409,6 +419,7 @@ export default class ChannelsController {
 
             if (updatedChannel.spaceId)
                 await invalidateCache("spaceHydrated", updatedChannel.spaceId);
+
             await setCache("channel", updatedChannel.id, updatedChannel);
 
             await emitEvent({

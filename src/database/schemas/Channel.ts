@@ -53,7 +53,7 @@ export const channelsTable = pgTable(
             },
         ),
 
-        flags: bigint("flags", { mode: "bigint" })
+        flags: bigint({ mode: "bigint" })
             .notNull()
             .default(sql`0`),
 
