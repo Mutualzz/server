@@ -1,4 +1,8 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { deleteCache, setCache } from "@mutualzz/cache";
 import {
     channelsTable,
@@ -11,7 +15,13 @@ import {
     userSettingsTable,
 } from "@mutualzz/database";
 import { generateHash } from "@mutualzz/rest/util";
-import type { APIChannel, APIRole, APISpace, APISpaceMember, APIUserSettings, } from "@mutualzz/types";
+import type {
+    APIChannel,
+    APIRole,
+    APISpace,
+    APISpaceMember,
+    APIUserSettings,
+} from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     bucketName,
@@ -24,7 +34,7 @@ import {
     Snowflake,
 } from "@mutualzz/util";
 import {
-    fileValidator,
+    imageFileValidator,
     validateSpaceCreate,
     validateSpaceDeleteParams,
     validateSpaceGetBulkQuery,
@@ -52,7 +62,7 @@ export default class SpacesController {
                 crop: rawCrop,
             });
 
-            const iconFile = fileValidator.optional().parse(req.file);
+            const iconFile = imageFileValidator.optional().parse(req.file);
 
             const spaceId = BigInt(Snowflake.generate());
 

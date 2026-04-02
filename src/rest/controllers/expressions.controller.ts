@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { fileValidator, validateExpressionPutBody } from "@mutualzz/validators";
+import { imageFileValidator, validateExpressionPutBody, } from "@mutualzz/validators";
 import type { expressionsTable } from "@mutualzz/database";
 import { requireSpacePermissions, Snowflake } from "@mutualzz/util";
 
@@ -18,7 +18,7 @@ export default class ExpressionsController {
                 req.body,
             );
 
-            const iconFile = fileValidator.parse(req.file);
+            const iconFile = imageFileValidator.parse(req.file);
 
             const expressionValues: typeof expressionsTable.$inferInsert = {
                 id: BigInt(Snowflake.generate()),

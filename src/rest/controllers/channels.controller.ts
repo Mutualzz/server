@@ -15,7 +15,7 @@ import {
     Snowflake,
 } from "@mutualzz/util";
 import {
-    fileValidator,
+    imageFileValidator,
     validateChannelBodyCreate,
     validateChannelBodyUpdate,
     validateChannelBulkBodyPatch,
@@ -31,7 +31,6 @@ import { generateHash } from "@mutualzz/rest/util";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { BitField, channelFlags } from "@mutualzz/permissions";
 
-// TODO: Fix the icon rounded on the frontend and finish it here (tmrw 3/31/2026)
 export default class ChannelsController {
     static async getOne(req: Request, res: Response, next: NextFunction) {
         try {
@@ -197,13 +196,21 @@ export default class ChannelsController {
                     "Space not found",
                 );
 
-            await requireSpacePermissions({
-                spaceId,
-                userId: user.id,
-                needed: ["ManageChannels"],
-            });
+            if (parentId) {
+                await requireChannelPermissions({
+                    spaceId,
+                    channelId: parentId,
+                    needed: ["ManageChannels"],
+                });
+            } else {
+                await requireSpacePermissions({
+                    spaceId,
+                    userId: user.id,
+                    needed: ["ManageChannels"],
+                });
+            }
 
-            const iconFile = fileValidator.optional().parse(req.file);
+            const iconFile = imageFileValidator.optional().parse(req.file);
 
             const flags = BitField.fromBits(channelFlags, 0n);
 
@@ -232,8 +239,6 @@ export default class ChannelsController {
                         width,
                         height,
                     });
-
-                    flags.add("RoundedIcon");
                 }
 
                 iconFile.buffer = await iconSharp.toBuffer();
