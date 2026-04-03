@@ -89,7 +89,6 @@ export default class ChannelsController {
                 ownerId,
                 recipientIds,
                 crop,
-                roundedIcon,
                 ...rest
             } = validateChannelBodyCreate.parse({
                 ...req.body,
@@ -198,7 +197,7 @@ export default class ChannelsController {
 
             if (parentId) {
                 await requireChannelPermissions({
-                    spaceId,
+                    userId: user.id,
                     channelId: parentId,
                     needed: ["ManageChannels"],
                 });
@@ -231,7 +230,7 @@ export default class ChannelsController {
                 else iconSharp = sharp(iconFile.buffer).toFormat("png");
 
                 if (crop) {
-                    const { x, y, width, height } = crop;
+                    const { x, y, width, height, rounded } = crop;
 
                     iconSharp = iconSharp.extract({
                         left: x,
@@ -239,12 +238,14 @@ export default class ChannelsController {
                         width,
                         height,
                     });
+
+                    if (rounded) flags.add("RoundedIcon");
                 }
 
-                iconFile.buffer = await iconSharp.toBuffer();
+                const iconBuffer = await iconSharp.toBuffer();
 
                 const iconHash = generateHash(
-                    iconFile.buffer,
+                    iconBuffer,
                     iconFile.mimetype.includes("gif"),
                 );
 
@@ -268,7 +269,7 @@ export default class ChannelsController {
                     await s3Client.send(
                         new PutObjectCommand({
                             Bucket: bucketName,
-                            Body: iconFile.buffer,
+                            Body: iconBuffer,
                             Key: `icons/channels/${channelValues.id}/${iconHash}.${storedExt}`,
                             ContentType: isGif ? "image/gif" : "image/png",
                         }),
@@ -276,7 +277,6 @@ export default class ChannelsController {
                 }
 
                 channelValues.icon = iconHash;
-                if (roundedIcon) flags.add("RoundedIcon");
             }
 
             const created = await execNormalized<APIChannel>(

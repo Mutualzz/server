@@ -1,12 +1,10 @@
 import { GatewayCloseCodes, type GatewayPayload } from "@mutualzz/types";
-import { getUser, prepareReadyData } from "@mutualzz/util";
+import { getUser } from "@mutualzz/util";
 import { logger } from "../Logger";
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
-import { setupListener } from "@mutualzz/gateway/Listener.ts";
-import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
 
 export async function onResume(this: WebSocket, data: GatewayPayload) {
     const resume = data.d;
@@ -59,22 +57,4 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
     });
 
     logger.info(`Session resumed: ${this.sessionId}`);
-
-    const readyData = await prepareReadyData(user);
-
-    await Send(this, {
-        op: "Dispatch",
-        t: "Ready",
-        s: this.sequence++,
-        d: {
-            ...readyData,
-            sessionId: this.sessionId,
-        },
-    });
-
-    await setupListener.call(this);
-
-    await VoiceStateService.sendRejoinIfNeeded(this);
-
-    logger.info(`Sent Ready event for resumed session: ${this.sessionId}`);
 }

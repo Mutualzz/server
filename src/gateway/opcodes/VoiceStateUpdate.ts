@@ -15,15 +15,25 @@ export async function onVoiceStateUpdate(
     }
 
     const body = normalizeJSON<Partial<VoiceStateUpdateBody>>(data.d ?? {});
-    if (!body.spaceId) return;
+    const channelId = body.channelId ?? null;
+    const spaceId = body.spaceId ?? null;
 
-    const selfMute = body.selfMute === true;
-    const selfDeaf = body.selfDeaf === true;
+    // leave
+    if (!channelId) {
+        await VoiceStateService.handleVoiceStateUpdate(this, {
+            spaceId,
+            channelId: null,
+            selfMute: body.selfMute === true,
+            selfDeaf: body.selfDeaf === true,
+        });
+        return;
+    }
 
+    // join DM or space voice
     await VoiceStateService.handleVoiceStateUpdate(this, {
-        spaceId: body.spaceId,
-        channelId: body.channelId ?? null,
-        selfMute,
-        selfDeaf,
+        spaceId,
+        channelId,
+        selfMute: body.selfMute === true,
+        selfDeaf: body.selfDeaf === true,
     });
 }

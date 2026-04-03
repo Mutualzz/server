@@ -922,13 +922,13 @@ export default class MembersController {
             );
 
             if (spaceMute != null) {
-                if (spaceMute) memberBitfield.add("VoiceSpaceMuted");
-                else memberBitfield.remove("VoiceSpaceMuted");
+                if (spaceMute) memberBitfield.add("VoiceMuted");
+                else memberBitfield.remove("VoiceMuted");
             }
 
             if (spaceDeaf != null) {
-                if (spaceDeaf) memberBitfield.add("VoiceSpaceDeafened");
-                else memberBitfield.remove("VoiceSpaceDeafened");
+                if (spaceDeaf) memberBitfield.add("VoiceDeafened");
+                else memberBitfield.remove("VoiceDeafened");
             }
 
             const nextFlags = memberBitfield.toBigInt();

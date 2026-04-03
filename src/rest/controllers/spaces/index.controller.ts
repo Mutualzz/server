@@ -90,10 +90,10 @@ export default class SpacesController {
                     });
                 }
 
-                iconFile.buffer = await iconSharp.toBuffer();
+                const iconBuffer = await iconSharp.toBuffer();
 
                 const iconHash = generateHash(
-                    iconFile.buffer,
+                    iconBuffer,
                     iconFile.mimetype.includes("gif"),
                 );
 
@@ -117,7 +117,7 @@ export default class SpacesController {
                     await s3Client.send(
                         new PutObjectCommand({
                             Bucket: bucketName,
-                            Body: iconFile.buffer,
+                            Body: iconBuffer,
                             Key: `icons/spaces/${spaceId}/${iconHash}.${storedExt}`,
                             ContentType: isGif ? "image/gif" : "image/png",
                         }),

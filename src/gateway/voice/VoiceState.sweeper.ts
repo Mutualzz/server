@@ -1,5 +1,5 @@
 import type { Snowflake } from "@mutualzz/types";
-import { emitEvent, redis } from "@mutualzz/util";
+import { redis } from "@mutualzz/util";
 import {
     VOICE_EXP_ZSET_KEY,
     VOICE_SWEEP_BATCH_SIZE,
@@ -72,16 +72,6 @@ export class VoiceStateSweeper {
                             membersKey(last.spaceId, last.channelId),
                             userId,
                         );
-
-                        await emitEvent({
-                            space_id: last.spaceId,
-                            event: "VoiceStateUpdate",
-                            data: {
-                                userId,
-                                spaceId: last.spaceId,
-                                channelId: null,
-                            },
-                        });
                     }
                 } catch {}
             }

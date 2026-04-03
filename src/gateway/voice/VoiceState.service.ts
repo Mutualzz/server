@@ -29,28 +29,36 @@ export class VoiceStateService {
         const sessionId = socket.sessionId as string;
 
         const requestedChannelId = body.channelId ?? null;
-        const spaceId = body.spaceId;
+        const spaceId = body.spaceId ?? null;
 
         const selfMuteRequested = body.selfMute === true;
         const selfDeafRequested = body.selfDeaf === true;
 
         const previous = await VoiceStateRedis.getState(userId);
-
         if (!requestedChannelId) {
             if (previous) {
                 await VoiceStateRedis.removeState({
                     userId,
-                    spaceId: previous.spaceId,
+                    spaceId: previous.spaceId ?? null,
                     channelId: previous.channelId,
                 });
 
                 await emitEvent({
-                    space_id: previous.spaceId,
+                    space_id: previous.spaceId ?? null,
                     event: "VoiceStateUpdate",
                     data: {
                         userId,
-                        spaceId: previous.spaceId,
+                        spaceId: previous.spaceId ?? null,
                         channelId: null,
+                    },
+                });
+
+                await emitEvent({
+                    space_id: previous.spaceId ?? null,
+                    event: "VoiceStateSync",
+                    data: {
+                        channelId: previous.channelId,
+                        states: [],
                     },
                 });
             }
@@ -58,28 +66,37 @@ export class VoiceStateService {
             return;
         }
 
-        const hasConnect = await canVoiceConnect({
-            spaceId,
-            channelId: requestedChannelId,
-            userId,
-        });
+        const isDmVoice = spaceId == null;
 
-        if (!hasConnect) {
-            logger.debug(
-                `User ${userId} attempted to join voice channel ${requestedChannelId} in space ${spaceId} without permission`,
-            );
-            return;
+        if (!isDmVoice) {
+            const hasConnect = await canVoiceConnect({
+                spaceId,
+                channelId: requestedChannelId,
+                userId,
+            });
+
+            if (!hasConnect) {
+                logger.debug(
+                    `User ${userId} attempted to join voice channel ${requestedChannelId} in space ${spaceId} without permission`,
+                );
+                return;
+            }
         }
 
-        const hasSpeak = await canVoiceSpeak({
-            spaceId,
-            channelId: requestedChannelId,
-            userId,
-        });
+        const hasSpeak = isDmVoice
+            ? true
+            : await canVoiceSpeak({
+                  spaceId,
+                  channelId: requestedChannelId,
+                  userId,
+              });
 
         const effectiveSelfMute = hasSpeak ? selfMuteRequested : true;
 
-        const moderation = await this.getMemberVoiceModeration(spaceId, userId);
+        const moderation = isDmVoice
+            ? { spaceMute: false, spaceDeaf: false }
+            : await this.getMemberVoiceModeration(spaceId, userId);
+
         const spaceMute = moderation.spaceMute;
         const spaceDeaf = moderation.spaceDeaf;
 
@@ -227,9 +244,10 @@ export class VoiceStateService {
     }
 
     private static async getMemberVoiceModeration(
-        spaceId: Snowflake,
+        spaceId: Snowflake | null,
         userId: Snowflake,
     ) {
+        if (!spaceId) return { spaceMute: false, spaceDeaf: false };
         const member = await getMember(spaceId, userId);
 
         if (!member) return { spaceMute: false, spaceDeaf: false };

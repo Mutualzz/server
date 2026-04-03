@@ -100,14 +100,14 @@ export class VoiceStateRedis {
         spaceId: Snowflake | null;
         channelId: Snowflake | null;
     }) {
-        const keyToRemoveFrom =
-            params.channelId != null
-                ? voiceScopeKey(params.spaceId, params.channelId)
-                : null;
-
         const transaction = redis.multi();
 
-        if (keyToRemoveFrom) transaction.srem(keyToRemoveFrom, params.userId);
+        if (params.channelId != null) {
+            transaction.srem(
+                voiceScopeKey(params.spaceId, params.channelId),
+                params.userId,
+            );
+        }
 
         transaction.del(stateKey(params.userId));
         transaction.zrem(VOICE_EXP_ZSET_KEY, params.userId);

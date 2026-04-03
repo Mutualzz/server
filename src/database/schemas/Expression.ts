@@ -24,6 +24,7 @@ export const expressionsTable = pgTable(
         type: smallint().notNull(),
 
         name: text().notNull(),
+        assetHash: text().notNull(),
 
         authorId: bigint({
             mode: "bigint",

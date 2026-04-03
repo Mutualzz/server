@@ -47,12 +47,6 @@ export default class InvitesController {
                     "Space not found",
                 );
 
-            await requireSpacePermissions({
-                spaceId: space.id,
-                userId: user.id,
-                needed: ["ManageInvites"],
-            });
-
             let invites = await getCache("invites", spaceId);
             if (invites)
                 return res.status(HttpStatusCode.Success).json(invites);
@@ -109,13 +103,6 @@ export default class InvitesController {
                     HttpStatusCode.NotFound,
                     "Space not found",
                 );
-
-            await requireSpacePermissions({
-                spaceId: space.id,
-                userId: user.id,
-                needed: ["ManageInvites"],
-            });
-
             let invite = await getCache("invite", code);
             if (invite) return res.status(HttpStatusCode.Success).json(invite);
 
@@ -156,7 +143,7 @@ export default class InvitesController {
 
     static async getFromCode(req: Request, res: Response, next: NextFunction) {
         try {
-            const { code } = req.params;
+            const { code } = req.params as { code: string };
 
             const invite = await execNormalized<APIInvite>(
                 db.query.invitesTable.findFirst({
@@ -214,7 +201,7 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params;
+            const { spaceId } = req.params as { spaceId: string };
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -336,7 +323,7 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { code } = req.params;
+            const { code } = req.params as { code: string };
 
             const invite = await execNormalized<APIInvite>(
                 db.query.invitesTable.findFirst({
@@ -418,7 +405,7 @@ export default class InvitesController {
                     await requireChannelPermissions({
                         channelId: invite.channelId,
                         userId: user.id,
-                        needed: ["ManageInvites"],
+                        needed: ["CreateInvites"],
                     });
 
                     canModerate = true;
@@ -539,7 +526,10 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId, code } = req.params;
+            const { spaceId, code } = req.params as {
+                spaceId: string;
+                code: string;
+            };
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -598,7 +588,7 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params;
+            const { spaceId } = req.params as { spaceId: string };
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -610,7 +600,7 @@ export default class InvitesController {
             await requireSpacePermissions({
                 spaceId: space.id,
                 userId: user.id,
-                needed: ["ManageInvites"],
+                needed: ["ManageChannels"],
             });
 
             await db

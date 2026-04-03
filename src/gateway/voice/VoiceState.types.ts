@@ -2,7 +2,7 @@ import type { Snowflake } from "@mutualzz/types";
 
 export interface VoiceState {
     userId: Snowflake;
-    spaceId: Snowflake;
+    spaceId: Snowflake | null;
     channelId: Snowflake | null;
 
     selfMute: boolean;
@@ -16,7 +16,7 @@ export interface VoiceState {
 }
 
 export type VoiceStateUpdateBody = {
-    spaceId: Snowflake;
+    spaceId: Snowflake | null;
     channelId: Snowflake | null;
     selfMute?: boolean;
     selfDeaf?: boolean;
