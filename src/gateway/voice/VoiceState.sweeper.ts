@@ -7,7 +7,7 @@ import {
     VOICE_SWEEP_LOCK_KEY,
     VOICE_SWEEP_LOCK_TTL_MS,
 } from "./VoiceState.constants";
-import { lastKey, membersKey, stateKey } from "./VoiceState.util.ts";
+import { lastKey, stateKey, voiceScopeKey } from "./VoiceState.util.ts";
 
 export class VoiceStateSweeper {
     private static intervalHandle: NodeJS.Timeout | null = null;
@@ -65,11 +65,22 @@ export class VoiceStateSweeper {
                     const last = JSON.parse(lastRaw) as {
                         spaceId: Snowflake;
                         channelId: Snowflake | null;
+                        updatedAt?: number;
                     };
+
+                    const ageMs = Date.now() - Number(last.updatedAt ?? 0);
+                    if (ageMs < 30_000) {
+                        await redis.zadd(
+                            VOICE_EXP_ZSET_KEY,
+                            String(Date.now() + 15_000),
+                            userId,
+                        );
+                        continue;
+                    }
 
                     if (last.spaceId && last.channelId) {
                         await redis.srem(
-                            membersKey(last.spaceId, last.channelId),
+                            voiceScopeKey(last.spaceId, last.channelId),
                             userId,
                         );
                     }

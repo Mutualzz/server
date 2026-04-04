@@ -37,16 +37,31 @@ export default async function VoiceProduce(
             "Voice token does not match room",
         );
 
-    const rawState = await redis.get(`voice:state:${peer.userId}`);
-    if (!rawState)
-        throw server.error("VOICE_STATE_NOT_FOUND", "Voice state not found");
+    const readVoiceState = async () => {
+        const rawState = await redis.get(`voice:state:${peer.userId}`);
+        if (!rawState) return null;
 
-    let state: any;
-    try {
-        state = JSON.parse(rawState);
-    } catch (err) {
-        throw server.error("VOICE_STATE_INVALID", "Voice state is invalid");
+        try {
+            return JSON.parse(rawState);
+        } catch {
+            throw server.error("VOICE_STATE_INVALID", "Voice state is invalid");
+        }
+    };
+
+    let state: any = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        state = await readVoiceState();
+        if (state) break;
+
+        if (attempt < 4) {
+            await new Promise((resolve) =>
+                setTimeout(resolve, 50 * (attempt + 1)),
+            );
+        }
     }
+
+    if (!state)
+        throw server.error("VOICE_STATE_NOT_FOUND", "Voice state not found");
 
     if (!state.channelId)
         throw server.error("NOT_IN_VOICE", "User is not in a voice channel");

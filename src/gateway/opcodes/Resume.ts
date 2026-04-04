@@ -5,6 +5,7 @@ import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
+import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
 
 export async function onResume(this: WebSocket, data: GatewayPayload) {
     const resume = data.d;
@@ -57,4 +58,6 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
     });
 
     logger.info(`Session resumed: ${this.sessionId}`);
+
+    await VoiceStateService.sendRejoinIfNeeded(this);
 }

@@ -53,14 +53,22 @@ export class VoiceStateService {
                     },
                 });
 
-                await emitEvent({
-                    space_id: previous.spaceId ?? null,
-                    event: "VoiceStateSync",
-                    data: {
-                        channelId: previous.channelId,
-                        states: [],
-                    },
-                });
+                if (previous.channelId) {
+                    const remainingStates =
+                        await VoiceStateRedis.listChannelStates(
+                            previous.spaceId ?? null,
+                            previous.channelId,
+                        );
+
+                    await emitEvent({
+                        space_id: previous.spaceId ?? null,
+                        event: "VoiceStateSync",
+                        data: {
+                            channelId: previous.channelId,
+                            states: remainingStates,
+                        },
+                    });
+                }
             }
 
             return;
@@ -144,6 +152,8 @@ export class VoiceStateService {
                 s: socket.sequence++,
                 d: {
                     roomId,
+                    spaceId,
+                    channelId: requestedChannelId,
                     voiceEndpoint: process.env.VOICE_ENDPOINT,
                     voiceToken,
                 },
@@ -200,6 +210,8 @@ export class VoiceStateService {
             s: socket.sequence++,
             d: {
                 roomId,
+                spaceId: existing.spaceId,
+                channelId: existing.channelId,
                 voiceEndpoint: process.env.VOICE_ENDPOINT,
                 voiceToken,
             },

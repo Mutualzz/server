@@ -19,12 +19,12 @@ export default async function Message(
         return;
     }
 
-    logger.debug("<-", {
-        op: envelope.op,
-        id: envelope.id,
-        userId: peer.userId,
-        roomId: peer.roomId,
-    });
+    // logger.debug("<-", {
+    //     op: envelope.op,
+    //     id: envelope.id,
+    //     userId: peer.userId,
+    //     roomId: peer.roomId,
+    // });
 
     const handler = OPCodeHandlers[envelope.op];
     if (!handler) {

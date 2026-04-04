@@ -16,7 +16,3 @@ export function voiceScopeKey(
         ? `voice:space:${spaceId}:channel:${channelId}`
         : `voice:channel:${channelId}`;
 }
-
-export function membersKey(spaceId: Snowflake, channelId: Snowflake) {
-    return `voice:space:${spaceId}:channel:${channelId}:members`;
-}

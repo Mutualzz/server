@@ -11,7 +11,7 @@ import { MIME_TYPES } from "../Constants";
 export default class DefaultAvatarsController {
     static async get(req: Request, res: Response, next: NextFunction) {
         try {
-            const { id } = req.params;
+            const { id } = req.params as { id: string };
 
             if (!id.match(/^[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/))
                 throw new HttpException(
