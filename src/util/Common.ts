@@ -16,17 +16,24 @@ import MurmurHash from "imurmurhash";
 
 type Services = "spotify" | "youtube" | "apple" | "tidal" | "other";
 
-const privateKey = fs.readFileSync(path.resolve(process.cwd(), "KitKey.p8"));
+let appleToken = null;
+try {
+    const privateKey = fs.readFileSync(
+        path.resolve(process.cwd(), "KitKey.p8"),
+    );
 
-const token = jwt.sign({}, privateKey, {
-    algorithm: "ES256",
-    expiresIn: "180d",
-    issuer: process.env.APPLE_TEAM_ID,
-    header: {
-        alg: "ES256",
-        kid: process.env.APPLE_KEY_ID,
-    },
-});
+    appleToken = jwt.sign({}, privateKey, {
+        algorithm: "ES256",
+        expiresIn: "180d",
+        issuer: process.env.APPLE_TEAM_ID,
+        header: {
+            alg: "ES256",
+            kid: process.env.APPLE_KEY_ID,
+        },
+    });
+} catch (err) {
+    console.error("Apple embeds wont work");
+}
 
 export const spotifySdk = SpotifyApi.withClientCredentials(
     process.env.SPOTIFY_CLIENT_ID!,
@@ -34,7 +41,7 @@ export const spotifySdk = SpotifyApi.withClientCredentials(
 );
 
 export const appleMusicSdk = new AppleMusicClient({
-    developerToken: token,
+    developerToken: appleToken ?? "",
     defaultStorefront: "us",
     defaultLanguageTag: "en-US",
 });
