@@ -13,12 +13,15 @@ import { relations, sql } from "drizzle-orm";
 // Expression Type
 // 0 - Emoji
 // 1 - Sticker
+// For now these two
+
+// TODO: Add sharedWith for author to share if not in space. or if in space they should have manage expression
 
 // If spaceId set the expression belongs to a space
 // Otherwise is it belongs to a user
 // AuthorId is when set
 export const expressionsTable = pgTable(
-    "emojis",
+    "expressions",
     {
         id: bigint({ mode: "bigint" }).primaryKey(),
         type: smallint().notNull(),

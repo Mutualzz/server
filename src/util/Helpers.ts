@@ -3,6 +3,7 @@ import {
     channelPermissionOverwritesTable,
     channelsTable,
     db,
+    expressionsTable,
     rolesTable,
     spaceMemberRolesTable,
     spaceMembersTable,
@@ -25,6 +26,7 @@ import {
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/permissions";
+import type { APIExpression } from "@mutualzz/types/src";
 
 export const publicUserColumns = {
     hash: false,
@@ -49,6 +51,19 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
             }),
         ),
     ]);
+
+    const expressions = await execNormalizedMany<APIExpression>(
+        db.query.expressionsTable.findMany({
+            where: or(
+                eq(expressionsTable.authorId, BigInt(user.id)),
+                sql`exists (
+                    select 1 from "space_members" sm
+                    where sm."spaceId" = ${spacesTable.id}
+                    and sm."userId" = ${BigInt(user.id)}
+                )`,
+            ),
+        }),
+    );
 
     const spaces = await execNormalizedMany<APISpace>(
         db.query.spacesTable.findMany({
@@ -94,6 +109,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
         themes,
         spaces,
         settings,
+        expressions,
     };
 };
 

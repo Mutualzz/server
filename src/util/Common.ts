@@ -14,7 +14,7 @@ import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
 
-type Services = "spotify" | "youtube" | "apple" | "other";
+type Services = "spotify" | "youtube" | "apple" | "tidal" | "other";
 
 const privateKey = fs.readFileSync(path.resolve(process.cwd(), "KitKey.p8"));
 
@@ -378,6 +378,7 @@ export const detectService = (url: string): Services => {
     if (/open\.spotify\.com/.test(url)) return "spotify";
     if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
     if (/music\.apple\.com/.test(url)) return "apple";
+    if (/tidal\.com/.test(url)) return "tidal";
     return "other";
 };
 

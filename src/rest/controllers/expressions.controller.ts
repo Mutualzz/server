@@ -35,7 +35,7 @@ export default class ExpressionsController {
                 });
 
             const id = BigInt(Snowflake.generate());
-            const expressionName = name ?? id;
+            const expressionName = name ?? id.toString();
 
             const isGif = iconFile.mimetype === "image/gif";
 
@@ -48,7 +48,7 @@ export default class ExpressionsController {
                 type: parseInt(type),
                 authorId: BigInt(user.id),
                 spaceId: spaceId ? BigInt(spaceId) : null,
-                name: expressionName.toString(),
+                name: expressionName,
             });
         } catch (err) {
             next(err);
