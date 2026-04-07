@@ -1,4 +1,4 @@
-import type { APIMessageEmbed } from "@mutualzz/types";
+import type { APIMessageEmbed, APIPrivateUser, APIUser } from "@mutualzz/types";
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import Color from "color";
 import crypto from "crypto";
@@ -13,6 +13,7 @@ import path from "path";
 import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
+import { getExpression, getMember } from "@mutualzz/util/Helpers.ts";
 
 type Services = "spotify" | "youtube" | "apple" | "tidal" | "other";
 
@@ -71,6 +72,44 @@ export function arrayPartition<T>(
     array.forEach((e) => (filter(e) ? pass : fail).push(e));
     return [pass, fail];
 }
+
+async function replaceAsync(
+    str: string,
+    regex: string | RegExp,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    asyncFn: Function,
+) {
+    const promises: any[] = [];
+    str.replace(regex, (full, ...args) => {
+        promises.push(asyncFn(full, ...args));
+        return full;
+    });
+    const data = await Promise.all(promises);
+    return str.replace(regex, () => data.shift());
+}
+
+export const sanitizeContent = (
+    content: string,
+    user: APIUser | APIPrivateUser,
+) => {
+    const customEmojiRegex = /<a?:[^:]+:\d+>/g;
+
+    return replaceAsync(content, customEmojiRegex, async (raw: string) => {
+        const [, , emojiId] = raw.replace(">", "").split(":");
+        const emoji = await getExpression(emojiId);
+
+        if (!emoji) return raw;
+
+        let allowed = false;
+        if (BigInt(emoji.authorId) === BigInt(user.id)) allowed = true;
+        else if (emoji.spaceId)
+            allowed = await getMember(emoji.spaceId, user.id, true);
+
+        if (allowed) return raw;
+
+        return `:${emoji.name}:`;
+    });
+};
 
 export const createRouter = () => express.Router({ mergeParams: true });
 export const createLimiter = (ms: number, limit: number) =>

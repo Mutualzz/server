@@ -1,5 +1,6 @@
 import type {
     APIChannel,
+    APIExpression,
     APIInvite,
     APIMessage,
     APIPrivateUser,
@@ -20,6 +21,13 @@ export const authUserLRU = new LRUCache<string, APIPrivateUser>({
     },
 });
 // [END] Auth User Caches
+
+// [START] Expression Cache
+export const expressionLRU = new LRUCache<string, APIExpression>({
+    max: 5000,
+    ttl: 1000 * 60,
+});
+// [END] Expression Cache
 
 // [START] Channel Caches
 export const channelsLRU = new LRUCache<string, APIChannel[]>({

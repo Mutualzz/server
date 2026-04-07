@@ -18,7 +18,7 @@ import {
 import { generateHash } from "@mutualzz/rest/util";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 
 export default class ExpressionsController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -40,12 +40,39 @@ export default class ExpressionsController {
                 });
             const expressionFile = imageFileValidator.parse(req.file);
 
-            if (spaceId)
+            if (spaceId) {
                 await requireSpacePermissions({
                     spaceId,
                     userId: user.id,
                     needed: ["CreateExpressions"],
                 });
+
+                const { counted } = await db
+                    .select({
+                        counted: count(),
+                    })
+                    .from(expressionsTable)
+                    .where(eq(expressionsTable.spaceId, BigInt(spaceId)))
+                    .then((r) => r[0]);
+
+                if (counted === 100)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "Space has reached its maximum number of expressions",
+                    );
+            } else {
+                const { counted } = await db
+                    .select({ counted: count() })
+                    .from(expressionsTable)
+                    .where(eq(expressionsTable.authorId, BigInt(user.id)))
+                    .then((r) => r[0]);
+
+                if (counted === 100)
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "You have reached maximum number of expressions",
+                    );
+            }
 
             const id = BigInt(Snowflake.generate());
 
@@ -58,8 +85,6 @@ export default class ExpressionsController {
                 expressionSharp = sharp(expressionFile.buffer, {
                     animated: true,
                 });
-
-                console.log("GIF detected");
 
                 if (crop) {
                     const { x, y, width, height } = crop;
@@ -192,6 +217,18 @@ export default class ExpressionsController {
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Expression not found",
+                );
+
+            if (expression.spaceId)
+                await requireSpacePermissions({
+                    spaceId: expression.spaceId,
+                    userId: user.id,
+                    needed: ["ManageExpressions"],
+                });
+            else if (BigInt(expression.authorId) !== BigInt(user.id))
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You cannot delete this expression",
                 );
 
             await db

@@ -224,6 +224,22 @@ export const getChannel = async (id: string) => {
     return channel;
 };
 
+export const getExpression = async (id: string) => {
+    let expression = await getCache("expression", id);
+    if (expression) return expression;
+
+    expression = await execNormalized<APIExpression>(
+        db.query.expressionsTable.findFirst({
+            where: eq(expressionsTable.id, BigInt(id)),
+        }),
+    );
+
+    if (!expression) return null;
+
+    await setCache("expression", id, expression);
+    return expression;
+};
+
 export async function getMember(
     spaceId: Snowflake,
     userId: Snowflake,

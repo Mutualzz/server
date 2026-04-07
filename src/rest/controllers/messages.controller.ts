@@ -22,6 +22,7 @@ import {
     getSpace,
     getUser,
     requireChannelPermissions,
+    sanitizeContent,
     Snowflake,
 } from "@mutualzz/util";
 import {
@@ -119,6 +120,10 @@ export default class MessagesController {
                         .json(existingMessage);
             }
 
+            const sanitizedContent = content
+                ? await sanitizeContent(content, user)
+                : null;
+
             const newMessage = await execNormalized<APIMessage>(
                 db
                     .insert(messagesTable)
@@ -130,8 +135,8 @@ export default class MessagesController {
                         spaceId: channel.spaceId
                             ? BigInt(channel.spaceId)
                             : undefined,
-                        content,
-                        embeds: await buildEmbeds(content || ""),
+                        content: sanitizedContent,
+                        embeds: await buildEmbeds(sanitizedContent || ""),
                         type: MessageType.Default,
                     })
                     .returning()
@@ -238,12 +243,16 @@ export default class MessagesController {
 
             const { content } = validateMessageBodyPut.parse(req.body);
 
+            const sanitizedContent = content
+                ? await sanitizeContent(content, user)
+                : content;
+
             const result = await execNormalized<APIMessage>(
                 db
                     .update(messagesTable)
                     .set({
-                        content: content || message.content,
-                        embeds: await buildEmbeds(content || ""),
+                        content: sanitizedContent,
+                        embeds: await buildEmbeds(sanitizedContent || ""),
                     })
                     .where(eq(messagesTable.id, BigInt(message.id)))
                     .returning()

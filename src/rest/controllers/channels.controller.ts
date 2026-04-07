@@ -210,9 +210,7 @@ export default class ChannelsController {
 
             if (iconFile) {
                 const isGif = iconFile.mimetype === "image/gif";
-                let buffer:
-                    | Buffer<ArrayBufferLike>
-                    | Uint8Array<ArrayBufferLike> = iconFile.buffer;
+                let buffer: Buffer | Uint8Array = iconFile.buffer;
 
                 let iconSharp: sharp.Sharp;
                 if (isGif) {
@@ -306,7 +304,7 @@ export default class ChannelsController {
                         .returning()
                         .then((res) => res[0]);
 
-                    return inserted ?? null;
+                    return inserted || null;
                 }),
             );
 

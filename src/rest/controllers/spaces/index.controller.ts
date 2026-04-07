@@ -373,7 +373,7 @@ export default class SpacesController {
                     "Unauthorized",
                 );
 
-            const { id: spaceId } = validateSpaceDeleteParams.parse(req.params);
+            const { spaceId } = validateSpaceDeleteParams.parse(req.params);
 
             const space = await getSpace(spaceId);
 
@@ -504,7 +504,7 @@ export default class SpacesController {
                     "Unauthorized",
                 );
 
-            const { id: spaceId } = validateSpaceGetOneParams.parse(req.params);
+            const { spaceId } = validateSpaceGetOneParams.parse(req.params);
 
             const space = await getSpace(spaceId);
 
