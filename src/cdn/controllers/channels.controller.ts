@@ -1,5 +1,5 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getCache, spaceIconCache } from "@mutualzz/cache";
+import { channelIconCache, getCache } from "@mutualzz/cache";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
@@ -47,7 +47,7 @@ export default class ChannelsController {
                 targetFormat =
                     isAnimatedHash && explicitAnimated ? "webp" : "png";
 
-            let willAnimate = false;
+            let willAnimate: boolean;
             if (targetFormat === "gif")
                 willAnimate = isAnimatedHash && !explicitStatic;
             else if (targetFormat === "webp")
@@ -66,7 +66,7 @@ export default class ChannelsController {
             if (boundedSize) cacheKey += `:${boundedSize}`;
             if (willAnimate) cacheKey += `:a`;
 
-            const cached = await getCache("spaceIcon", cacheKey);
+            const cached = await getCache("channelIcon", cacheKey);
             if (cached) {
                 res.setHeader(
                     "Cache-Control",
@@ -122,7 +122,7 @@ export default class ChannelsController {
                 } else if (targetFormat === "gif") {
                     if (!boundedSize) {
                         const etag = contentEtag(sourceBody);
-                        spaceIconCache.set(cacheKey, sourceBody);
+                        channelIconCache.set(cacheKey, sourceBody);
                         res.setHeader(
                             "Cache-Control",
                             "public, max-age=86400, immutable",
@@ -168,7 +168,7 @@ export default class ChannelsController {
             const outputBuffer = await image.toBuffer();
 
             const etag = contentEtag(outputBuffer);
-            spaceIconCache.set(cacheKey, outputBuffer);
+            channelIconCache.set(cacheKey, outputBuffer);
 
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");
             res.setHeader("ETag", etag);

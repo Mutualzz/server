@@ -23,6 +23,7 @@ import {
     avatarCache,
     channelIconCache,
     defaultAvatarCache,
+    expressionsCache,
     spaceIconCache,
 } from "./cdn";
 
@@ -32,6 +33,7 @@ export const caches = {
     defaultAvatar: defaultAvatarCache,
     spaceIcon: spaceIconCache,
     channelIcon: channelIconCache,
+    expressions: expressionsCache,
 
     // REST
     authUser: authUserLRU,

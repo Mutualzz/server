@@ -63,7 +63,7 @@ export default class MeThemesController {
                     "Unauthorized",
                 );
 
-            const { id: themeId } = validateThemeUpdateQuery.parse(req.params);
+            const { themeId } = validateThemeUpdateQuery.parse(req.params);
 
             let theme = await getCache("theme", themeId);
             if (!theme)
@@ -127,7 +127,7 @@ export default class MeThemesController {
                     "Unauthorized",
                 );
 
-            const { id: themeId } = validateThemeUpdateQuery.parse(req.params);
+            const { themeId } = validateThemeUpdateQuery.parse(req.params);
 
             let theme = await getCache("theme", themeId);
             if (!theme)

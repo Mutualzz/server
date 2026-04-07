@@ -3,6 +3,6 @@ import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
-router.get("/:id", createLimiter(60_000, 60), UsersController.get);
+router.get("/:userId", createLimiter(60_000, 60), UsersController.get);
 
 export default router;

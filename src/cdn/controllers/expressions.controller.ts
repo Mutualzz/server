@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import path from "path";
 import { contentEtag, normalizeFormat } from "@mutualzz/cdn/utils";
-import { getCache, spaceIconCache } from "@mutualzz/cache";
+import { expressionsCache, getCache } from "@mutualzz/cache";
 import { MIME_TYPES } from "@mutualzz/cdn/Constants.ts";
 import { bucketName, s3Client } from "@mutualzz/util";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
@@ -54,7 +54,7 @@ export default class ExpressionsController {
                 targetFormat =
                     isAnimatedHash && explicitAnimated ? "webp" : "png";
 
-            let willAnimate = false;
+            let willAnimate: boolean;
             if (targetFormat === "gif")
                 willAnimate = isAnimatedHash && !explicitStatic;
             else if (targetFormat === "webp")
@@ -73,7 +73,7 @@ export default class ExpressionsController {
             if (boundedSize) cacheKey += `:${boundedSize}`;
             if (willAnimate) cacheKey += `:a`;
 
-            const cached = await getCache("spaceIcon", cacheKey);
+            const cached = await getCache("expressions", cacheKey);
             if (cached) {
                 res.setHeader(
                     "Cache-Control",
@@ -89,7 +89,7 @@ export default class ExpressionsController {
             }
 
             const sourceExt = isAnimatedHash ? "gif" : "png";
-            const sourceKey = `icons/channels/${expressionId}/${baseName}.${sourceExt}`;
+            const sourceKey = `expressions/${expressionId}/${baseName}.${sourceExt}`;
 
             let sourceBody: Uint8Array;
             try {
@@ -104,7 +104,7 @@ export default class ExpressionsController {
             } catch {
                 throw new HttpException(
                     HttpStatusCode.NotFound,
-                    "Icon not found",
+                    "Expression not found",
                 );
             }
 
@@ -129,7 +129,7 @@ export default class ExpressionsController {
                 } else if (targetFormat === "gif") {
                     if (!boundedSize) {
                         const etag = contentEtag(sourceBody);
-                        spaceIconCache.set(cacheKey, sourceBody);
+                        expressionsCache.set(cacheKey, sourceBody);
                         res.setHeader(
                             "Cache-Control",
                             "public, max-age=86400, immutable",
@@ -175,7 +175,7 @@ export default class ExpressionsController {
             const outputBuffer = await image.toBuffer();
 
             const etag = contentEtag(outputBuffer);
-            spaceIconCache.set(cacheKey, outputBuffer);
+            expressionsCache.set(cacheKey, outputBuffer);
 
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");
             res.setHeader("ETag", etag);

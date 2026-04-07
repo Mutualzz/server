@@ -79,21 +79,8 @@ export default class ChannelsController {
                     "Unauthorized",
                 );
 
-            let rawCrop;
-            if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
-
-            const {
-                name,
-                parentId,
-                spaceId,
-                ownerId,
-                recipientIds,
-                crop,
-                ...rest
-            } = validateChannelBodyCreate.parse({
-                ...req.body,
-                crop: rawCrop,
-            });
+            const { name, parentId, spaceId, ownerId, recipientIds, ...rest } =
+                validateChannelBodyCreate.parse(req.body);
 
             const type = parseInt(rest.type) as ChannelType;
 
@@ -223,29 +210,35 @@ export default class ChannelsController {
 
             if (iconFile) {
                 const isGif = iconFile.mimetype === "image/gif";
+                let buffer:
+                    | Buffer<ArrayBufferLike>
+                    | Uint8Array<ArrayBufferLike> = iconFile.buffer;
 
                 let iconSharp: sharp.Sharp;
-                if (isGif)
-                    iconSharp = sharp(iconFile.buffer, { animated: true });
-                else iconSharp = sharp(iconFile.buffer).toFormat("png");
-
-                if (crop) {
-                    const { x, y, width, height, rounded } = crop;
-
-                    iconSharp = iconSharp.extract({
-                        left: x,
-                        top: y,
-                        width,
-                        height,
+                if (isGif) {
+                    iconSharp = sharp(buffer, {
+                        animated: true,
                     });
 
-                    if (rounded) flags.add("RoundedIcon");
+                    if (req.body.crop) {
+                        const { x, y, width, height } = JSON.parse(
+                            req.body.crop,
+                        );
+                        iconSharp = iconSharp.extract({
+                            left: x,
+                            top: y,
+                            width,
+                            height,
+                        });
+
+                        buffer = await iconSharp.toBuffer();
+                    }
                 }
 
-                const iconBuffer = await iconSharp.toBuffer();
+                if (req.body.rounded === "true") flags.add("RoundedIcon");
 
                 const iconHash = generateHash(
-                    iconBuffer,
+                    buffer,
                     iconFile.mimetype.includes("gif"),
                 );
 
@@ -269,7 +262,7 @@ export default class ChannelsController {
                     await s3Client.send(
                         new PutObjectCommand({
                             Bucket: bucketName,
-                            Body: iconBuffer,
+                            Body: buffer,
                             Key: `icons/channels/${channelValues.id}/${iconHash}.${storedExt}`,
                             ContentType: isGif ? "image/gif" : "image/png",
                         }),

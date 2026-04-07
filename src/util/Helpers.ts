@@ -13,6 +13,7 @@ import {
     userSettingsTable,
     usersTable,
 } from "@mutualzz/database";
+import type { APIExpression } from "@mutualzz/types";
 import {
     type APIChannel,
     type APIPrivateUser,
@@ -26,7 +27,6 @@ import {
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/permissions";
-import type { APIExpression } from "@mutualzz/types/src";
 
 export const publicUserColumns = {
     hash: false,

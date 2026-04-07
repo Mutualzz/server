@@ -1,12 +1,24 @@
 import type { NextFunction, Request, Response } from "express";
+import type { APIExpression } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     imageFileValidator,
+    validateExpressionParams,
     validateExpressionPutBody,
 } from "@mutualzz/validators";
 import { db, expressionsTable } from "@mutualzz/database";
-import { requireSpacePermissions, Snowflake } from "@mutualzz/util";
+import {
+    bucketName,
+    emitEvent,
+    execNormalized,
+    requireSpacePermissions,
+    s3Client,
+    Snowflake,
+} from "@mutualzz/util";
+import { generateHash } from "@mutualzz/rest/util";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
+import { eq } from "drizzle-orm";
 
 export default class ExpressionsController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -18,14 +30,15 @@ export default class ExpressionsController {
                     "Unauthorized",
                 );
 
-            let rawCrop;
-            if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
+            let parsedCrop;
+            if (req.body.crop) parsedCrop = JSON.parse(req.body.crop);
 
-            const { spaceId, type, name } = validateExpressionPutBody.parse(
-                req.body,
-            );
-
-            const iconFile = imageFileValidator.parse(req.file);
+            const { spaceId, type, name, crop } =
+                validateExpressionPutBody.parse({
+                    ...req.body,
+                    crop: parsedCrop,
+                });
+            const expressionFile = imageFileValidator.parse(req.file);
 
             if (spaceId)
                 await requireSpacePermissions({
@@ -35,21 +48,170 @@ export default class ExpressionsController {
                 });
 
             const id = BigInt(Snowflake.generate());
-            const expressionName = name ?? id.toString();
 
-            const isGif = iconFile.mimetype === "image/gif";
+            const isGif = expressionFile.mimetype === "image/gif";
+            let buffer: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike> =
+                expressionFile.buffer;
 
-            let assetSharp: sharp.Sharp;
-            if (isGif) assetSharp = sharp(iconFile.buffer, { animated: true });
-            else assetSharp = sharp(iconFile.buffer).toFormat("png");
+            let expressionSharp: sharp.Sharp;
+            if (isGif) {
+                expressionSharp = sharp(expressionFile.buffer, {
+                    animated: true,
+                });
 
-            const expression = await db.insert(expressionsTable).values({
-                id,
-                type: parseInt(type),
-                authorId: BigInt(user.id),
-                spaceId: spaceId ? BigInt(spaceId) : null,
-                name: expressionName,
-            });
+                console.log("GIF detected");
+
+                if (crop) {
+                    const { x, y, width, height } = crop;
+                    expressionSharp = expressionSharp.extract({
+                        left: x,
+                        top: y,
+                        width,
+                        height,
+                    });
+
+                    buffer = await expressionSharp.toBuffer();
+                }
+            }
+
+            const assetHash = generateHash(buffer, isGif);
+            let existingImage = null;
+            const storedExt = isGif ? "gif" : "png";
+
+            try {
+                const { Body } = await s3Client.send(
+                    new GetObjectCommand({
+                        Bucket: bucketName,
+                        Key: `expressions/${id}/${assetHash}.${storedExt}`,
+                    }),
+                );
+
+                existingImage = Body;
+            } catch {
+                // Ignore
+            }
+
+            if (!existingImage)
+                await s3Client.send(
+                    new PutObjectCommand({
+                        Bucket: bucketName,
+                        Body: buffer,
+                        Key: `expressions/${id}/${assetHash}.${storedExt}`,
+                        ContentType: isGif ? "image/gif" : "image/png",
+                    }),
+                );
+
+            const newExpression = await execNormalized<APIExpression>(
+                db
+                    .insert(expressionsTable)
+                    .values({
+                        id,
+                        type: parseInt(type),
+                        authorId: BigInt(user.id),
+                        spaceId: spaceId ? BigInt(spaceId) : null,
+                        name: name ?? id.toString(),
+                        assetHash,
+                    })
+                    .returning()
+                    .then((r) => r[0]),
+            );
+
+            if (!newExpression)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Failed to create expression",
+                );
+
+            if (spaceId)
+                await emitEvent({
+                    space_id: spaceId,
+                    data: newExpression,
+                    event: "ExpressionCreate",
+                });
+            else
+                await emitEvent({
+                    user_id: user.id,
+                    data: newExpression,
+                    event: "ExpressionCreate",
+                });
+
+            return res.status(HttpStatusCode.Created).send(newExpression);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async get(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { expressionId } = validateExpressionParams.parse(req.params);
+
+            const expression = await execNormalized<APIExpression>(
+                db.query.expressionsTable.findFirst({
+                    where: eq(expressionsTable.id, BigInt(expressionId)),
+                }),
+            );
+
+            if (!expression)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Expression not found",
+                );
+
+            return res.status(HttpStatusCode.Success).json(expression);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async delete(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { expressionId } = validateExpressionParams.parse(req.params);
+
+            const expression = await execNormalized<APIExpression>(
+                db.query.expressionsTable.findFirst({
+                    where: eq(expressionsTable.id, BigInt(expressionId)),
+                }),
+            );
+
+            if (!expression)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Expression not found",
+                );
+
+            await db
+                .delete(expressionsTable)
+                .where(eq(expressionsTable.id, BigInt(expressionId)));
+
+            if (expression.spaceId)
+                await emitEvent({
+                    space_id: expression.spaceId,
+                    data: expression,
+                    event: "ExpressionDelete",
+                });
+            else
+                await emitEvent({
+                    user_id: user.id,
+                    data: expression,
+                    event: "ExpressionDelete",
+                });
+
+            return res.status(HttpStatusCode.Success).json(expression);
         } catch (err) {
             next(err);
         }

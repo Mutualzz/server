@@ -3,6 +3,6 @@ import ExpressionsController from "../controllers/expressions.controller";
 
 const router = createRouter();
 
-router.get("/:id", ExpressionsController.getExpression);
+router.get("/:expressionId/:assetHash", ExpressionsController.getExpression);
 
 export default router;

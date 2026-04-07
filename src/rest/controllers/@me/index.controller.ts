@@ -23,6 +23,7 @@ import {
     s3Client,
 } from "@mutualzz/util";
 import {
+    imageFileValidator,
     validateMeSettingsUpdate,
     validateMeUpdate,
 } from "@mutualzz/validators";
@@ -43,7 +44,7 @@ export default class MeController {
             const { username, avatar, defaultAvatar, globalName } =
                 validateMeUpdate.parse(req.body);
 
-            const { file: avatarFile } = req;
+            const avatarFile = imageFileValidator.parse(req.file);
 
             if (avatarFile && avatar)
                 throw new HttpException(
@@ -105,31 +106,34 @@ export default class MeController {
                     }
                 }
 
-                let crop = null;
-
-                if (req.body.crop) crop = JSON.parse(req.body.crop);
-
                 const isGif = avatarFile.mimetype === "image/gif";
+                let buffer:
+                    | Buffer<ArrayBufferLike>
+                    | Uint8Array<ArrayBufferLike> = avatarFile.buffer;
 
-                let avatarSharp: sharp.Sharp;
-                if (isGif)
-                    avatarSharp = sharp(avatarFile.buffer, { animated: true });
-                else avatarSharp = sharp(avatarFile.buffer).toFormat("png");
-
-                if (crop) {
-                    const { x, y, width, height } = crop;
-                    avatarSharp = avatarSharp.extract({
-                        left: x,
-                        top: y,
-                        width,
-                        height,
+                let expressionSharp: sharp.Sharp;
+                if (isGif) {
+                    expressionSharp = sharp(buffer, {
+                        animated: true,
                     });
+
+                    if (req.body.crop) {
+                        const { x, y, width, height } = JSON.parse(
+                            req.body.crop,
+                        );
+                        expressionSharp = expressionSharp.extract({
+                            left: x,
+                            top: y,
+                            width,
+                            height,
+                        });
+
+                        buffer = await expressionSharp.toBuffer();
+                    }
                 }
 
-                avatarFile.buffer = await avatarSharp.toBuffer();
-
                 const avatarHash = generateHash(
-                    avatarFile.buffer,
+                    buffer,
                     avatarFile.mimetype.includes("gif"),
                 );
 
@@ -154,7 +158,7 @@ export default class MeController {
                     await s3Client.send(
                         new PutObjectCommand({
                             Bucket: bucketName,
-                            Body: avatarFile.buffer,
+                            Body: buffer,
                             Key: `avatars/${user.id}/${avatarHash}.${storedExt}`,
                             ContentType: isGif ? "image/gif" : "image/png",
                         }),
@@ -162,14 +166,13 @@ export default class MeController {
                 }
 
                 user.avatar = avatarHash;
-                user.accentColor = await dominantHex(avatarFile.buffer);
+                user.accentColor = await dominantHex(buffer);
             }
 
             if (avatar !== undefined && !avatarFile) {
                 if (avatar === null) {
                     if (
                         user.avatar &&
-                        user.avatar !== null &&
                         !user.previousAvatars.includes(user.avatar)
                     ) {
                         user.previousAvatars.unshift(user.avatar);
@@ -178,12 +181,12 @@ export default class MeController {
 
                             if (removedAvatar) {
                                 const isGif = removedAvatar.startsWith("a_");
-                                const extName = isGif ? "gif" : "png";
+                                const ext = isGif ? "gif" : "png";
 
                                 await s3Client.send(
                                     new DeleteObjectCommand({
                                         Bucket: bucketName,
-                                        Key: `avatars/${user.id}/${removedAvatar}.${extName}`,
+                                        Key: `avatars/${user.id}/${removedAvatar}.${ext}`,
                                     }),
                                 );
                             }
@@ -219,7 +222,18 @@ export default class MeController {
                         user.previousAvatars.unshift(user.avatar);
                         if (user.previousAvatars.length >= 9) {
                             const removedAvatar = user.previousAvatars.pop();
-                            // ...deletion logic...
+
+                            if (removedAvatar) {
+                                const isGif = removedAvatar.startsWith("a_");
+                                const ext = isGif ? "gif" : "png";
+
+                                await s3Client.send(
+                                    new DeleteObjectCommand({
+                                        Bucket: bucketName,
+                                        Key: `avatars/${user.id}/${removedAvatar}.${ext}`,
+                                    }),
+                                );
+                            }
                         }
                     }
 

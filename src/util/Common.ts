@@ -113,7 +113,7 @@ export const genRandColor = () =>
         .map(() => (crypto.randomBytes(1)[0] % 16).toString(16))
         .join("");
 
-export const dominantHex = async (buffer: Buffer) => {
+export const dominantHex = async (buffer: Uint8Array<ArrayBufferLike>) => {
     const { dominant } = await sharp(buffer).stats();
 
     return Color({

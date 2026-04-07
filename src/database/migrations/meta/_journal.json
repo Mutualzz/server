@@ -71,6 +71,41 @@
       "when": 1775360149046,
       "tag": "0009_chemical_sir_ram",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775514895431,
+      "tag": "0010_cloudy_mentallo",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1775515327860,
+      "tag": "0011_green_klaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1775515353121,
+      "tag": "0012_sudden_susan_delgado",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1775516477617,
+      "tag": "0013_strong_iron_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1775516493615,
+      "tag": "0014_wandering_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }

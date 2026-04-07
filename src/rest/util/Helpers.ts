@@ -3,7 +3,7 @@ import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { db, rolesTable, spaceMemberRolesTable } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
 
-export const generateHash = (buffer: Buffer, animated = false) => {
+export const generateHash = (buffer: Uint8Array, animated = false) => {
     return `${animated ? "a_" : ""}${crypto.createHash("sha256").update(buffer).digest("hex")}`;
 };
 

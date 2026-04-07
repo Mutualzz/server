@@ -1,17 +1,9 @@
-import {
-    bigint,
-    boolean,
-    index,
-    pgTable,
-    smallint,
-    text,
-    timestamp,
-} from "drizzle-orm/pg-core";
+import { bigint, boolean, index, pgTable, smallint, text, timestamp, } from "drizzle-orm/pg-core";
 import { spacesTable, usersTable } from "@mutualzz/database";
 import { relations, sql } from "drizzle-orm";
 
 // Expression Type
-// 0 - Emoji
+// 0 - Preview
 // 1 - Sticker
 // For now these two
 
@@ -43,11 +35,11 @@ export const expressionsTable = pgTable(
             onDelete: "cascade",
         }),
 
-        animated: boolean().notNull(),
-
         flags: bigint({ mode: "bigint" })
             .notNull()
             .default(sql`0`),
+
+        animated: boolean().generatedAlwaysAs(sql`LEFT("assetHash", 2) = 'a_'`),
 
         createdAt: timestamp({ withTimezone: true, mode: "date" })
             .notNull()

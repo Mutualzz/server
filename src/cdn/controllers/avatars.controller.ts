@@ -48,7 +48,7 @@ export default class AvatarsController {
                     isAnimatedHash && explicitAnimated ? "webp" : "png";
             }
 
-            let willAnimate = false;
+            let willAnimate: boolean;
             if (targetFormat === "gif")
                 willAnimate = isAnimatedHash && !explicitStatic;
             else if (targetFormat === "webp")
@@ -60,8 +60,8 @@ export default class AvatarsController {
             const boundedSize = (() => {
                 const n = Number(sizeQuery);
                 if (!Number.isFinite(n)) return undefined as number | undefined;
-                const clamped = Math.max(1, Math.min(4096, Math.floor(n)));
-                return clamped;
+
+                return Math.max(1, Math.min(4096, Math.floor(n)));
             })();
 
             let cacheKey = `${userId}:${baseName}:${targetFormat}`;

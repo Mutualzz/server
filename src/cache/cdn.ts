@@ -19,3 +19,8 @@ export const channelIconCache = new LRUCache<string, Uint8Array>({
     max: 300,
     ttl: 1000 * 60 * 60 * 24, // 1 day
 });
+
+export const expressionsCache = new LRUCache<string, Uint8Array>({
+    max: 300,
+    ttl: 1000 * 60 * 60 * 24, // 1 day
+});
