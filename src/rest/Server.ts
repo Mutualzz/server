@@ -95,7 +95,7 @@ export class Server {
         Sentry.setupExpressErrorHandler(this.app);
 
         this.app.post(
-            `/v1/sentry`,
+            `/sentry`,
             bodyParser.raw({
                 type: () => true,
                 limit: "16mb",
@@ -112,10 +112,7 @@ export class Server {
     }
 
     private async initRoutes() {
-        const routesBaseDir =
-            process.env.NODE_ENV === "development"
-                ? path.join(import.meta.dirname, "routes")
-                : path.join(import.meta.dirname, "rest", "routes");
+        const routesBaseDir = path.join(import.meta.dirname, "routes");
 
         logger.debug(`Loading routes from ${routesBaseDir}`);
 
