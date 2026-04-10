@@ -1,17 +1,7 @@
-import {
-    deleteCache,
-    getCache,
-    invalidateCache,
-    setCache,
-} from "@mutualzz/cache";
+import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
 import { channelsTable, db, messagesTable } from "@mutualzz/database";
 import type { APIMessage } from "@mutualzz/types";
-import {
-    ChannelType,
-    HttpException,
-    HttpStatusCode,
-    MessageType,
-} from "@mutualzz/types";
+import { ChannelType, HttpException, HttpStatusCode, MessageType, } from "@mutualzz/types";
 import {
     buildEmbeds,
     emitEvent,
@@ -397,7 +387,7 @@ export default class MessagesController {
                 await requireChannelPermissions({
                     channelId: channel.id,
                     userId: user.id,
-                    needed: ["ViewChannel"],
+                    needed: ["ViewChannel", "ReadMessageHistory"],
                 });
 
             const aroundRaw = req.query.around

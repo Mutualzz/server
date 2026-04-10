@@ -142,8 +142,10 @@ export default class SpacesController {
                         "Failed to create space",
                     );
 
+                // Note: Keep ading permissions when you have
                 const everyoneRole = await execNormalized<APIRole>(
                     tx
+
                         .insert(rolesTable)
                         .values({
                             id: BigInt(newSpace.id),
@@ -155,7 +157,11 @@ export default class SpacesController {
                                 permissionFlags.SendMessages |
                                 permissionFlags.CreateInvites |
                                 permissionFlags.Connect |
-                                permissionFlags.Speak,
+                                permissionFlags.Speak |
+                                permissionFlags.AttachFiles |
+                                permissionFlags.ReadMessageHistory |
+                                permissionFlags.UseExternalEmojis |
+                                permissionFlags.EmbedLinks,
                         })
                         .returning()
                         .then((res) => res[0]),
