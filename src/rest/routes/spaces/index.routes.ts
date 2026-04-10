@@ -1,8 +1,8 @@
 import { upload } from "@mutualzz/rest";
-import InvitesController from "@mutualzz/rest/controllers/invites.controller";
-import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller";
-import MembersController from "@mutualzz/rest/controllers/spaces/members.controller";
-import RolesController from "@mutualzz/rest/controllers/spaces/roles.controllers";
+import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts";
+import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller.ts";
+import MembersController from "@mutualzz/rest/controllers/spaces/members.controller.ts";
+import RolesController from "@mutualzz/rest/controllers/spaces/roles.controllers.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();

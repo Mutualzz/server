@@ -120,8 +120,28 @@ export default class MessagesController {
                         .json(existingMessage);
             }
 
+            let canUseExternalEmojis = false;
+            let canEmbed = false;
+
+            if (channel.spaceId) {
+                try {
+                    const { permissions } = await requireChannelPermissions({
+                        channelId: channel.id,
+                        userId: user.id,
+                        needed: ["UseExternalEmojis", "EmbedLinks"],
+                        mode: "Any",
+                    });
+
+                    canUseExternalEmojis = permissions.has("UseExternalEmojis");
+                    canEmbed = permissions.has("EmbedLinks");
+                } catch {
+                    canUseExternalEmojis = false;
+                    canEmbed = false;
+                }
+            }
+
             const sanitizedContent = content
-                ? await sanitizeContent(content, user)
+                ? await sanitizeContent(content, channel, canUseExternalEmojis)
                 : null;
 
             const newMessage = await execNormalized<APIMessage>(
@@ -136,7 +156,9 @@ export default class MessagesController {
                             ? BigInt(channel.spaceId)
                             : undefined,
                         content: sanitizedContent,
-                        embeds: await buildEmbeds(sanitizedContent || ""),
+                        embeds: canEmbed
+                            ? await buildEmbeds(sanitizedContent || "")
+                            : [],
                         type: MessageType.Default,
                     })
                     .returning()
@@ -243,8 +265,47 @@ export default class MessagesController {
 
             const { content } = validateMessageBodyPut.parse(req.body);
 
+            if (!content || content.length === 0) {
+                await db
+                    .delete(messagesTable)
+                    .where(eq(messagesTable.id, BigInt(message.id)));
+                await deleteCache("message", messageId);
+                await invalidateCache("messages", `${channel.id}*`);
+
+                await emitEvent({
+                    event: "MessageDelete",
+                    channel_id: channel.id,
+                    data: message,
+                });
+
+                return res.status(HttpStatusCode.Success).json({
+                    ...message,
+                    content: "",
+                    embeds: [],
+                });
+            }
+
+            let canUseExternalEmojis = false;
+            let canEmbed = false;
+
+            if (channel.spaceId) {
+                try {
+                    const { permissions } = await requireChannelPermissions({
+                        channelId: channel.id,
+                        userId: user.id,
+                        needed: ["UseExternalEmojis", "EmbedLinks"],
+                        mode: "Any",
+                    });
+                    canUseExternalEmojis = permissions.has("UseExternalEmojis");
+                    canEmbed = permissions.has("EmbedLinks");
+                } catch {
+                    canUseExternalEmojis = false;
+                    canEmbed = false;
+                }
+            }
+
             const sanitizedContent = content
-                ? await sanitizeContent(content, user)
+                ? await sanitizeContent(content, channel, canUseExternalEmojis)
                 : content;
 
             const result = await execNormalized<APIMessage>(
@@ -252,7 +313,10 @@ export default class MessagesController {
                     .update(messagesTable)
                     .set({
                         content: sanitizedContent,
-                        embeds: await buildEmbeds(sanitizedContent || ""),
+                        embeds: canEmbed
+                            ? await buildEmbeds(sanitizedContent || "")
+                            : [],
+                        edited: true,
                     })
                     .where(eq(messagesTable.id, BigInt(message.id)))
                     .returning()

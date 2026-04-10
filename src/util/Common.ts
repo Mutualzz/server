@@ -1,4 +1,4 @@
-import type { APIMessageEmbed, APIPrivateUser, APIUser } from "@mutualzz/types";
+import type { APIChannel, APIMessageEmbed } from "@mutualzz/types";
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import Color from "color";
 import crypto from "crypto";
@@ -13,7 +13,7 @@ import path from "path";
 import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
-import { getExpression, getMember } from "@mutualzz/util/Helpers.ts";
+import { getExpression } from "@mutualzz/util/Helpers.ts";
 
 type Services = "spotify" | "youtube" | "apple" | "tidal" | "other";
 
@@ -90,7 +90,8 @@ async function replaceAsync(
 
 export const sanitizeContent = (
     content: string,
-    user: APIUser | APIPrivateUser,
+    channel?: APIChannel | null,
+    canUseExternalEmojis = false,
 ) => {
     const customEmojiRegex = /<a?:[^:]+:\d+>/g;
 
@@ -101,9 +102,14 @@ export const sanitizeContent = (
         if (!emoji) return raw;
 
         let allowed = false;
-        if (BigInt(emoji.authorId) === BigInt(user.id)) allowed = true;
-        else if (emoji.spaceId)
-            allowed = await getMember(emoji.spaceId, user.id, true);
+
+        if (
+            channel?.spaceId &&
+            emoji.spaceId &&
+            BigInt(emoji.spaceId) === BigInt(channel.spaceId)
+        )
+            allowed = true;
+        else if (canUseExternalEmojis) allowed = true;
 
         if (allowed) return raw;
 

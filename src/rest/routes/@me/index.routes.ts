@@ -1,5 +1,5 @@
 import { upload } from "@mutualzz/rest";
-import MeController from "@mutualzz/rest/controllers/@me/index.controller";
+import MeController from "@mutualzz/rest/controllers/@me/index.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();

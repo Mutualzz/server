@@ -1,10 +1,6 @@
-import {
-    GatewayCloseCodes,
-    type GatewayPayload,
-    type RESTSession,
-} from "@mutualzz/types";
+import { GatewayCloseCodes, type GatewayPayload, type RESTSession, } from "@mutualzz/types";
 import { getUser, prepareReadyData, redis } from "@mutualzz/util";
-import { setupListener } from "gateway/Listener";
+import { setupListener } from "../Listener";
 import { logger } from "../Logger";
 import { saveSession } from "../util";
 import { Send } from "../util/Send";

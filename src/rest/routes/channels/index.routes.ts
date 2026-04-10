@@ -1,5 +1,5 @@
-import ChannelsController from "@mutualzz/rest/controllers/channels.controller";
-import MessagesController from "@mutualzz/rest/controllers/messages.controller";
+import ChannelsController from "@mutualzz/rest/controllers/channels.controller.ts";
+import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 import { upload } from "@mutualzz/rest";
 

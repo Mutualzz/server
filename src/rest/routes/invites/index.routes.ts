@@ -1,4 +1,4 @@
-import InvitesController from "@mutualzz/rest/controllers/invites.controller";
+import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts";
 import { createRouter } from "@mutualzz/util";
 
 const router = createRouter();

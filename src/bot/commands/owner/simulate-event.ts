@@ -1,4 +1,4 @@
-import { StringOption } from "bot/Builders";
+import { StringOption } from "../../Builders";
 import { AbstractSlashCommand, SlashCommand } from "../../classes/SlashCommand";
 import type { ChatInputCommandInteraction } from "discord.js";
 import { type EVENTS } from "../../Constants";

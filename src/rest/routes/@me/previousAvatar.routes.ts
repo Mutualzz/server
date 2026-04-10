@@ -1,4 +1,4 @@
-import PreviousAvatarController from "@mutualzz/rest/controllers/@me/previousAvatar.controller";
+import PreviousAvatarController from "@mutualzz/rest/controllers/@me/previousAvatar.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();

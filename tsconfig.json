@@ -27,23 +27,25 @@
         "experimentalDecorators": true,
         "emitDecoratorMetadata": false,
 
-        "baseUrl": "./src",
+        "rootDir": "./src",
 
         "paths": {
-            "@mutualzz/cache": ["./cache"],
-            "@mutualzz/cache/*": ["./cache/*"],
-            "@mutualzz/rest": ["./rest"],
-            "@mutualzz/rest/*": ["./rest/*"],
-            "@mutualzz/database": ["./database"],
-            "@mutualzz/database/*": ["./database/*"],
-            "@mutualzz/gateway": ["./gateway"],
-            "@mutualzz/gateway/*": ["./gateway/*"],
-            "@mutualzz/cdn": ["./cdn"],
-            "@mutualzz/cdn/*": ["./cdn/*"],
-            "@mutualzz/util": ["./util"],
-            "@mutualzz/util/*": ["./util/*"],
-            "@mutualzz/voice": ["./voice"],
-            "@mutualzz/voice/*": ["./voice/*"]
+            "@mutualzz/cache": ["./src/cache"],
+            "@mutualzz/cache/*": ["./src/cache/*"],
+            "@mutualzz/rest": ["./src/rest"],
+            "@mutualzz/rest/*": ["./src/rest/*"],
+            "@mutualzz/database": ["./src/database"],
+            "@mutualzz/database/*": ["./src/database/*"],
+            "@mutualzz/gateway": ["./src/gateway"],
+            "@mutualzz/gateway/*": ["./src/gateway/*"],
+            "@mutualzz/cdn": ["./src/cdn"],
+            "@mutualzz/cdn/*": ["./src/cdn/*"],
+            "@mutualzz/util": ["./src/util"],
+            "@mutualzz/util/*": ["./src/util/*"],
+            "@mutualzz/voice": ["./src/voice"],
+            "@mutualzz/voice/*": ["./src/voice/*"]
         }
-    }
+    },
+    "include": ["src/**/*"],
+    "exclude": ["dist", "dist/**", "**/dist/**"]
 }

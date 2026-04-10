@@ -1,4 +1,4 @@
-import AuthController from "@mutualzz/rest/controllers/auth.controller";
+import AuthController from "@mutualzz/rest/controllers/auth.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();

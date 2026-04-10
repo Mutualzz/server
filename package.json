@@ -1,7 +1,7 @@
 {
     "author": "",
     "dependencies": {
-        "@aws-sdk/client-s3": "^3.1025.0",
+        "@aws-sdk/client-s3": "^3.1027.0",
         "@discordjs/builders": "^1.14.1",
         "@discordjs/opus": "^0.10.0",
         "@discordjs/voice": "^0.19.2",
@@ -46,7 +46,7 @@
         "ioredis": "^5.10.1",
         "json-bigint": "^1.0.0",
         "jsonwebtoken": "^9.0.3",
-        "lru-cache": "^11.3.1",
+        "lru-cache": "^11.3.3",
         "mediaplex": "^1.0.0",
         "mediasoup": "^3.19.19",
         "morgan": "^1.10.1",
@@ -60,7 +60,7 @@
         "rate-limit-redis": "^4.3.1",
         "redis": "^5.11.0",
         "sharp": "^0.34.5",
-        "url-metadata": "^5.4.3",
+        "url-metadata": "^5.4.4",
         "ws": "^8.20.0",
         "zlib-sync": "^0.1.10",
         "zod": "^4.3.6"

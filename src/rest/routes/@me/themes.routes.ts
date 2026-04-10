@@ -1,4 +1,4 @@
-import MeThemesController from "@mutualzz/rest/controllers/@me/themes.controller";
+import MeThemesController from "@mutualzz/rest/controllers/@me/themes.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
