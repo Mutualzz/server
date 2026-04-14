@@ -203,7 +203,7 @@ export default class SpacesController {
                             id: BigInt(Snowflake.generate()),
                             type: ChannelType.Category,
                             spaceId: BigInt(newSpace.id),
-                            name: "General",
+                            name: "Text Channels",
                             position: 0,
                         })
                         .returning()
@@ -264,7 +264,7 @@ export default class SpacesController {
                             id: BigInt(Snowflake.generate()),
                             type: ChannelType.Voice,
                             spaceId: BigInt(newSpace.id),
-                            name: "Text Channels",
+                            name: "General",
                             position: 0,
                             parentId: BigInt(voiceCategory.id),
                         })
