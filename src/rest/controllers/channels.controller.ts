@@ -28,7 +28,11 @@ import { and, eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
 import { generateHash } from "@mutualzz/rest/util";
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { BitField, channelFlags } from "@mutualzz/permissions";
 
 export default class ChannelsController {
@@ -611,6 +615,20 @@ export default class ChannelsController {
                 channel_id: channel.id,
                 data: channel,
             });
+
+            if (channel.icon) {
+                const ext = channel.icon.startsWith("a_") ? "gif" : "png";
+                try {
+                    await s3Client.send(
+                        new DeleteObjectCommand({
+                            Bucket: bucketName,
+                            Key: `icons/channels/${channel.id}/${channel.icon}.${ext}`,
+                        }),
+                    );
+                } catch {
+                    // ignore since it might be already deelted
+                }
+            }
 
             res.status(HttpStatusCode.Success).json(channel);
         } catch (err) {

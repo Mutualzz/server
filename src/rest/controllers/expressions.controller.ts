@@ -5,7 +5,7 @@ import { imageFileValidator, validateExpressionParams, validateExpressionPutBody
 import { db, expressionsTable } from "@mutualzz/database";
 import { bucketName, emitEvent, execNormalized, requireSpacePermissions, s3Client, Snowflake, } from "@mutualzz/util";
 import { generateHash } from "@mutualzz/rest/util";
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { count, eq } from "drizzle-orm";
 
@@ -295,6 +295,18 @@ export default class ExpressionsController {
             await db
                 .delete(expressionsTable)
                 .where(eq(expressionsTable.id, BigInt(expressionId)));
+
+            const ext = expression.assetHash.startsWith("a_") ? "gif" : "png";
+            try {
+                await s3Client.send(
+                    new DeleteObjectCommand({
+                        Bucket: bucketName,
+                        Key: `expressions/${expression.id}/${expression.assetHash}.${ext}`,
+                    }),
+                );
+            } catch {
+                // Ignore cuz it might be deleted
+            }
 
             if (expression.spaceId)
                 await emitEvent({
