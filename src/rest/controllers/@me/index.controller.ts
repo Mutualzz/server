@@ -325,7 +325,7 @@ export default class MeController {
                 data: toPublicUser(newUser),
             });
 
-            await setCache("user", user.id, newUser);
+            await setCache("user", user.id, toPublicUser(newUser));
 
             res.status(HttpStatusCode.Success).json(toPublicUser(newUser));
         } catch (err) {
