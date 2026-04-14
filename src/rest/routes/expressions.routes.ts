@@ -20,5 +20,10 @@ router.get(
     createLimiter(10_000, 100),
     ExpressionsController.get,
 );
+router.patch(
+    "/:expressionId",
+    createLimiter(60_000, 5),
+    ExpressionsController.patch,
+);
 
 export default router;

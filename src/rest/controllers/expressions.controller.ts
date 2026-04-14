@@ -1,20 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
 import type { APIExpression } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import {
-    imageFileValidator,
-    validateExpressionParams,
-    validateExpressionPutBody,
-} from "@mutualzz/validators";
+import { imageFileValidator, validateExpressionParams, validateExpressionPutBody, } from "@mutualzz/validators";
 import { db, expressionsTable } from "@mutualzz/database";
-import {
-    bucketName,
-    emitEvent,
-    execNormalized,
-    requireSpacePermissions,
-    s3Client,
-    Snowflake,
-} from "@mutualzz/util";
+import { bucketName, emitEvent, execNormalized, requireSpacePermissions, s3Client, Snowflake, } from "@mutualzz/util";
 import { generateHash } from "@mutualzz/rest/util";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
@@ -190,6 +179,78 @@ export default class ExpressionsController {
                 );
 
             return res.status(HttpStatusCode.Success).json(expression);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async patch(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { expressionId } = validateExpressionParams.parse(req.params);
+            const { name } = validateExpressionPutBody
+                .partial()
+                .parse(req.body);
+
+            const expression = await execNormalized<APIExpression>(
+                db.query.expressionsTable.findFirst({
+                    where: eq(expressionsTable.id, BigInt(expressionId)),
+                }),
+            );
+
+            if (!expression)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Expression not found",
+                );
+
+            if (expression.spaceId)
+                await requireSpacePermissions({
+                    spaceId: expression.spaceId,
+                    userId: user.id,
+                    needed: ["ManageExpressions"],
+                });
+            else if (BigInt(expression.authorId) !== BigInt(user.id))
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You cannot edit this expression",
+                );
+
+            const updatedExpression = await execNormalized<APIExpression>(
+                db
+                    .update(expressionsTable)
+                    .set({ name })
+                    .where(eq(expressionsTable.id, BigInt(expressionId)))
+                    .returning()
+                    .then((r) => r[0]),
+            );
+
+            if (!updatedExpression)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Failed to update expression",
+                );
+
+            if (expression.spaceId)
+                await emitEvent({
+                    space_id: expression.spaceId,
+                    data: updatedExpression,
+                    event: "ExpressionUpdate",
+                });
+            else
+                await emitEvent({
+                    user_id: user.id,
+                    data: updatedExpression,
+                    event: "ExpressionUpdate",
+                });
+
+            return res.status(HttpStatusCode.Success).json(updatedExpression);
         } catch (err) {
             next(err);
         }
