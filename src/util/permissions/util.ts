@@ -8,7 +8,7 @@ import {
     permissionFlags,
     resolveBaseBits,
     resolveEffectiveChannelBits,
-} from "@mutualzz/permissions";
+} from "@mutualzz/bitfield";
 
 export type RequireMode = "All" | "Any";
 

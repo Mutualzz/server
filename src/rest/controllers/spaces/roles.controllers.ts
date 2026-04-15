@@ -26,7 +26,7 @@ import {
     getActorTopRolePosition,
 } from "@mutualzz/rest/util";
 import { invalidateCache } from "@mutualzz/cache";
-import { permissionFlags } from "@mutualzz/permissions";
+import { permissionFlags } from "@mutualzz/bitfield";
 
 export default class RolesController {
     static async getAll(req: Request, res: Response, next: NextFunction) {

@@ -12,7 +12,7 @@ import {
 } from "@mutualzz/util";
 import { canVoiceConnect, canVoiceSpeak } from "../util/VoicePermissions.ts";
 import { logger } from "../Logger.ts";
-import { BitField, memberFlags } from "@mutualzz/permissions";
+import { BitField, memberFlags } from "@mutualzz/bitfield";
 import { voiceScopeKey } from "./VoiceState.util";
 
 export class VoiceStateService {

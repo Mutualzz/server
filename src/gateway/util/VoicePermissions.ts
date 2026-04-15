@@ -1,7 +1,12 @@
 import { db, spaceMembersTable } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
 import type { APISpaceMember, Snowflake } from "@mutualzz/types";
-import { ALL_BITS, hasAny, permissionFlags, resolveEffectiveChannelBits, } from "@mutualzz/permissions";
+import {
+    ALL_BITS,
+    hasAny,
+    permissionFlags,
+    resolveEffectiveChannelBits,
+} from "@mutualzz/bitfield";
 import {
     computeMemberBaseBits,
     computeMemberRoleIds,

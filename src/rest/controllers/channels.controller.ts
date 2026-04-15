@@ -33,7 +33,7 @@ import {
     GetObjectCommand,
     PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import { BitField, channelFlags } from "@mutualzz/permissions";
+import { BitField, channelFlags } from "@mutualzz/bitfield";
 
 export default class ChannelsController {
     static async getOne(req: Request, res: Response, next: NextFunction) {

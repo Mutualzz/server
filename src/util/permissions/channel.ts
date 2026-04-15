@@ -6,7 +6,7 @@ import {
     type PermissionFlag,
     permissionFlags,
     resolveEffectiveChannelBits,
-} from "@mutualzz/permissions";
+} from "@mutualzz/bitfield";
 import type { RequireMode } from "./util";
 import {
     getChannel,
@@ -43,7 +43,6 @@ export const requireChannelPermissions = async ({
     const space = await getSpace(channel.spaceId);
     if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
-
 
     if (BigInt(userId) !== BigInt(space.ownerId)) {
         const member = await getMember(space.id, userId);

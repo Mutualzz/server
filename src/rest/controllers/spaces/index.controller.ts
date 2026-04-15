@@ -43,7 +43,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
-import { permissionFlags, roleFlags } from "@mutualzz/permissions";
+import { permissionFlags, roleFlags } from "@mutualzz/bitfield";
 
 export default class SpacesController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -142,7 +142,7 @@ export default class SpacesController {
                         "Failed to create space",
                     );
 
-                // Note: Keep ading permissions when you have
+                // Note: Keep ading bitfield when you have
                 const everyoneRole = await execNormalized<APIRole>(
                     tx
 

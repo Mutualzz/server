@@ -99,6 +99,6 @@ export const assertNoPermissionEscalation = (
     if ((newRoleBits & ~actorBits) !== 0n)
         throw new HttpException(
             HttpStatusCode.Forbidden,
-            "Cannot grant permissions you do not have",
+            "Cannot grant bitfield you do not have",
         );
 };

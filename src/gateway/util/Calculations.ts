@@ -12,7 +12,7 @@ import {
     hasAny,
     permissionFlags,
     resolveEffectiveChannelBits,
-} from "@mutualzz/permissions";
+} from "@mutualzz/bitfield";
 import {
     arrayPartition,
     execNormalizedMany,

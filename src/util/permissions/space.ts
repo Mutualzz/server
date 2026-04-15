@@ -11,7 +11,7 @@ import {
     BitField,
     type PermissionFlag,
     permissionFlags,
-} from "@mutualzz/permissions";
+} from "@mutualzz/bitfield";
 
 interface ResolveSpacePermissionsOptions {
     spaceOwnerId: Snowflake;
@@ -80,10 +80,7 @@ export const requireSpacePermissions = async ({
             : permissions.hasAny(...needed);
 
     if (!ok)
-        throw new HttpException(
-            HttpStatusCode.Forbidden,
-            "Missing permissions",
-        );
+        throw new HttpException(HttpStatusCode.Forbidden, "Missing bitfield");
 
     return { space, permissions };
 };

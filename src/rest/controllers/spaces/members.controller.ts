@@ -46,7 +46,7 @@ import {
 } from "@mutualzz/validators";
 import { and, eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import { BitField, memberFlags, permissionFlags } from "@mutualzz/permissions";
+import { BitField, memberFlags, permissionFlags } from "@mutualzz/bitfield";
 import dayjs from "dayjs";
 import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
 

@@ -26,7 +26,7 @@ import {
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
-import { roleFlags } from "@mutualzz/permissions";
+import { roleFlags } from "@mutualzz/bitfield";
 
 export const publicUserColumns = {
     hash: false,
