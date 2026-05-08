@@ -200,7 +200,7 @@ export class Server {
                     data: {
                         userId: otherUserId,
                         producerId: producer.id,
-                        kind: "audio",
+                        kind: producer.kind,
                     },
                 });
             }

@@ -13,10 +13,10 @@ router.post(
     upload.single("icon"),
     SpacesController.create,
 );
-router.delete("/:id", createLimiter(60_000, 10), SpacesController.delete);
+router.delete("/:spaceId", createLimiter(60_000, 10), SpacesController.delete);
 
 router.get("/", createLimiter(60_000, 60), SpacesController.getAll);
-router.get("/:id", createLimiter(60_000, 60), SpacesController.getOne);
+router.get("/:spaceId", createLimiter(60_000, 60), SpacesController.getOne);
 router.get("/bulk", createLimiter(60_000, 30), SpacesController.getBulk);
 
 // Invites

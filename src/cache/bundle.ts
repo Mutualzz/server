@@ -2,13 +2,18 @@ import type { LRUCache } from "lru-cache";
 import {
     authUserLRU,
     channelLRU,
+    channelOverwritesLRU,
     channelsLRU,
+    everyoneRoleLRU,
     expressionLRU,
     inviteEditLRU,
     inviteLRU,
     invitesLRU,
+    memberRolesLRU,
     messageLRU,
     messagesLRU,
+    roleLRU,
+    rolesLRU,
     spaceHydratedLRU,
     spaceLRU,
     spaceMemberLRU,
@@ -51,11 +56,18 @@ export const caches = {
     inviteEdit: inviteEditLRU,
     messages: messagesLRU,
     message: messageLRU,
+    roles: rolesLRU,
+    role: roleLRU,
     user: userLRU,
     users: usersLRU,
     userSettings: userSettingsLRU,
     theme: themeLRU,
     themes: themesLRU,
+
+    // Permission related
+    memberRoles: memberRolesLRU,
+    everyoneRole: everyoneRoleLRU,
+    channelOverwrites: channelOverwritesLRU,
 };
 
 export type CacheName = keyof typeof caches;

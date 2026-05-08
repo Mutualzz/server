@@ -22,12 +22,15 @@ import {
     type APIUserSettings,
     HttpException,
     HttpStatusCode,
+    InviteType,
 } from "@mutualzz/types";
 import {
     emitEvent,
     execNormalized,
     execNormalizedMany,
     filterVisibleChannelsForUser,
+    fireAndForget,
+    fireAndForgetAll,
     getMember,
     getMemberRoles,
     getSpaceHydrated,
@@ -37,6 +40,7 @@ import {
 import {
     validateMemberBanBody,
     validateMembersActionParams,
+    validateMembersAddBody,
     validateMembersAddParams,
     validateMembersGetAllParams,
     validateMembersGetAllQuery,
@@ -48,7 +52,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { BitField, memberFlags, permissionFlags } from "@mutualzz/bitfield";
 import dayjs from "dayjs";
-import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
+import { VoiceStateService } from "@mutualzz/gateway";
 
 function topPos(rows: { position: number }[]) {
     let t = -1;
@@ -77,7 +81,7 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            const me = await getMember(space.id, user.id);
+            const me = await getMember(space.id, user.id, true);
             if (!me)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
@@ -109,7 +113,14 @@ export default class MembersController {
                     }),
                 );
 
-            return res.status(HttpStatusCode.Success).json(members);
+            res.status(HttpStatusCode.Success).json(members);
+
+            fireAndForget(() => setCache("spaceMembers", space.id, members), {
+                label: "cache:set:spaceMembers",
+                meta: {
+                    spaceId: space.id,
+                },
+            });
         } catch (err) {
             next(err);
         }
@@ -136,7 +147,7 @@ export default class MembersController {
                     "Space not found",
                 );
 
-            const me = await getMember(space.id, user.id);
+            const me = await getMember(space.id, user.id, true);
             if (!me)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
@@ -189,48 +200,98 @@ export default class MembersController {
             const member = await getMember(space.id, user.id);
             if (member) return res.status(HttpStatusCode.Success).json(member);
 
-            const { channelId, code } = req.body;
+            const { channelId, code } = validateMembersAddBody.parse(req.body);
 
-            const findInvite = await db.query.invitesTable.findFirst({
-                where: and(
-                    eq(invitesTable.code, code),
-                    eq(invitesTable.channelId, BigInt(channelId)),
-                    eq(invitesTable.spaceId, BigInt(space.id)),
-                ),
-            });
+            const newMember = await db.transaction(async (tx) => {
+                const invite = await tx.query.invitesTable.findFirst({
+                    where: and(
+                        eq(invitesTable.code, code),
+                        eq(invitesTable.channelId, BigInt(channelId)),
+                        eq(invitesTable.spaceId, BigInt(space.id)),
+                    ),
+                });
 
-            if (!findInvite)
-                throw new HttpException(
-                    HttpStatusCode.BadRequest,
-                    "Invalid invite code",
+                if (!invite)
+                    throw new HttpException(
+                        HttpStatusCode.BadRequest,
+                        "Invalid invite code",
+                    );
+
+                if (
+                    invite.expiresAt &&
+                    dayjs().isAfter(dayjs(invite.expiresAt))
+                ) {
+                    await tx
+                        .delete(invitesTable)
+                        .where(eq(invitesTable.code, code));
+
+                    await deleteCache("invite", code);
+                    await invalidateCache("invites", space.id);
+
+                    throw new HttpException(
+                        HttpStatusCode.BadRequest,
+                        "Invite expired",
+                    );
+                }
+
+                if (invite.type !== InviteType.Space)
+                    throw new HttpException(
+                        HttpStatusCode.BadRequest,
+                        "Invalid invite",
+                    );
+
+                const maxUses = Number(invite.maxUses ?? 0);
+                const uses = Number(invite.uses ?? 0);
+
+                if (maxUses !== 0 && uses >= maxUses) {
+                    await tx
+                        .delete(invitesTable)
+                        .where(eq(invitesTable.code, code));
+
+                    await deleteCache("invite", code);
+                    await invalidateCache("invites", space.id);
+
+                    throw new HttpException(
+                        HttpStatusCode.BadRequest,
+                        "Invite has reached its maximum uses",
+                    );
+                }
+
+                const createdMember = await execNormalized<APISpaceMember>(
+                    tx
+                        .insert(spaceMembersTable)
+                        .values({
+                            spaceId: BigInt(space.id),
+                            userId: BigInt(user.id),
+                            joinedAt: new Date(),
+                        })
+                        .returning()
+                        .then((r) => r[0]),
                 );
 
-            const newMember = await execNormalized<APISpaceMember>(
-                db
-                    .insert(spaceMembersTable)
-                    .values({
-                        spaceId: BigInt(space.id),
-                        userId: BigInt(user.id),
-                        joinedAt: new Date(),
-                    })
-                    .returning()
-                    .then((r) => r[0]),
-            );
+                if (!createdMember)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to add member to space",
+                    );
 
-            if (!newMember)
-                throw new HttpException(
-                    HttpStatusCode.InternalServerError,
-                    "Failed to add member to space",
-                );
+                await tx.insert(spaceMemberRolesTable).values({
+                    roleId: BigInt(space.id),
+                    userId: BigInt(user.id),
+                    spaceId: BigInt(space.id),
+                });
 
-            await db.insert(spaceMemberRolesTable).values({
-                roleId: BigInt(space.id),
-                userId: BigInt(user.id),
-                spaceId: BigInt(space.id),
+                await tx
+                    .update(invitesTable)
+                    .set({ uses: uses + 1 })
+                    .where(eq(invitesTable.code, code));
+
+                return createdMember;
             });
 
             let members = await getCache("spaceMembers", space.id);
             let channels = await getCache("channels", space.id);
+
             if (!channels)
                 channels = await execNormalizedMany<APIChannel>(
                     db.query.channelsTable.findMany({
@@ -261,26 +322,54 @@ export default class MembersController {
                     }),
                 );
 
-            await setCache("spaceMember", `${space.id}:${user.id}`, newMember);
-            await setCache("channels", space.id, channels);
-            await setCache("spaceMembers", space.id, members);
+            res.status(HttpStatusCode.Created).json(newMember);
 
-            await emitEvent({
-                event: "SpaceMemberAdd",
-                space_id: space.id,
-                data: newMember,
-            });
-
-            await emitEvent({
-                event: "SpaceCreate",
-                user_id: user.id,
-                data: {
-                    ...space,
-                    members,
-                    channels,
-                    memberCount: members.length + 1,
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceMemberAdd",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceMemberAdd",
+                            space_id: space.id,
+                            data: newMember,
+                        }),
                 },
-            });
+                {
+                    label: "event:SpaceCreate",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceCreate",
+                            user_id: user.id,
+                            data: {
+                                ...space,
+                                members,
+                                channels,
+                                memberCount: members.length + 1,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:set:spaceMember",
+                    run: () =>
+                        setCache(
+                            "spaceMember",
+                            `${space.id}:${user.id}`,
+                            newMember,
+                        ),
+                },
+                {
+                    label: "cache:set:channels",
+                    run: () => setCache("channels", space.id, channels),
+                },
+                {
+                    label: "cache:set:spaceMembers",
+                    run: () => setCache("spaceMembers", space.id, members),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
 
             const settings = await execNormalized<APIUserSettings>(
                 db
@@ -300,17 +389,22 @@ export default class MembersController {
             );
 
             if (settings) {
-                await setCache("userSettings", user.id, settings);
-                await emitEvent({
-                    event: "UserSettingsUpdate",
-                    user_id: user.id,
-                    data: settings,
-                });
+                fireAndForgetAll([
+                    {
+                        label: "event:UserSettingsUpdate",
+                        run: () =>
+                            emitEvent({
+                                event: "UserSettingsUpdate",
+                                user_id: user.id,
+                                data: settings,
+                            }),
+                    },
+                    {
+                        label: "cache:set:userSettings",
+                        run: () => setCache("userSettings", user.id, settings),
+                    },
+                ]);
             }
-
-            await invalidateCache("spaceHydrated", spaceId);
-
-            res.status(HttpStatusCode.Created).json(newMember);
         } catch (err) {
             next(err);
         }
@@ -357,29 +451,54 @@ export default class MembersController {
                     ),
                 );
 
-            await deleteCache("spaceMember", `${space.id}:${member.userId}`);
-            await invalidateCache("spaceMembers", space.id);
-
             const data = {
                 user: toPublicUser(user),
                 ...member,
             };
 
-            await emitEvent({
-                event: "SpaceDelete",
-                user_id: user.id,
-                data: space,
-            });
+            res.status(HttpStatusCode.NoContent).send();
 
-            await emitEvent({
-                event: "SpaceMemberRemove",
-                space_id: space.id,
-                data,
-            });
-
-            await invalidateCache("spaceHydrated", spaceId);
-
-            res.status(HttpStatusCode.Success).json(data);
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceMemberRemove",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceMemberRemove",
+                            space_id: space.id,
+                            data: {
+                                spaceId: space.id,
+                                userId: member.userId,
+                            },
+                        }),
+                },
+                {
+                    label: "event:SpaceDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceDelete",
+                            user_id: user.id,
+                            data: {
+                                id: spaceId,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache(
+                            "spaceMember",
+                            `${space.id}:${member.userId}`,
+                        ),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -406,7 +525,7 @@ export default class MembersController {
                 );
 
             if (BigInt(space.ownerId) !== BigInt(user.id)) {
-                const me = await getMember(space.id, user.id);
+                const me = await getMember(space.id, user.id, true);
                 if (!me)
                     throw new HttpException(
                         HttpStatusCode.Forbidden,
@@ -426,7 +545,7 @@ export default class MembersController {
                 (actorPermissions.bits & permissionFlags.Administrator) ===
                 permissionFlags.Administrator;
 
-            const targetMember = await getMember(space.id, userId);
+            const targetMember = await getMember(space.id, userId, true);
             if (!targetMember)
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -483,23 +602,36 @@ export default class MembersController {
                 })
                 .onConflictDoNothing();
 
-            await Promise.all([
-                invalidateCache("spaceHydrated", space.id),
-                invalidateCache("spaceMember", `${space.id}:${userId}`),
-                invalidateCache("spaceMembers", space.id),
-            ]);
-
-            await emitEvent({
-                event: "SpaceMemberRoleAdd",
-                space_id: space.id,
-                data: {
-                    spaceId,
-                    userId,
-                    roleId: role.id,
-                },
-            });
-
             res.status(HttpStatusCode.Success).json(role);
+
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceMemberRoleAdd",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceMemberRoleAdd",
+                            space_id: space.id,
+                            data: {
+                                spaceId,
+                                userId,
+                                roleId: role.id,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", space.id),
+                },
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache("spaceMember", `${space.id}:${userId}`),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -606,23 +738,36 @@ export default class MembersController {
                 )
                 .execute();
 
-            await Promise.all([
-                invalidateCache("spaceHydrated", String(space.id)),
-                invalidateCache("spaceMember", `${space.id}:${userId}`),
-                invalidateCache("spaceMembers", String(space.id)),
-            ]);
-
-            await emitEvent({
-                event: "SpaceMemberRoleRemove",
-                space_id: space.id,
-                data: {
-                    spaceId,
-                    userId,
-                    roleId: role.id,
-                },
-            });
-
             res.status(HttpStatusCode.NoContent).send();
+
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceMemberRoleRemove",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceMemberRoleRemove",
+                            space_id: space.id,
+                            data: {
+                                spaceId,
+                                userId,
+                                roleId: role.id,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", space.id),
+                },
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache("spaceMember", `${space.id}:${userId}`),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -699,18 +844,41 @@ export default class MembersController {
                 )
                 .execute();
 
-            await deleteCache("spaceMember", `${space.id}:${member.userId}`);
-            await invalidateCache("spaceMembers", space.id);
-
-            await emitEvent({
-                event: "SpaceMemberRemove",
-                space_id: space.id,
-                data: member,
+            res.status(HttpStatusCode.Success).json({
+                spaceId,
+                userId: member.userId
             });
 
-            await invalidateCache("spaceHydrated", spaceId);
-
-            res.status(HttpStatusCode.Success).json(member);
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceMemberRemove",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceMemberRemove",
+                            space_id: space.id,
+                            data: {
+                                spaceId: spaceId,
+                                userId: member.userId,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache(
+                            "spaceMember",
+                            `${space.id}:${member.userId}`,
+                        ),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -811,14 +979,16 @@ export default class MembersController {
                             .execute(),
                     );
 
-                    await emitEvent({
-                        event: "MessageDeleteBulk",
-                        space_id: space.id,
-                        data: messages.map((m) => ({
-                            id: m.id,
-                            channelId: m.channelId,
-                        })),
-                    });
+                    fireAndForget(() =>
+                        emitEvent({
+                            event: "MessageDeleteBulk",
+                            space_id: space.id,
+                            data: messages.map((m) => ({
+                                id: m.id,
+                                channelId: m.channelId,
+                            })),
+                        }),
+                    );
                 }
 
                 const deleteBefore = dayjs()
@@ -842,25 +1012,53 @@ export default class MembersController {
                         .execute(),
                 );
 
-                await emitEvent({
-                    event: "MessageDeleteBulk",
-                    space_id: space.id,
-                    data: messages.map((m) => ({
-                        id: m.id,
-                        channelId: m.channelId,
-                    })),
-                });
+                fireAndForget(() =>
+                    emitEvent({
+                        event: "MessageDeleteBulk",
+                        space_id: space.id,
+                        data: messages.map((m) => ({
+                            id: m.id,
+                            channelId: m.channelId,
+                        })),
+                    }),
+                );
             });
 
-            await emitEvent({
-                event: "SpaceMemberRemove",
-                space_id: space.id,
-                data: member,
+            res.status(HttpStatusCode.Success).json({
+                spaceId,
+                userId: member.userId,
             });
 
-            await invalidateCache("spaceHydrated", spaceId);
-
-            res.status(HttpStatusCode.Success).json(member);
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceMemberRemove",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceMemberRemove",
+                            space_id: space.id,
+                            data: {
+                                spaceId,
+                                userId: member.userId,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache(
+                            "spaceMember",
+                            `${space.id}:${member.userId}`,
+                        ),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -943,24 +1141,38 @@ export default class MembersController {
                     ),
                 );
 
-            await deleteCache("spaceMember", `${space.id}:${userId}`);
-            await invalidateCache("spaceMembers", space.id);
-            await invalidateCache("spaceHydrated", spaceId);
+            res.status(HttpStatusCode.Success).json({
+                ...member,
+                flags: nextFlags,
+            });
 
-            await VoiceStateService.applyMemberVoiceModeration(
-                space.id,
-                userId,
+            fireAndForgetAll([
                 {
-                    spaceMute,
-                    spaceDeaf,
+                    label: "event:applyMemberVoiceModeration",
+                    run: () =>
+                        VoiceStateService.applyMemberVoiceModeration(
+                            space.id,
+                            userId,
+                            {
+                                spaceMute,
+                                spaceDeaf,
+                            },
+                        ),
                 },
-            );
-
-            const updated = await getMember(space.id, userId);
-
-            return res
-                .status(HttpStatusCode.Success)
-                .json(updated ?? { ...member, flags: nextFlags });
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache("spaceMember", `${space.id}:${userId}`),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }

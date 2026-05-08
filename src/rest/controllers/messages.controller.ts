@@ -17,6 +17,7 @@ import {
     emitEvent,
     execNormalized,
     execNormalizedMany,
+    fireAndForgetAll,
     getChannel,
     getMember,
     getSpace,
@@ -101,7 +102,13 @@ export default class MessagesController {
                 });
 
             if (nonce) {
-                const existingMessage = await execNormalized<APIMessage>(
+                let existingMessage = await getCache("message", nonce);
+                if (existingMessage)
+                    return res
+                        .status(HttpStatusCode.Success)
+                        .json(existingMessage);
+
+                existingMessage = await execNormalized<APIMessage>(
                     db.query.messagesTable.findFirst({
                         with: {
                             channel: true,
@@ -114,10 +121,12 @@ export default class MessagesController {
                     }),
                 );
 
-                if (existingMessage)
+                if (existingMessage) {
+                    await setCache("message", nonce, existingMessage);
                     return res
                         .status(HttpStatusCode.Success)
                         .json(existingMessage);
+                }
             }
 
             let canUseExternalEmojis = false;
@@ -185,25 +194,39 @@ export default class MessagesController {
                 space: channel.spaceId ? await getSpace(channel.spaceId) : null,
             };
 
-            await setCache("message", message.id, message);
-
-            await emitEvent({
-                event: "MessageCreate",
-                channel_id: channel.id,
-                data: message,
-            });
-
-            await emitEvent({
-                event: "ChannelUpdate",
-                channel_id: channel.id,
-                data: {
-                    id: channel.id,
-                    lastMessageId: message.id,
-                },
-            });
-
-            await invalidateCache("messages", `${channel.id}*`);
             res.status(HttpStatusCode.Created).json(message);
+
+            fireAndForgetAll([
+                {
+                    label: "event:MessageCreate",
+                    run: () =>
+                        emitEvent({
+                            event: "MessageCreate",
+                            channel_id: channel.id,
+                            data: message,
+                        }),
+                },
+                {
+                    label: "event:ChannelUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelUpdate",
+                            channel_id: channel.id,
+                            data: {
+                                id: channel.id,
+                                lastMessageId: message.id,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:set:message",
+                    run: () => setCache("message", message.id, message),
+                },
+                {
+                    label: "cache:invalidate:messages",
+                    run: () => invalidateCache("messages", channel.id),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -269,20 +292,34 @@ export default class MessagesController {
                 await db
                     .delete(messagesTable)
                     .where(eq(messagesTable.id, BigInt(message.id)));
-                await deleteCache("message", messageId);
-                await invalidateCache("messages", `${channel.id}*`);
 
-                await emitEvent({
-                    event: "MessageDelete",
-                    channel_id: channel.id,
-                    data: message,
-                });
-
-                return res.status(HttpStatusCode.Success).json({
+                res.status(HttpStatusCode.Success).json({
                     ...message,
                     content: "",
                     embeds: [],
                 });
+
+                fireAndForgetAll([
+                    {
+                        label: "event:MessageDelete",
+                        run: () =>
+                            emitEvent({
+                                event: "MessageDelete",
+                                channel_id: channel.id,
+                                data: message,
+                            }),
+                    },
+                    {
+                        label: "cache:delete:message",
+                        run: () => deleteCache("messages", messageId),
+                    },
+                    {
+                        label: "cache:invalidate:messages",
+                        run: () => invalidateCache("messages", channel.id),
+                    },
+                ]);
+
+                return;
             }
 
             let canUseExternalEmojis = false;
@@ -335,16 +372,27 @@ export default class MessagesController {
                 author: await getUser(message.authorId),
             };
 
-            await setCache("message", messageId, newMessage);
-
-            await emitEvent({
-                event: "MessageUpdate",
-                channel_id: channel.id,
-                data: newMessage,
-            });
-
-            await invalidateCache("messages", `${channel.id}*`);
             res.status(HttpStatusCode.Success).json(newMessage);
+
+            fireAndForgetAll([
+                {
+                    label: "event:MessageUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "MessageUpdate",
+                            channel_id: channel.id,
+                            data: newMessage,
+                        }),
+                },
+                {
+                    label: "cache:set:message",
+                    run: () => setCache("message", messageId, newMessage),
+                },
+                {
+                    label: "cache:invalidate:messages",
+                    run: () => invalidateCache("messages", channel.id),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -532,9 +580,9 @@ export default class MessagesController {
                 );
             }
 
-            await setCache("messages", cacheKey, messages);
-
             res.status(HttpStatusCode.Success).json(messages);
+
+            void setCache("messages", cacheKey, messages);
         } catch (err) {
             next(err);
         }
@@ -607,16 +655,30 @@ export default class MessagesController {
                 .delete(messagesTable)
                 .where(eq(messagesTable.id, BigInt(message.id)));
 
-            await deleteCache("message", messageId);
-            await invalidateCache("messages", `${channel.id}*`);
-
-            await emitEvent({
-                event: "MessageDelete",
-                channel_id: channel.id,
-                data: message,
-            });
-
             res.status(HttpStatusCode.Success).json(message);
+
+            fireAndForgetAll([
+                {
+                    label: "event:MessageDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "MessageDelete",
+                            channel_id: channel.id,
+                            data: {
+                                id: message.id,
+                                channelId: message.channelId,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:delete:message",
+                    run: () => deleteCache("message", messageId),
+                },
+                {
+                    label: "cache:invalidate:messages",
+                    run: () => invalidateCache("messages", channel.id),
+                },
+            ]);
         } catch (err) {
             next(err);
         }

@@ -1,10 +1,11 @@
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { db, usersTable } from "@mutualzz/database";
+import { db, toPublicUser, usersTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { bucketName, s3Client } from "@mutualzz/util";
+import { bucketName, fireAndForgetAll, s3Client } from "@mutualzz/util";
 import { validatePreviousAvatarDelete } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
+import { setCache } from "@mutualzz/cache";
 
 export default class PreviousAvatarController {
     static async delete(req: Request, res: Response, next: NextFunction) {
@@ -20,12 +21,6 @@ export default class PreviousAvatarController {
                 req.query,
             );
 
-            if (!avatarHash)
-                throw new HttpException(
-                    HttpStatusCode.BadRequest,
-                    "Avatar hash is required",
-                );
-
             if (!user.previousAvatars.includes(avatarHash))
                 throw new HttpException(
                     HttpStatusCode.NotFound,
@@ -35,12 +30,14 @@ export default class PreviousAvatarController {
             const isGif = avatarHash.startsWith("a_");
             const extName = isGif ? "gif" : "png";
 
+            const nextPreviousAvatars = user.previousAvatars.filter(
+                (avatar) => avatar !== avatarHash,
+            );
+
             await db
                 .update(usersTable)
                 .set({
-                    previousAvatars: user.previousAvatars.filter(
-                        (avatar) => avatar !== avatarHash,
-                    ),
+                    previousAvatars: nextPreviousAvatars,
                 })
                 .where(eq(usersTable.id, BigInt(user.id)));
 
@@ -52,9 +49,28 @@ export default class PreviousAvatarController {
                 }),
             );
 
+            user.previousAvatars = nextPreviousAvatars;
+
             res.status(HttpStatusCode.Success).json({
                 avatar: avatarHash,
             });
+
+            fireAndForgetAll([
+                {
+                    label: "cache:set:authUser",
+                    run: () => setCache("authUser", user.id, user),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+                {
+                    label: "cache:set:user",
+                    run: () => setCache("user", user.id, toPublicUser(user)),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+            ]);
         } catch (error) {
             next(error);
         }

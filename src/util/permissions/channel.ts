@@ -45,7 +45,7 @@ export const requireChannelPermissions = async ({
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
 
     if (BigInt(userId) !== BigInt(space.ownerId)) {
-        const member = await getMember(space.id, userId);
+        const member = await getMember(space.id, userId, true);
         if (!member)
             throw new HttpException(
                 HttpStatusCode.Forbidden,

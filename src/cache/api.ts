@@ -1,9 +1,11 @@
 import type {
     APIChannel,
+    APIChannelPermissionOverwrite,
     APIExpression,
     APIInvite,
     APIMessage,
     APIPrivateUser,
+    APIRole,
     APISpace,
     APISpaceMember,
     APITheme,
@@ -27,6 +29,12 @@ export const expressionLRU = new LRUCache<string, APIExpression>({
     max: 5000,
     ttl: 1000 * 60,
 });
+
+export const expressionsLRU = new LRUCache<string, APIExpression[]>({
+    max: 500,
+    ttl: 1000 * 60,
+});
+
 // [END] Expression Cache
 
 // [START] Channel Caches
@@ -138,3 +146,43 @@ export const themesLRU = new LRUCache<string, APITheme[]>({
     ttl: 1000 * 60 * 10,
 });
 // [END] Theme Caches
+
+// [START] Role Caches
+export const rolesLRU = new LRUCache<string, APIRole[]>({
+    max: 500,
+    ttl: 1000 * 60 * 3,
+});
+
+export const roleLRU = new LRUCache<string, APIRole>({
+    max: 1000,
+    ttl: 1000 * 60 * 3,
+});
+// [END] Roles Cache
+
+// [START] Permission Related Caches
+export const memberRolesLRU = new LRUCache<
+    string,
+    Pick<APIRole, "id" | "permissions" | "flags" | "position">[]
+>({
+    max: 1000,
+    ttl: 1000 * 60 * 5,
+});
+
+export const everyoneRoleLRU = new LRUCache<
+    string,
+    Pick<APIRole, "id" | "permissions" | "flags" | "position">
+>({
+    max: 1000,
+    ttl: 1000 * 60 * 5,
+});
+
+export const channelOverwritesLRU = new LRUCache<
+    string,
+    Pick<
+        APIChannelPermissionOverwrite,
+        "roleId" | "userId" | "allow" | "deny"
+    >[]
+>({
+    max: 1000,
+    ttl: 1000 * 60 * 5,
+});

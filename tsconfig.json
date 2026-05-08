@@ -30,6 +30,8 @@
         "rootDir": "./src",
 
         "paths": {
+            "@mutualzz/bot": ["./src/bot"],
+            "@mutualzz/bot/*": ["./src/bot/*"],
             "@mutualzz/cache": ["./src/cache"],
             "@mutualzz/cache/*": ["./src/cache/*"],
             "@mutualzz/rest": ["./src/rest"],

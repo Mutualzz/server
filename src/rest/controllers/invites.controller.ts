@@ -11,6 +11,7 @@ import {
     emitEvent,
     execNormalized,
     execNormalizedMany,
+    fireAndForgetAll,
     generateInviteCode,
     getSpace,
     getUser,
@@ -60,24 +61,28 @@ export default class InvitesController {
                 }),
             );
 
+            let hadExpired = false;
+
             invites = await Promise.all(
                 invites.map(async (invite) => {
                     if (
                         invite.expiresAt &&
                         dayjs().isAfter(dayjs(invite.expiresAt))
                     ) {
+                        hadExpired = true;
                         await db
                             .delete(invitesTable)
                             .where(eq(invitesTable.code, invite.code));
-                        await deleteCache("invite", invite.code);
 
+                        await deleteCache("invite", invite.code);
                         return null;
                     }
 
                     return invite;
                 }),
-            ).then((invs) => invs.filter((inv) => !!inv));
+            ).then((invs) => invs.filter((inv): inv is APIInvite => !!inv));
 
+            if (hadExpired) await invalidateCache("invites", spaceId);
             await setCache("invites", spaceId, invites || []);
 
             return res.status(HttpStatusCode.Success).json(invites);
@@ -95,7 +100,9 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId, code } = validateInviteParamsCode.parse(req.body);
+            const { spaceId, code } = validateInviteParamsCode.parse(
+                req.params,
+            );
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -143,7 +150,9 @@ export default class InvitesController {
 
     static async getFromCode(req: Request, res: Response, next: NextFunction) {
         try {
-            const { code } = req.params as { code: string };
+            const { code } = validateInviteParamsCode
+                .pick({ code: true })
+                .parse(req.params);
 
             const invite = await execNormalized<APIInvite>(
                 db.query.invitesTable.findFirst({
@@ -201,7 +210,11 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params as { spaceId: string };
+            const { spaceId } = validateInviteParamsCode
+                .pick({
+                    spaceId: true,
+                })
+                .parse(req.params);
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -291,24 +304,44 @@ export default class InvitesController {
 
             const editSessionId = generateInviteCode();
 
-            await setCache("inviteEdit", `${code}:${editSessionId}`, {
-                inviterId: newInvite.inviterId,
-            });
-
-            await invalidateCache("invites", spaceId);
-            await setCache("invite", code, newInvite);
-
-            await emitEvent({
-                event: "InviteCreate",
-                space_id: space.id,
-                channel_id: channelId,
-                data: newInvite,
-            });
-
-            return res.status(HttpStatusCode.Created).json({
+            const payload = {
                 ...newInvite,
                 editSessionId,
-            });
+            };
+
+            res.status(HttpStatusCode.Created).json(payload);
+
+            fireAndForgetAll([
+                {
+                    label: "cache:set:inviteEdit",
+                    run: () =>
+                        setCache("inviteEdit", `${code}:${editSessionId}`, {
+                            inviterId: newInvite.inviterId,
+                        }),
+                    meta: { code, spaceId },
+                },
+                {
+                    label: "cache:invalidate:invites",
+                    run: () => invalidateCache("invites", spaceId),
+                    meta: { spaceId },
+                },
+                {
+                    label: "cache:set:invite",
+                    run: () => setCache("invite", code, newInvite),
+                    meta: { code },
+                },
+                {
+                    label: "event:InviteCreate",
+                    run: () =>
+                        emitEvent({
+                            event: "InviteCreate",
+                            space_id: space.id,
+                            channel_id: channelId,
+                            data: newInvite,
+                        }),
+                    meta: { code, spaceId, channelId: String(channelId) },
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -323,7 +356,11 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { code } = req.params as { code: string };
+            const { code } = validateInviteParamsCode
+                .pick({
+                    code: true,
+                })
+                .parse(req.params);
 
             const invite = await execNormalized<APIInvite>(
                 db.query.invitesTable.findFirst({
@@ -486,32 +523,60 @@ export default class InvitesController {
                         ),
                     );
 
-                await deleteCache("invite", code);
-                await invalidateCache("invites", spaceId);
-
-                await emitEvent({
-                    event: "InviteDelete",
-                    space_id: space.id,
-                    channel_id: invite.channelId,
-                    data: invite,
-                });
-
                 res.status(HttpStatusCode.Success).json(invite);
+
+                fireAndForgetAll([
+                    {
+                        label: "cache:delete:invite",
+                        run: () => deleteCache("invite", code),
+                        meta: { code },
+                    },
+                    {
+                        label: "cache:invalidate:invites",
+                        run: () => invalidateCache("invites", spaceId),
+                        meta: { spaceId },
+                    },
+                    {
+                        label: "event:InviteDelete",
+                        run: () =>
+                            emitEvent({
+                                event: "InviteDelete",
+                                space_id: space.id,
+                                channel_id: invite.channelId,
+                                data: invite,
+                            }),
+                        meta: { code, spaceId },
+                    },
+                ]);
 
                 return;
             }
 
-            await invalidateCache("invites", spaceId);
-            await setCache("invite", code, invite);
+            res.status(HttpStatusCode.Success).json(invite);
 
-            await emitEvent({
-                event: "InviteUpdate",
-                space_id: space.id,
-                channel_id: invite.channelId,
-                data: invite,
-            });
-
-            return res.status(HttpStatusCode.Success).json(invite);
+            fireAndForgetAll([
+                {
+                    label: "cache:invalidate:invites",
+                    run: () => invalidateCache("invites", spaceId),
+                    meta: { spaceId },
+                },
+                {
+                    label: "cache:set:invite",
+                    run: () => setCache("invite", code, invite),
+                    meta: { code },
+                },
+                {
+                    label: "event:InviteUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "InviteUpdate",
+                            space_id: space.id,
+                            channel_id: invite.channelId,
+                            data: invite,
+                        }),
+                    meta: { code, spaceId },
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -526,10 +591,9 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId, code } = req.params as {
-                spaceId: string;
-                code: string;
-            };
+            const { spaceId, code } = validateInviteParamsCode.parse(
+                req.params,
+            );
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -564,16 +628,38 @@ export default class InvitesController {
                     ),
                 );
 
-            await invalidateCache("invites", spaceId);
-            await deleteCache("invite", code);
-
-            await emitEvent({
-                event: "InviteDelete",
-                space_id: space.id,
-                data: invite,
+            res.status(HttpStatusCode.Success).json({
+                code,
+                spaceId,
             });
 
-            return res.status(HttpStatusCode.Success).json(invite);
+            fireAndForgetAll([
+                {
+                    label: "event:InviteDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "InviteDelete",
+                            space_id: space.id,
+                            data: {
+                                code,
+                                spaceId,
+                            },
+                        }),
+                    meta: { code, spaceId },
+                },
+                {
+                    label: "cache:invalidate:invites",
+                    run: () => invalidateCache("invites", spaceId),
+                    meta: { spaceId },
+                },
+                {
+                    label: "cache:delete:invite",
+                    run: () => deleteCache("invite", code),
+                    meta: { code },
+                },
+            ]);
+
+            return;
         } catch (err) {
             next(err);
         }
@@ -588,7 +674,7 @@ export default class InvitesController {
                     "Unauthorized",
                 );
 
-            const { spaceId } = req.params as { spaceId: string };
+            const { spaceId } = validateInviteParamsGet.parse(req.params);
 
             const space = await getSpace(spaceId);
             if (!space)
@@ -603,13 +689,31 @@ export default class InvitesController {
                 needed: ["ManageChannels"],
             });
 
+            const existingInvites = await execNormalizedMany<APIInvite>(
+                db.query.invitesTable.findMany({
+                    columns: { code: true },
+                    where: eq(invitesTable.spaceId, BigInt(spaceId)),
+                }),
+            );
+
             await db
                 .delete(invitesTable)
                 .where(eq(invitesTable.spaceId, BigInt(spaceId)));
 
-            await invalidateCache("invites", spaceId);
-
             res.status(HttpStatusCode.NoContent).send();
+
+            fireAndForgetAll([
+                {
+                    label: "cache:invalidate:invites",
+                    run: () => invalidateCache("invites", spaceId),
+                    meta: { spaceId },
+                },
+                ...existingInvites.map((inv) => ({
+                    label: "cache:delete:invite",
+                    run: () => deleteCache("invite", inv.code),
+                    meta: { code: inv.code, spaceId },
+                })),
+            ]);
         } catch (err) {
             next(err);
         }

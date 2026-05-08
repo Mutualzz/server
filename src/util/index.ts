@@ -10,3 +10,4 @@ export * from "./Session";
 export * from "./Snowflake";
 export * from "./permissions";
 export * from "./Voice";
+export * from "./fireAndForget";

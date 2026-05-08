@@ -1,13 +1,35 @@
 import type { NextFunction, Request, Response } from "express";
 import type { APIExpression } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { imageFileValidator, validateExpressionParams, validateExpressionPutBody, } from "@mutualzz/validators";
+import {
+    imageFileValidator,
+    validateExpressionParams,
+    validateExpressionPutBody,
+} from "@mutualzz/validators";
 import { db, expressionsTable } from "@mutualzz/database";
-import { bucketName, emitEvent, execNormalized, requireSpacePermissions, s3Client, Snowflake, } from "@mutualzz/util";
-import { generateHash } from "@mutualzz/rest/util";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
+import {
+    bucketName,
+    emitEvent,
+    execNormalized,
+    fireAndForgetAll,
+    generateHash,
+    requireSpacePermissions,
+    s3Client,
+    Snowflake,
+} from "@mutualzz/util";
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { count, eq } from "drizzle-orm";
+import {
+    deleteCache,
+    getCache,
+    invalidateCache,
+    setCache,
+} from "@mutualzz/cache";
 
 export default class ExpressionsController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -27,6 +49,7 @@ export default class ExpressionsController {
                     ...req.body,
                     crop: parsedCrop,
                 });
+
             const expressionFile = imageFileValidator.parse(req.file);
 
             if (spaceId) {
@@ -136,20 +159,34 @@ export default class ExpressionsController {
                     "Failed to create expression",
                 );
 
-            if (spaceId)
-                await emitEvent({
-                    space_id: spaceId,
-                    data: newExpression,
-                    event: "ExpressionCreate",
-                });
-            else
-                await emitEvent({
-                    user_id: user.id,
-                    data: newExpression,
-                    event: "ExpressionCreate",
-                });
+            res.status(HttpStatusCode.Created).send(newExpression);
 
-            return res.status(HttpStatusCode.Created).send(newExpression);
+            fireAndForgetAll([
+                {
+                    label: `event:${spaceId ? "space" : " user"}:ExpressionCreate`,
+                    run: () =>
+                        emitEvent({
+                            space_id: spaceId || undefined,
+                            user_id: !spaceId ? user.id : undefined,
+                            data: newExpression,
+                            event: "ExpressionCreate",
+                        }),
+                },
+                {
+                    label: "cache:set:expression",
+                    run: () =>
+                        setCache("expression", newExpression.id, newExpression),
+                },
+                ...(spaceId
+                    ? [
+                          {
+                              label: "cache:invalidate:spaceHydrated",
+                              run: () =>
+                                  invalidateCache("spaceHydrated", spaceId),
+                          },
+                      ]
+                    : []),
+            ]);
         } catch (err) {
             next(err);
         }
@@ -166,7 +203,11 @@ export default class ExpressionsController {
 
             const { expressionId } = validateExpressionParams.parse(req.params);
 
-            const expression = await execNormalized<APIExpression>(
+            let expression = await getCache("expression", expressionId);
+            if (expression)
+                return res.status(HttpStatusCode.Success).json(expression);
+
+            expression = await execNormalized<APIExpression>(
                 db.query.expressionsTable.findFirst({
                     where: eq(expressionsTable.id, BigInt(expressionId)),
                 }),
@@ -198,11 +239,13 @@ export default class ExpressionsController {
                 .partial()
                 .parse(req.body);
 
-            const expression = await execNormalized<APIExpression>(
-                db.query.expressionsTable.findFirst({
-                    where: eq(expressionsTable.id, BigInt(expressionId)),
-                }),
-            );
+            let expression = await getCache("expression", expressionId);
+            if (!expression)
+                expression = await execNormalized<APIExpression>(
+                    db.query.expressionsTable.findFirst({
+                        where: eq(expressionsTable.id, BigInt(expressionId)),
+                    }),
+                );
 
             if (!expression)
                 throw new HttpException(
@@ -250,7 +293,49 @@ export default class ExpressionsController {
                     event: "ExpressionUpdate",
                 });
 
-            return res.status(HttpStatusCode.Success).json(updatedExpression);
+            await setCache(
+                "expression",
+                updatedExpression.id,
+                updatedExpression,
+            );
+            if (expression.spaceId)
+                await invalidateCache("spaceHydrated", expression.spaceId);
+
+            res.status(HttpStatusCode.Success).json(updatedExpression);
+
+            fireAndForgetAll([
+                {
+                    label: `event:${expression.spaceId ? "space" : "user"}:ExpressionUpdate`,
+                    run: () =>
+                        emitEvent({
+                            space_id: expression.spaceId || undefined,
+                            user_id: !expression.spaceId ? user.id : undefined,
+                            data: updatedExpression,
+                            event: "ExpressionUpdate",
+                        }),
+                },
+                {
+                    label: "cache:update:expression",
+                    run: () =>
+                        setCache(
+                            "expression",
+                            updatedExpression.id,
+                            updatedExpression,
+                        ),
+                },
+                ...(expression.spaceId
+                    ? [
+                          {
+                              label: "cache:invalidate:spaceHydrated",
+                              run: () =>
+                                  invalidateCache(
+                                      "spaceHydrated",
+                                      expression.spaceId!,
+                                  ),
+                          },
+                      ]
+                    : []),
+            ]);
         } catch (err) {
             next(err);
         }
@@ -296,6 +381,43 @@ export default class ExpressionsController {
                 .delete(expressionsTable)
                 .where(eq(expressionsTable.id, BigInt(expressionId)));
 
+            res.status(HttpStatusCode.Success).json({
+                id: expression.id,
+                spaceId: expression.spaceId,
+            });
+
+            fireAndForgetAll([
+                {
+                    label: `event:${expression.spaceId ? "space" : "user"}:ExpressionDelete`,
+                    run: () =>
+                        emitEvent({
+                            space_id: expression.spaceId || undefined,
+                            user_id: !expression.spaceId ? user.id : undefined,
+                            data: {
+                                id: expression.id,
+                                spaceId: expression.spaceId,
+                            },
+                            event: "ExpressionDelete",
+                        }),
+                },
+                {
+                    label: "cache:delete:expression",
+                    run: () => deleteCache("expression", expression.id),
+                },
+                ...(expression.spaceId
+                    ? [
+                          {
+                              label: "cache:invalidate:spaceHydrated",
+                              run: () =>
+                                  invalidateCache(
+                                      "spaceHydrated",
+                                      expression.spaceId!,
+                                  ),
+                          },
+                      ]
+                    : []),
+            ]);
+
             const ext = expression.assetHash.startsWith("a_") ? "gif" : "png";
             try {
                 await s3Client.send(
@@ -307,21 +429,6 @@ export default class ExpressionsController {
             } catch {
                 // Ignore cuz it might be deleted
             }
-
-            if (expression.spaceId)
-                await emitEvent({
-                    space_id: expression.spaceId,
-                    data: expression,
-                    event: "ExpressionDelete",
-                });
-            else
-                await emitEvent({
-                    user_id: user.id,
-                    data: expression,
-                    event: "ExpressionDelete",
-                });
-
-            return res.status(HttpStatusCode.Success).json(expression);
         } catch (err) {
             next(err);
         }

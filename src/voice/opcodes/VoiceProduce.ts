@@ -66,14 +66,13 @@ export default async function VoiceProduce(
     if (!state.channelId)
         throw server.error("NOT_IN_VOICE", "User is not in a voice channel");
 
-    const shouldStartPaused = Boolean(state.selfMute || state.spaceMute);
+    const shouldStartPaused =
+        kind === "audio" && Boolean(state.selfMute || state.spaceMute);
 
     const producer = await peer.sendTransport.produce({
         kind,
         rtpParameters,
-        appData: {
-            userId: peer.userId,
-        },
+        appData: { userId: peer.userId },
     });
 
     if (shouldStartPaused) {

@@ -54,7 +54,7 @@ export const requireSpacePermissions = async ({
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
 
     if (userId !== space.ownerId) {
-        const member = await getMember(space.id, userId);
+        const member = await getMember(space.id, userId, true);
         if (!member)
             throw new HttpException(
                 HttpStatusCode.Forbidden,

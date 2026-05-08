@@ -110,3 +110,4 @@ export const initDatabaseShutdownHooks = () => {
 };
 
 export * from "./schemas";
+export * from "./Logger";

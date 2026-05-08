@@ -2,7 +2,7 @@ import { deleteCache, getCache, setCache } from "@mutualzz/cache";
 import { db, themesTable } from "@mutualzz/database";
 import type { APITheme } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { execNormalized, Snowflake } from "@mutualzz/util";
+import { execNormalized, fireAndForget, Snowflake } from "@mutualzz/util";
 import {
     validateThemeCreate,
     validateThemeUpdateBody,
@@ -46,9 +46,9 @@ export default class MeThemesController {
                 author: user,
             };
 
-            await setCache("theme", newTheme.id, newTheme);
-
             res.status(HttpStatusCode.Created).json(newTheme);
+
+            fireAndForget(() => setCache("theme", newTheme.id, newTheme));
         } catch (error) {
             next(error);
         }
@@ -110,9 +110,12 @@ export default class MeThemesController {
                 author: theme.author || user,
             };
 
-            await setCache("theme", themeId, updatedTheme);
-
             res.status(HttpStatusCode.Success).json(updatedTheme);
+
+            fireAndForget(() => setCache("theme", themeId, updatedTheme), {
+                label: "cache:set:theme",
+                meta: { themeId },
+            });
         } catch (error) {
             next(error);
         }
@@ -159,10 +162,13 @@ export default class MeThemesController {
                 .delete(themesTable)
                 .where(eq(themesTable.id, BigInt(themeId)));
 
-            await deleteCache("theme", themeId);
-
             res.status(HttpStatusCode.Success).send({
                 id: theme.id,
+            });
+
+            fireAndForget(() => deleteCache("theme", themeId), {
+                label: "cache:delete:theme",
+                meta: { themeId },
             });
         } catch (error) {
             next(error);

@@ -4,6 +4,7 @@ import {
     emitEvent,
     execNormalized,
     execNormalizedMany,
+    fireAndForgetAll,
     getMember,
     getSpace,
     getSpaceHydrated,
@@ -25,7 +26,7 @@ import {
     assertNotEveryoneDelete,
     getActorTopRolePosition,
 } from "@mutualzz/rest/util";
-import { invalidateCache } from "@mutualzz/cache";
+import { getCache, invalidateCache } from "@mutualzz/cache";
 import { permissionFlags } from "@mutualzz/bitfield";
 
 export default class RolesController {
@@ -56,7 +57,10 @@ export default class RolesController {
                     );
             }
 
-            const roles = await execNormalizedMany<APIRole>(
+            let roles = await getCache("roles", spaceId);
+            if (roles) return res.status(HttpStatusCode.Success).json(roles);
+
+            roles = await execNormalizedMany<APIRole>(
                 db.query.rolesTable.findMany({
                     where: eq(rolesTable.spaceId, BigInt(spaceId)),
                     orderBy: asc(rolesTable.position),
@@ -96,7 +100,10 @@ export default class RolesController {
                     );
             }
 
-            const role = await execNormalized<APIRole>(
+            let role = await getCache("role", roleId);
+            if (role) return res.status(HttpStatusCode.Success).json(role);
+
+            role = await execNormalized<APIRole>(
                 db
                     .select()
                     .from(rolesTable)
@@ -171,14 +178,31 @@ export default class RolesController {
                     "Failed to create role",
                 );
 
-            await invalidateCache("spaceHydrated", spaceId);
-            await emitEvent({
-                event: "RoleCreate",
-                space_id: space.id,
-                data: newRole,
-            });
-
             res.status(HttpStatusCode.Success).json(newRole);
+
+            fireAndForgetAll([
+                {
+                    label: "event:RoleCreate",
+                    run: () =>
+                        emitEvent({
+                            event: "RoleCreate",
+                            space_id: space.id,
+                            data: newRole,
+                        }),
+                },
+                {
+                    label: "cache:invalidate:everyoneRole",
+                    run: () => invalidateCache("everyoneRole", spaceId),
+                },
+                {
+                    label: "cache:invalidate:memberRoles",
+                    run: () => invalidateCache("memberRoles", spaceId),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (error) {
             next(error);
         }
@@ -257,15 +281,41 @@ export default class RolesController {
                 )
                 .execute();
 
-            await invalidateCache("spaceHydrated", spaceId);
-
-            await emitEvent({
-                event: "RoleDelete",
-                space_id: space.id,
-                data: role,
+            res.status(HttpStatusCode.Success).json({
+                id: role.id,
+                spaceId: space.id,
             });
 
-            res.status(HttpStatusCode.Success).json(role);
+            fireAndForgetAll([
+                {
+                    label: "event:RoleDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "RoleDelete",
+                            space_id: space.id,
+                            data: {
+                                id: role.id,
+                                spaceId: space.id,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:invalidate:channelOverwrites",
+                    run: () => invalidateCache("channelOverwrites", spaceId),
+                },
+                {
+                    label: "cache:invalidate:everyoneRole",
+                    run: () => invalidateCache("everyoneRole", spaceId),
+                },
+                {
+                    label: "cache:invalidate:memberRoles",
+                    run: () => invalidateCache("memberRoles", spaceId),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -390,15 +440,35 @@ export default class RolesController {
                     "Failed to update role",
                 );
 
-            await invalidateCache("spaceHydrated", spaceId);
-
-            await emitEvent({
-                event: "RoleUpdate",
-                space_id: space.id,
-                data: updatedRole,
-            });
-
             res.status(HttpStatusCode.Success).json(updatedRole);
+
+            fireAndForgetAll([
+                {
+                    label: "event:RoleUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "RoleUpdate",
+                            space_id: space.id,
+                            data: updatedRole,
+                        }),
+                },
+                {
+                    label: "cache:invalidate:channelOverwrites",
+                    run: () => invalidateCache("channelOverwrites", spaceId),
+                },
+                {
+                    label: "cache:invalidate:everyoneRole",
+                    run: () => invalidateCache("everyoneRole", spaceId),
+                },
+                {
+                    label: "cache:invalidate:memberRoles",
+                    run: () => invalidateCache("memberRoles", spaceId),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }

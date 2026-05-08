@@ -7,7 +7,6 @@ import express, { Router } from "express";
 import fg from "fast-glob";
 import helmet from "helmet";
 import { createServer } from "http";
-import morgan from "morgan";
 import multer from "multer";
 import path from "path";
 import { pathToFileURL } from "url";
@@ -16,6 +15,7 @@ import { logger } from "./Logger";
 import authMiddleware from "./middlewares/auth.middleware";
 import errorMiddleware from "./middlewares/error.middleware";
 import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./util";
+import type { LogLevel } from "@mutualzz/logger";
 
 declare global {
     interface BigInt {
@@ -59,6 +59,51 @@ export class Server {
         });
     }
 
+    private initLoggerMiddleware() {
+        this.app.use((req, res, next) => {
+            const start = process.hrtime.bigint();
+
+            res.on("finish", () => {
+                const end = process.hrtime.bigint();
+                const durationMs = Number(end - start) / 1e6;
+
+                const status = res.statusCode;
+
+                const ip =
+                    (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
+                    req.socket.remoteAddress ||
+                    "-";
+
+                const contentLength = res.getHeader("content-length") || 0;
+
+                const baseMessage = `${req.method} ${req.originalUrl} ${status} ${durationMs.toFixed(2)} ms`;
+
+                let level: LogLevel = "info";
+                if (status >= 500) level = "error";
+                else if (status >= 400) level = "warn";
+
+                const isSlow = durationMs > 1000;
+
+                logger[level]({
+                    msg: baseMessage,
+                    method: req.method,
+                    url: req.originalUrl,
+                    status,
+                    duration: `${durationMs}ms`,
+                    ip,
+                    userAgent: req.headers["user-agent"],
+                    contentLength: Number(contentLength),
+                    slow: isSlow || undefined,
+                    user: req.user
+                        ? `${req.user.id} (${req.user.username})`
+                        : undefined,
+                });
+            });
+
+            next();
+        });
+    }
+
     private initHeadMiddlewares() {
         this.app.use(
             cors({
@@ -82,10 +127,6 @@ export class Server {
             res.setHeader("X-XSS-Protection", "1; mode=block");
             next();
         });
-
-        this.app.use(
-            morgan(process.env.NODE_ENV === "production" ? "tiny" : "dev"),
-        );
 
         this.app.disable("x-powered-by");
         this.app.set("trust proxy", true);
@@ -172,6 +213,7 @@ export class Server {
         this.initHeadMiddlewares();
         this.initSentry();
         this.initMiddlewares();
+        this.initLoggerMiddleware();
         await this.initRoutes();
         this.initErrorHandling();
     }

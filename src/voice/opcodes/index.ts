@@ -11,6 +11,7 @@ import VoiceLeave from "./VoiceLeave";
 
 import type { Server } from "../Server";
 import type { ClientMessageEnvelope, VoicePeer, VoiceRoom } from "../types";
+import VoiceCloseProducer from "@mutualzz/voice/opcodes/VoiceCloseProducer.ts";
 
 export type OPCodeHandler = (
     server: Server,
@@ -27,6 +28,7 @@ const OPCodeHandlers: Record<number, OPCodeHandler> = {
     [VoiceOpcodes.VoiceProduce]: VoiceProduce,
     [VoiceOpcodes.VoiceConsume]: VoiceConsume,
     [VoiceOpcodes.VoiceResumeConsumer]: VoiceResumeConsumer,
+    [VoiceOpcodes.VoiceCloseProducer]: VoiceCloseProducer,
     [VoiceOpcodes.VoiceLeave]: VoiceLeave,
 };
 

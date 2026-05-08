@@ -506,3 +506,7 @@ export const buildEmbeds = async (content: string) => {
     }
     return embeds;
 };
+
+export const generateHash = (buffer: Uint8Array, animated = false) => {
+    return `${animated ? "a_" : ""}${crypto.createHash("sha256").update(buffer).digest("hex")}`;
+};

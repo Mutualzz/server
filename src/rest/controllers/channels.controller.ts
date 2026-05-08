@@ -7,6 +7,8 @@ import {
     emitEvent,
     execNormalized,
     execNormalizedMany,
+    fireAndForgetAll,
+    generateHash,
     getChannel,
     getSpaceHydrated,
     requireChannelPermissions,
@@ -27,7 +29,6 @@ import {
 import { and, eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
-import { generateHash } from "@mutualzz/rest/util";
 import {
     DeleteObjectCommand,
     GetObjectCommand,
@@ -86,7 +87,7 @@ export default class ChannelsController {
             const { name, parentId, spaceId, ownerId, recipientIds, ...rest } =
                 validateChannelBodyCreate.parse(req.body);
 
-            const type = parseInt(rest.type) as ChannelType;
+            const type = parseInt(rest.type);
 
             switch (type) {
                 case ChannelType.Text:
@@ -166,8 +167,6 @@ export default class ChannelsController {
                         "Failed to create channel",
                     );
 
-                await setCache("channel", channel.id, channel);
-
                 // TODO: Implement proper events for DM and Group DM channels
                 // await emitEvent({
                 //     event: "ChannelCreate",
@@ -176,6 +175,8 @@ export default class ChannelsController {
                 // });
 
                 res.status(HttpStatusCode.Created).json(channel);
+
+                void setCache("channel", channel.id, channel);
                 return;
             }
 
@@ -328,16 +329,27 @@ export default class ChannelsController {
                     "Failed to create channel",
                 );
 
-            await invalidateCache("spaceHydrated", spaceId);
-            await setCache("channel", channel.id, channel);
-
-            await emitEvent({
-                event: "ChannelCreate",
-                space_id: channel.spaceId,
-                data: channel,
-            });
-
             res.status(HttpStatusCode.Created).json(channel);
+
+            fireAndForgetAll([
+                {
+                    label: "event:ChannelCreate",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelCreate",
+                            space_id: channel.spaceId,
+                            data: channel,
+                        }),
+                },
+                {
+                    label: "cache:set:channel",
+                    run: () => setCache("channel", channel.id, channel),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -417,18 +429,36 @@ export default class ChannelsController {
                     "Failed to update channel",
                 );
 
-            if (updatedChannel.spaceId)
-                await invalidateCache("spaceHydrated", updatedChannel.spaceId);
-
-            await setCache("channel", updatedChannel.id, updatedChannel);
-
-            await emitEvent({
-                event: "ChannelUpdate",
-                channel_id: channel.id,
-                data: updatedChannel,
-            });
-
             res.status(HttpStatusCode.Success).json(updatedChannel);
+
+            fireAndForgetAll([
+                {
+                    label: "event:ChannelUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelUpdate",
+                            channel_id: channel.id,
+                            data: updatedChannel,
+                        }),
+                },
+                {
+                    label: "cache:update:channel",
+                    run: () =>
+                        setCache("channel", updatedChannel.id, updatedChannel),
+                },
+                ...(updatedChannel.space
+                    ? [
+                          {
+                              label: "cache:invalidate:spaceHydrated",
+                              run: () =>
+                                  invalidateCache(
+                                      "spaceHydrated",
+                                      updatedChannel.spaceId!,
+                                  ),
+                          },
+                      ]
+                    : []),
+            ]);
         } catch (err) {
             next(err);
         }
@@ -507,7 +537,6 @@ export default class ChannelsController {
                                 `Failed to update channel with ID ${chBody.id}`,
                             );
 
-                        await setCache("channel", newChannel.id, newChannel);
                         updated.push(newChannel);
                     }
 
@@ -515,14 +544,23 @@ export default class ChannelsController {
                 },
             );
 
-            await invalidateCache("spaceHydrated", spaceId);
-            await emitEvent({
-                event: "BulkChannelUpdate",
-                space_id: spaceId,
-                data: newChannels,
-            });
-
             res.status(HttpStatusCode.Success).json(newChannels);
+
+            fireAndForgetAll([
+                {
+                    label: "event:BulkChannelUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "BulkChannelUpdate",
+                            space_id: spaceId,
+                            data: newChannels,
+                        }),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -591,30 +629,82 @@ export default class ChannelsController {
             deletedChannels.push(deletedParent);
 
             if (parentOnly === false && channel.type === ChannelType.Category) {
-                for (const ch of deletedChannels)
-                    await deleteCache("channel", ch.id);
+                res.status(HttpStatusCode.Success).json(
+                    deletedChannels.map((ch) => ({
+                        id: ch.id,
+                        spaceId: ch.spaceId,
+                    })),
+                );
 
-                await emitEvent({
-                    event: "BulkChannelDelete",
-                    space_id: channel.spaceId,
-                    data: deletedChannels,
-                });
-
-                res.status(HttpStatusCode.Success).json(deletedChannels);
+                fireAndForgetAll([
+                    {
+                        label: "event:BulkChannelDelete",
+                        run: () =>
+                            emitEvent({
+                                event: "BulkChannelDelete",
+                                space_id: channel.spaceId,
+                                data: deletedChannels.map((ch) => ({
+                                    id: ch.id,
+                                    spaceId: ch.spaceId,
+                                })),
+                            }),
+                    },
+                    ...deletedChannels.map((ch) => ({
+                        label: `cache:delete:channel:${ch.id}`,
+                        run: () => deleteCache("channel", ch.id),
+                    })),
+                    ...(channel.spaceId
+                        ? [
+                              {
+                                  label: `cache:invalidate:spaceHydrated:${channel.spaceId}`,
+                                  run: () =>
+                                      invalidateCache(
+                                          "spaceHydrated",
+                                          channel.spaceId!,
+                                      ),
+                              },
+                          ]
+                        : []),
+                ]);
 
                 return;
             }
 
-            if (channel.spaceId)
-                await invalidateCache("spaceHydrated", channel.spaceId);
-
-            await deleteCache("channel", channel.id);
-
-            await emitEvent({
-                event: "ChannelDelete",
-                channel_id: channel.id,
-                data: channel,
+            res.status(HttpStatusCode.Success).json({
+                id: channel.id,
+                spaceId: channel.spaceId,
             });
+
+            fireAndForgetAll([
+                {
+                    label: "event:ChannelDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelDelete",
+                            channel_id: channel.id,
+                            data: {
+                                id: channel.id,
+                                spaceId: channel.spaceId,
+                            },
+                        }),
+                },
+                {
+                    label: "cache:delete:channel",
+                    run: () => deleteCache("channel", channel.id),
+                },
+                ...(channel.spaceId
+                    ? [
+                          {
+                              label: "cache:invalidate:spaceHydrated",
+                              run: () =>
+                                  invalidateCache(
+                                      "spaceHydrated",
+                                      channel.spaceId!,
+                                  ),
+                          },
+                      ]
+                    : []),
+            ]);
 
             if (channel.icon) {
                 const ext = channel.icon.startsWith("a_") ? "gif" : "png";
@@ -626,11 +716,9 @@ export default class ChannelsController {
                         }),
                     );
                 } catch {
-                    // ignore since it might be already deelted
+                    // ignore since it might be already deleted
                 }
             }
-
-            res.status(HttpStatusCode.Success).json(channel);
         } catch (err) {
             next(err);
         }

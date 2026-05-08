@@ -10,18 +10,19 @@ import {
     userSettingsTable,
     usersTable,
 } from "@mutualzz/database";
-import { logger } from "@mutualzz/rest/Logger";
-import { generateHash } from "@mutualzz/rest/util";
-import type { APIPrivateUser, APIUserSettings } from "@mutualzz/types";
-import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { logger } from "@mutualzz/rest";
 import {
     bucketName,
     dominantHex,
     emitEvent,
     execNormalized,
+    fireAndForgetAll,
+    generateHash,
     genRandColor,
     s3Client,
 } from "@mutualzz/util";
+import type { APIPrivateUser, APIUserSettings } from "@mutualzz/types";
+import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     imageFileValidator,
     validateMeSettingsUpdate,
@@ -319,15 +320,27 @@ export default class MeController {
                     "Failed to update user",
                 );
 
-            await emitEvent({
-                event: "UserUpdate",
-                user_id: newUser.id,
-                data: toPublicUser(newUser),
-            });
-
-            await setCache("user", user.id, toPublicUser(newUser));
-
             res.status(HttpStatusCode.Success).json(toPublicUser(newUser));
+
+            fireAndForgetAll([
+                {
+                    label: "event:UserUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserUpdate",
+                            user_id: newUser.id,
+                            data: toPublicUser(newUser),
+                        }),
+                    meta: { userId: user.id },
+                },
+                {
+                    label: "cache:update:user",
+                    run: () => setCache("user", user.id, toPublicUser(newUser)),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+            ]);
         } catch (err) {
             next(err);
         }
@@ -382,15 +395,27 @@ export default class MeController {
                     "Failed to update user settings",
                 );
 
-            await emitEvent({
-                event: "UserSettingsUpdate",
-                user_id: user.id,
-                data: result,
-            });
-
-            await setCache("userSettings", user.id, result);
-
             res.status(HttpStatusCode.Success).json(result);
+
+            fireAndForgetAll([
+                {
+                    label: "event:UserSettingsUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserSettingsUpdate",
+                            user_id: user.id,
+                            data: result,
+                        }),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+                {
+                    label: "cache:set:userSettings",
+                    run: () => setCache("userSettings", user.id, result),
+                    meta: { userId: user.id },
+                },
+            ]);
         } catch (error) {
             next(error);
         }

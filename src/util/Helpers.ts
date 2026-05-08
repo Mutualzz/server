@@ -291,26 +291,40 @@ export async function getMember(
 }
 
 export async function getEveryoneRole(spaceId: Snowflake) {
-    return db
-        .select({
-            id: rolesTable.id,
-            permissions: rolesTable.permissions,
-            flags: rolesTable.flags,
-            position: rolesTable.position,
-        })
-        .from(rolesTable)
-        .where(
-            and(
-                eq(rolesTable.spaceId, BigInt(spaceId)),
-                sql`${rolesTable.flags} & ${roleFlags.Everyone} = ${roleFlags.Everyone}`,
-            ),
-        )
-        .limit(1)
-        .then((res) => res[0])
-        .catch(() => null);
+    let role = await getCache("everyoneRole", spaceId);
+    if (role) return role;
+
+    role = await execNormalized(
+        db
+            .select({
+                id: rolesTable.id,
+                permissions: rolesTable.permissions,
+                flags: rolesTable.flags,
+                position: rolesTable.position,
+            })
+            .from(rolesTable)
+            .where(
+                and(
+                    eq(rolesTable.spaceId, BigInt(spaceId)),
+                    sql`${rolesTable.flags} & ${roleFlags.Everyone} = ${roleFlags.Everyone}`,
+                ),
+            )
+            .limit(1)
+            .then((res) => res[0])
+            .catch(() => null),
+    );
+
+    if (!role) return null;
+
+    await setCache("everyoneRole", spaceId, role);
+    return role;
 }
 
 export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
+    const cacheKey = `${spaceId}:${userId}`;
+    let memberRoles = await getCache("memberRoles", cacheKey);
+    if (memberRoles) return memberRoles;
+
     const rows = await db
         .select({
             id: rolesTable.id,
@@ -327,16 +341,23 @@ export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
             ),
         );
 
-    return rows.map((r) => ({
+    memberRoles = rows.map((r) => ({
         ...r,
         id: r.id.toString(),
     }));
+
+    await setCache("memberRoles", cacheKey, memberRoles);
+    return memberRoles;
 }
 
 export async function getChannelOverwrites(
     spaceId: Snowflake,
     channelId: Snowflake,
 ) {
+    const cacheKey = `${spaceId}:${channelId}`;
+    let overwrites = await getCache("channelOverwrites", cacheKey);
+    if (overwrites) return overwrites;
+
     const rows = await db
         .select({
             roleId: channelPermissionOverwritesTable.roleId,
@@ -355,10 +376,13 @@ export async function getChannelOverwrites(
             ),
         );
 
-    return rows.map((row) => ({
+    overwrites = rows.map((row) => ({
         roleId: row.roleId ? row.roleId.toString() : null,
         userId: row.userId ? row.userId.toString() : null,
         allow: row.allow,
         deny: row.deny,
     }));
+
+    await setCache("channelOverwrites", cacheKey, overwrites);
+    return overwrites;
 }

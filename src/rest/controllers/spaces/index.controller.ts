@@ -3,7 +3,7 @@ import {
     GetObjectCommand,
     PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import { deleteCache, setCache } from "@mutualzz/cache";
+import { deleteCache, invalidateCache, setCache } from "@mutualzz/cache";
 import {
     channelsTable,
     db,
@@ -14,7 +14,18 @@ import {
     toPublicUser,
     userSettingsTable,
 } from "@mutualzz/database";
-import { generateHash } from "@mutualzz/rest/util";
+import {
+    bucketName,
+    emitEvent,
+    execNormalized,
+    execNormalizedMany,
+    fireAndForgetAll,
+    generateHash,
+    getMember,
+    getSpace,
+    s3Client,
+    Snowflake,
+} from "@mutualzz/util";
 import type {
     APIChannel,
     APIRole,
@@ -23,16 +34,6 @@ import type {
     APIUserSettings,
 } from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
-import {
-    bucketName,
-    emitEvent,
-    execNormalized,
-    execNormalizedMany,
-    getMember,
-    getSpace,
-    s3Client,
-    Snowflake,
-} from "@mutualzz/util";
 import {
     imageFileValidator,
     validateSpaceCreate,
@@ -142,7 +143,7 @@ export default class SpacesController {
                         "Failed to create space",
                     );
 
-                // Note: Keep ading bitfield when you have
+                // Note: Keep adding bits when you need
                 const everyoneRole = await execNormalized<APIRole>(
                     tx
 
@@ -301,26 +302,6 @@ export default class SpacesController {
                         "Failed to create user settings",
                     );
 
-                await setCache("channel", textCategory.id, textCategory);
-                await setCache(
-                    "channel",
-                    defaultTextChannel.id,
-                    defaultTextChannel,
-                );
-                await setCache("channel", voiceCategory.id, voiceCategory);
-                await setCache(
-                    "channel",
-                    defaultVoiceChannel.id,
-                    defaultVoiceChannel,
-                );
-                await setCache(
-                    "spaceMember",
-                    `${newSpace.id}:${user.id}`,
-                    newMember,
-                );
-                await setCache("space", newSpace.id, newSpace);
-                await setCache("userSettings", user.id, settings);
-
                 const channels = [
                     textCategory,
                     defaultTextChannel,
@@ -338,6 +319,26 @@ export default class SpacesController {
                     },
                 ];
 
+                void setCache("channel", textCategory.id, textCategory);
+                void setCache(
+                    "channel",
+                    defaultTextChannel.id,
+                    defaultTextChannel,
+                );
+                void setCache("channel", voiceCategory.id, voiceCategory);
+                void setCache(
+                    "channel",
+                    defaultVoiceChannel.id,
+                    defaultVoiceChannel,
+                );
+                void setCache(
+                    "spaceMember",
+                    `${newSpace.id}:${user.id}`,
+                    newMember,
+                );
+                void setCache("space", newSpace.id, newSpace);
+                void setCache("userSettings", user.id, settings);
+
                 return {
                     space: {
                         ...newSpace,
@@ -350,21 +351,37 @@ export default class SpacesController {
                 };
             });
 
-            await emitEvent({
-                event: "SpaceCreate",
-                user_id: user.id,
-                data: space,
-            });
-
-            await emitEvent({
-                event: "UserSettingsUpdate",
-                user_id: user.id,
-                data: settings,
-            });
-
             const { channels, members, owner, ...plainSpace } = space;
 
             res.status(HttpStatusCode.Created).json(plainSpace);
+
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceCreate",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceCreate",
+                            user_id: user.id,
+                            data: space,
+                        }),
+                    meta: {
+                        spaceId,
+                        userId: user.id,
+                    },
+                },
+                {
+                    label: "event:UserSettingsUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserSettingsUpdate",
+                            user_id: user.id,
+                            data: settings,
+                        }),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+            ]);
         } catch (error) {
             next(error);
         }
@@ -450,10 +467,11 @@ export default class SpacesController {
                             "Failed to delete space",
                         );
 
-                    await deleteCache("space", space.id);
-                    await deleteCache("spaceMember", `${space.id}:${user.id}`);
-                    await deleteCache("spaceMembers", space.id);
-                    await setCache("userSettings", user.id, updatedSettings);
+                    void deleteCache("space", space.id);
+                    void deleteCache("spaceMember", `${space.id}:${user.id}`);
+                    void deleteCache("spaceMembers", space.id);
+                    void setCache("userSettings", user.id, updatedSettings);
+                    void invalidateCache("spaceHydrated", space.id);
 
                     return {
                         settings: updatedSettings,
@@ -462,19 +480,34 @@ export default class SpacesController {
                 },
             );
 
-            await emitEvent({
-                event: "SpaceDelete",
-                space_id: deletedSpace.id,
-                data: deletedSpace,
-            });
+            res.status(HttpStatusCode.Success).json({ id: deletedSpace.id });
 
-            await emitEvent({
-                event: "UserSettingsUpdate",
-                user_id: user.id,
-                data: settings,
-            });
-
-            res.status(HttpStatusCode.Success).json(deletedSpace);
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceDelete",
+                            space_id: deletedSpace.id,
+                            data: { id: deletedSpace.id },
+                        }),
+                    meta: {
+                        spaceId: deletedSpace.id,
+                    },
+                },
+                {
+                    label: "event:UserSettingsUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserSettingsUpdate",
+                            user_id: user.id,
+                            data: settings,
+                        }),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+            ]);
         } catch (error) {
             next(error);
         }
@@ -520,7 +553,8 @@ export default class SpacesController {
                     "Space not found",
                 );
 
-            if (!(await getMember(spaceId, user.id, true)))
+            const me = await getMember(spaceId, user.id, true);
+            if (!me)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
                     "You do not have permission to view this space",
@@ -545,7 +579,7 @@ export default class SpacesController {
 
             const spaces = await execNormalizedMany<APISpace>(
                 db.query.spacesTable.findMany({
-                    limit: typeof limit === "string" ? parseInt(limit, 10) : 50,
+                    limit: limit || 50,
                     where: sql`EXISTS (SELECT 1 FROM ${spaceMembersTable} WHERE ${spaceMembersTable.spaceId} = ${spacesTable.id} AND ${spaceMembersTable.userId} = ${user.id})`,
                 }),
             );

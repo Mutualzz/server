@@ -2,26 +2,21 @@ import "@sapphire/plugin-subcommands/register";
 
 import { type ILogger, LogLevel, SapphireClient } from "@sapphire/framework";
 import {
+    ActivityType,
     Collection,
+    type Guild,
     Partials,
     type PresenceData,
-    ActivityType,
-    type Guild,
     type TextChannel,
-    type VoiceChannel,
     type ThreadChannel,
+    type VoiceChannel,
 } from "discord.js";
-import { Logger } from "@mutualzz/logger";
 import { pickRandom } from "@sapphire/utilities";
 import dLogs from "discord-logs";
 import path from "path";
+import { logger } from "./Logger";
 
 const { BOT_TOKEN } = process.env;
-
-const logger = new Logger({
-    tag: "Asmodeus",
-    level: process.env.NODE_ENV === "development" ? "debug" : "info",
-});
 
 if (!BOT_TOKEN)
     throw new Error("BOT_TOKEN is not defined in environment variables");
@@ -179,3 +174,5 @@ export class BotClient extends SapphireClient {
         return `</${commandLiteral}:${appCommand.id}>`;
     }
 }
+
+export * from "./Logger";

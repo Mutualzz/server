@@ -28,11 +28,11 @@ export function computeBaseBitsFromSpace(
     const memberRoleIds = getMemberRoleIdsIdsOnly(member);
 
     const roles = (space.roles ?? []).map((r) => ({
-        id: String(r.id),
+        id: r.id.toString(),
         permissions: r.permissions,
     }));
 
-    const baseBits = resolveBaseBits(String(space.id), roles, memberRoleIds);
+    const baseBits = resolveBaseBits(space.id.toString(), roles, memberRoleIds);
     return { baseBits, memberRoleIds };
 }
 
@@ -51,7 +51,7 @@ export function filterVisibleChannelsForUser(
     if (channels.length === 0) return [];
 
     const byId = new Map<string, APIChannel>();
-    for (const channel of channels) byId.set(String(channel.id), channel);
+    for (const channel of channels) byId.set(channel.id.toString(), channel);
 
     const { baseBits, memberRoleIds } = computeBaseBitsFromSpace(space, member);
 
@@ -64,13 +64,13 @@ export function filterVisibleChannelsForUser(
 
     const canView = (channel: APIChannel): boolean => {
         const parent = channel.parentId
-            ? byId.get(String(channel.parentId))
+            ? byId.get(channel.parentId.toString())
             : null;
 
         const effectiveBits = resolveEffectiveChannelBits({
             baseBits,
-            userId: String(userId),
-            everyoneRoleId: String(space.id), // @everyone == space.id
+            userId: userId.toString(),
+            everyoneRoleId: space.id.toString(), // @everyone == space.id
             memberRoleIds,
             parentOverwrites: parent?.overwrites ?? null,
             channelOverwrites: channel.overwrites ?? null,
