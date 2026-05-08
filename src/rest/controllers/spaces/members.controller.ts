@@ -1,9 +1,4 @@
-import {
-    deleteCache,
-    getCache,
-    invalidateCache,
-    setCache,
-} from "@mutualzz/cache";
+import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
 import {
     channelsTable,
     db,
@@ -12,7 +7,6 @@ import {
     rolesTable,
     spaceMemberRolesTable,
     spaceMembersTable,
-    toPublicUser,
     userSettingsTable,
 } from "@mutualzz/database";
 import {
@@ -451,11 +445,6 @@ export default class MembersController {
                     ),
                 );
 
-            const data = {
-                user: toPublicUser(user),
-                ...member,
-            };
-
             res.status(HttpStatusCode.NoContent).send();
 
             fireAndForgetAll([
@@ -846,7 +835,7 @@ export default class MembersController {
 
             res.status(HttpStatusCode.Success).json({
                 spaceId,
-                userId: member.userId
+                userId: member.userId,
             });
 
             fireAndForgetAll([
