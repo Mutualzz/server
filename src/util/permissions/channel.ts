@@ -8,14 +8,7 @@ import {
     resolveEffectiveChannelBits,
 } from "@mutualzz/bitfield";
 import type { RequireMode } from "./util";
-import {
-    getChannel,
-    getChannelOverwrites,
-    getEveryoneRole,
-    getMember,
-    getMemberRoles,
-    getSpace,
-} from "../Helpers";
+import { getChannel, getChannelOverwrites, getEveryoneRole, getMember, getMemberRoles, getSpace, } from "../Helpers";
 import { resolveSpacePermissions } from "./space";
 
 interface RequireChannelPermissionsOptions {
@@ -59,11 +52,12 @@ export const requireChannelPermissions = async ({
     const base = resolveSpacePermissions({
         spaceOwnerId: space.ownerId,
         userId,
-        everyonePerms: everyoneRole?.permissions ?? 0n,
-        rolePerms: memberRoles.map((r) => r.permissions),
+        everyonePerms: BigInt(everyoneRole?.permissions ?? 0n),
+        rolePerms: memberRoles.map((r) => BigInt(r.permissions)),
     });
 
-    if (userId === space.ownerId) return { space, channel, permissions: base };
+    if (BigInt(userId) === BigInt(space.ownerId))
+        return { space, channel, permissions: base };
     if (base.has("Administrator")) return { space, channel, permissions: base };
 
     const channelOverwrites = await getChannelOverwrites(space.id, channel.id);
@@ -99,20 +93,3 @@ export const requireChannelPermissions = async ({
 
     return { space, channel, permissions };
 };
-
-type RequireChannelPermissionOptions = Omit<
-    RequireChannelPermissionsOptions,
-    "mode" | "needed"
-> & { needed: PermissionFlag };
-
-export const requireChannelPermission = ({
-    channelId,
-    userId,
-    needed,
-}: RequireChannelPermissionOptions) =>
-    requireChannelPermissions({
-        channelId,
-        userId,
-        needed: [needed],
-        mode: "All",
-    });

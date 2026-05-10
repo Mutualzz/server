@@ -30,8 +30,9 @@ export const resolveSpacePermissions = ({
         return BitField.fromBits(permissionFlags, ALL_BITS);
 
     let bits = 0n;
-    bits |= everyonePerms;
-    for (const perm of rolePerms) bits |= perm;
+    // For some reason we need to cast bigint here?
+    bits |= BigInt(everyonePerms);
+    for (const perm of rolePerms) bits |= BigInt(perm);
 
     return BitField.fromBits(permissionFlags, bits);
 };
@@ -84,20 +85,3 @@ export const requireSpacePermissions = async ({
 
     return { space, permissions };
 };
-
-type RequireSpacePermissionOptions = Omit<
-    RequireSpacePermissionsOptions,
-    "mode" | "needed"
-> & { needed: PermissionFlag };
-
-export const requireSpacePermission = async ({
-    spaceId,
-    userId,
-    needed,
-}: RequireSpacePermissionOptions) =>
-    requireSpacePermissions({
-        spaceId,
-        userId,
-        needed: [needed],
-        mode: "All",
-    });
