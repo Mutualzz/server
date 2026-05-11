@@ -8,7 +8,14 @@ import {
     resolveEffectiveChannelBits,
 } from "@mutualzz/bitfield";
 import type { RequireMode } from "./util";
-import { getChannel, getChannelOverwrites, getEveryoneRole, getMember, getMemberRoles, getSpace, } from "../Helpers";
+import {
+    getChannel,
+    getChannelOverwrites,
+    getEveryoneRole,
+    getMember,
+    getMemberRoles,
+    getSpace,
+} from "../Helpers";
 import { resolveSpacePermissions } from "./space";
 
 interface RequireChannelPermissionsOptions {
