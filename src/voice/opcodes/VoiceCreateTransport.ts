@@ -7,6 +7,7 @@ import type {
 } from "../types.ts";
 import { Send } from "../util/Common.ts";
 import config from "../Config.ts";
+import { getCloudflareTurnCredentials } from "@mutualzz/voice/util/CloudflareTurn.ts";
 
 export default async function VoiceCreateTransport(
     _server: Server,
@@ -31,6 +32,9 @@ export default async function VoiceCreateTransport(
     if (direction === "send") peer.sendTransport = transport;
     else peer.receiverTransport = transport;
 
+    const iceServers =
+        (await getCloudflareTurnCredentials().catch(() => null)) ?? [];
+
     Send(
         {
             ok: true,
@@ -40,6 +44,7 @@ export default async function VoiceCreateTransport(
                     iceParameters: transport.iceParameters,
                     iceCandidates: transport.iceCandidates,
                     dtlsParameters: transport.dtlsParameters,
+                    iceServers,
                 },
             },
         },

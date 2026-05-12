@@ -21,6 +21,7 @@ import {
     spacesLRU,
     themeLRU,
     themesLRU,
+    turnCredentialsLRU,
     userLRU,
     userSettingsLRU,
     usersLRU,
@@ -68,6 +69,9 @@ export const caches = {
     memberRoles: memberRolesLRU,
     everyoneRole: everyoneRoleLRU,
     channelOverwrites: channelOverwritesLRU,
+
+    // Cloudflare
+    turnCredentials: turnCredentialsLRU,
 };
 
 export type CacheName = keyof typeof caches;

@@ -186,3 +186,13 @@ export const channelOverwritesLRU = new LRUCache<
     max: 1000,
     ttl: 1000 * 60 * 5,
 });
+
+// [START] TURN credentials cache
+export const turnCredentialsLRU = new LRUCache<
+    string,
+    { iceServers: any[]; expiresAt: number }
+>({
+    max: 100,
+    ttl: 1000 * 60 * 60 * 24, // 24 hours
+});
+// [END] TURN credentials cache
