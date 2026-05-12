@@ -35,6 +35,8 @@ export default async function VoiceCreateTransport(
     const iceServers =
         (await getCloudflareTurnCredentials().catch(() => null)) ?? [];
 
+    console.log(iceServers);
+
     Send(
         {
             ok: true,

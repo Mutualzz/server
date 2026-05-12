@@ -1,72 +1,56 @@
 import { getCache, setCache } from "@mutualzz/cache";
+import { logger } from "../Logger.ts";
 
-interface CacheValue {
-    iceServers: any[];
+type CacheValue = {
+    iceServers: RTCIceServer[];
     expiresAt: number;
-}
+};
 
-export async function getCloudflareTurnCredentials(): Promise<any[] | null> {
+export async function getCloudflareTurnCredentials(): Promise<
+    RTCIceServer[] | null
+> {
     const keyId = process.env.CF_TURN_KEY_ID;
     const apiToken = process.env.CF_API_TOKEN;
-    const defaultTtl = process.env.CF_TURN_TTL
+    const ttl = process.env.CF_TURN_TTL
         ? parseInt(process.env.CF_TURN_TTL)
         : 86400;
 
     if (!keyId || !apiToken) return null;
 
-    try {
-        // Try cache
-        const cached = await getCache("turnCredentials", keyId);
-        if (cached && cached.expiresAt && Date.now() + 5000 < cached.expiresAt)
-            return cached.iceServers;
+    const cached = (await getCache(
+        "turnCredentials",
+        keyId,
+    )) as CacheValue | null;
+    if (cached && Date.now() + 5000 < cached.expiresAt)
+        return cached.iceServers;
 
-        // Fetch ephemeral credentials from Cloudflare
-        const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`;
-        const res = await fetch(url, {
+    const res = await fetch(
+        `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+        {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${apiToken}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ ttl: defaultTtl }),
-        });
+            body: JSON.stringify({ ttl }),
+        },
+    );
 
-        if (!res.ok) {
-            // Leave cache alone on failure
-            const txt = await res.text().catch(() => "");
-            console.warn("Cloudflare TURN request failed:", res.status, txt);
-            return null;
-        }
+    if (!res.ok) return null;
 
-        const json = await res.json().catch(() => ({}) as any);
-        const r = json.result ?? json;
+    const json = await res.json().catch(() => ({}) as any);
+    const r = json.result ?? json;
 
-        const username = r.username ?? null;
-        const password = r.password ?? null;
-        const urls = r.urls ?? r.uris ?? null;
-        const ttl = typeof r.ttl === "number" ? r.ttl : defaultTtl;
-
-        if (!username || !password || !urls) {
-            console.warn("Cloudflare TURN response missing fields:", r);
-            return null;
-        }
-
-        const iceServers = [
-            {
-                urls: Array.isArray(urls) ? urls : [urls],
-                username,
-                credential: password,
-            },
-        ];
-
-        const expiresAt = Date.now() + ttl * 1000;
-
-        // Store into your cache system; getCache/setCache handle redis/LRU for you.
-        await setCache("turnCredentials", keyId, { iceServers, expiresAt });
-
-        return iceServers;
-    } catch (err) {
-        console.warn("Failed to get Cloudflare TURN credentials:", err);
+    if (!Array.isArray(r.iceServers)) {
+        logger.warn("Cloudflare TURN response missing iceServers:", r);
         return null;
     }
+
+    const expiresAt = Date.now() + ttl * 1000;
+    await setCache("turnCredentials", keyId, {
+        iceServers: r.iceServers,
+        expiresAt,
+    }).catch(() => {});
+
+    return r.iceServers;
 }
