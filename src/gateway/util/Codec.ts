@@ -12,14 +12,12 @@ export interface Codec {
 export async function createCodec(encoding: Encoding): Promise<Codec> {
     if (encoding === "etf") {
         try {
-            const erl = await import("@yukikaze-bot/erlpack");
-
+            const erl = await import("erlpack");
             return {
                 name: "etf",
                 encode: (data) => erl.pack(data),
-                decode: (bytes) => {
-                    return erl.unpack(bytes);
-                },
+                decode: (bytes) =>
+                    erl.unpack(bytes as ReturnType<typeof erl.pack>),
             };
         } catch (err: any) {
             logger.error(
