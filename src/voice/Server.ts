@@ -18,6 +18,10 @@ export class Server {
     private readonly server: HttpServer;
     private readonly ws: WebSocketServer;
     private workersReady = false;
+    private readonly roomCloseTimers = new Map<
+        string,
+        ReturnType<typeof setTimeout>
+    >();
 
     constructor() {
         this.server = http.createServer();
@@ -39,6 +43,10 @@ export class Server {
 
         const voiceSession = await verifyVoiceToken(token);
         if (!voiceSession) {
+            logger.warn("verifyVoiceToken failed", {
+                tokenFingerprint: token?.slice(-8),
+                socketIp: (socket as any)._socket.remoteAddress,
+            });
             socket.close(4001, "Invalid token");
             return null;
         }
@@ -112,6 +120,12 @@ export class Server {
     }
 
     async getOrCreateRoom(roomId: string) {
+        const pendingClose = this.roomCloseTimers.get(roomId);
+        if (pendingClose) {
+            clearTimeout(pendingClose);
+            this.roomCloseTimers.delete(roomId);
+        }
+
         const existing = this.rooms.get(roomId);
         if (existing) return existing;
 
@@ -135,13 +149,24 @@ export class Server {
     }
 
     closeRoom(room: VoiceRoom) {
-        if (room.peers.size > 0) return;
+        const existingTimer = this.roomCloseTimers.get(room.roomId);
+        if (existingTimer) return;
 
-        try {
-            room.router.close();
-        } catch {}
+        const timer = setTimeout(() => {
+            this.roomCloseTimers.delete(room.roomId);
 
-        this.rooms.delete(room.roomId);
+            const currentRoom = this.rooms.get(room.roomId);
+            if (!currentRoom) return;
+            if (currentRoom.peers.size > 0) return;
+
+            try {
+                currentRoom.router.close();
+            } catch {}
+
+            this.rooms.delete(room.roomId);
+        }, 3000);
+
+        this.roomCloseTimers.set(room.roomId, timer);
     }
 
     getRoom(roomId: string) {

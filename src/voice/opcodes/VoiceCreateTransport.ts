@@ -35,6 +35,8 @@ export default async function VoiceCreateTransport(
     const iceServers =
         (await getCloudflareTurnCredentials().catch(() => null)) ?? [];
 
+    const limitedServers = iceServers.slice(0, 2);
+
     Send(
         {
             ok: true,
@@ -44,7 +46,7 @@ export default async function VoiceCreateTransport(
                     iceParameters: transport.iceParameters,
                     iceCandidates: transport.iceCandidates,
                     dtlsParameters: transport.dtlsParameters,
-                    iceServers,
+                    iceServers: limitedServers,
                 },
             },
         },

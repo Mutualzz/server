@@ -3,6 +3,7 @@ import type { Server } from "../Server.ts";
 import OPCodeHandlers from "../opcodes/index.ts";
 import { logger } from "../Logger.ts";
 import { Send } from "../util/Common.ts";
+import { validatePeerSession } from "@mutualzz/voice/middleware/validatePeerSession.ts";
 
 export default async function Message(
     server: Server,
@@ -10,6 +11,14 @@ export default async function Message(
     peer: VoicePeer,
     rawText: string,
 ) {
+    if (!validatePeerSession(server, peer)) {
+        try {
+            peer.socket.close(4000, "Session superseded");
+        } catch {}
+
+        return;
+    }
+
     let envelope: ClientMessageEnvelope;
 
     try {

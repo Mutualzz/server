@@ -8,6 +8,14 @@ import {
 import type { VoiceState } from "./VoiceState.types";
 import { lastKey, stateKey, voiceScopeKey } from "./VoiceState.util";
 
+interface ActiveVoiceSession {
+    userId: Snowflake;
+    sessionId: string;
+    roomId: string;
+    tokenId: string;
+    updatedAt: number;
+}
+
 export class VoiceStateRedis {
     static async getState(userId: Snowflake): Promise<VoiceState | null> {
         const raw = await redis.get(stateKey(userId));
@@ -17,6 +25,47 @@ export class VoiceStateRedis {
         } catch {
             return null;
         }
+    }
+
+    static activeSessionKey(userId: Snowflake) {
+        return `voice:activeSession:${userId}`;
+    }
+
+    static async getActiveSession(
+        userId: Snowflake,
+    ): Promise<ActiveVoiceSession | null> {
+        const raw = await redis.get(this.activeSessionKey(userId));
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw) as ActiveVoiceSession;
+        } catch {
+            return null;
+        }
+    }
+
+    static async setActiveSession(
+        session: ActiveVoiceSession,
+        ttlSeconds = 300,
+    ) {
+        await redis.set(
+            this.activeSessionKey(session.userId),
+            JSON.stringify(session),
+            "EX",
+            ttlSeconds,
+        );
+    }
+
+    static async clearActiveSession(userId: Snowflake, tokenId?: string) {
+        const current = await this.getActiveSession(userId);
+        if (!current) return;
+        if (tokenId && current.tokenId !== tokenId) return;
+
+        const transaction = redis.multi();
+
+        transaction.del(this.activeSessionKey(userId));
+        transaction.del(`voice:currentToken:${userId}`);
+
+        await transaction.exec();
     }
 
     static async listChannelStates(

@@ -1,0 +1,2 @@
+ALTER TABLE "user_settings" ADD COLUMN "preferredSelfMute" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "user_settings" ADD COLUMN "preferredSelfDeaf" boolean DEFAULT false NOT NULL;

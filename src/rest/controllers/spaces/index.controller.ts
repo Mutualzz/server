@@ -159,6 +159,7 @@ export default class SpacesController {
                                 permissionFlags.CreateInvites |
                                 permissionFlags.Connect |
                                 permissionFlags.Speak |
+                                permissionFlags.Camera |
                                 permissionFlags.AttachFiles |
                                 permissionFlags.ReadMessageHistory |
                                 permissionFlags.UseExternalEmojis |

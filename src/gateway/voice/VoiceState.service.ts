@@ -91,6 +91,15 @@ export class VoiceStateService {
             }
         }
 
+        const isFirstJoin = previous == null || previous.channelId == null;
+        const isMove =
+            previous != null &&
+            previous.channelId != null &&
+            (previous.spaceId !== spaceId ||
+                previous.channelId !== requestedChannelId);
+
+        const moderation = await this.getMemberVoiceModeration(spaceId, userId);
+
         const hasSpeak = isDmVoice
             ? true
             : await canVoiceSpeak({
@@ -99,33 +108,42 @@ export class VoiceStateService {
                   userId,
               });
 
-        const effectiveSelfMute = hasSpeak ? selfMuteRequested : true;
-
-        const moderation = isDmVoice
-            ? { spaceMute: false, spaceDeaf: false }
-            : await this.getMemberVoiceModeration(spaceId, userId);
-
-        const spaceMute = moderation.spaceMute;
-        const spaceDeaf = moderation.spaceDeaf;
-
-        const isFirstJoin = previous == null || previous.channelId == null;
-        const isMove =
-            previous != null &&
-            previous.channelId != null &&
-            (previous.spaceId !== spaceId ||
-                previous.channelId !== requestedChannelId);
-
         const next: VoiceState = {
             userId,
             spaceId,
             channelId: requestedChannelId,
-            selfMute: effectiveSelfMute,
+            selfMute: selfMuteRequested,
             selfDeaf: selfDeafRequested,
-            spaceMute,
-            spaceDeaf,
+            spaceMute: moderation.spaceMute || !hasSpeak,
+            spaceDeaf: moderation.spaceDeaf,
             sessionId,
             updatedAt: Date.now(),
         };
+
+        const active = await VoiceStateRedis.getActiveSession(userId);
+        let shouldSupersede = false;
+
+        if (active && active.sessionId !== sessionId) {
+            try {
+                await VoiceStateRedis.clearActiveSession(
+                    userId,
+                    active.tokenId,
+                );
+
+                shouldSupersede = true;
+
+                logger.debug("Superseded active voice session", {
+                    userId: String(userId),
+                    oldSessionId: active.sessionId,
+                });
+            } catch (err) {
+                logger.warn(
+                    "Failed to clear active voice session before supersede",
+                    err,
+                );
+                return;
+            }
+        }
 
         await VoiceStateRedis.upsertState(next);
 
@@ -135,14 +153,24 @@ export class VoiceStateService {
             data: next,
         });
 
-        if (isFirstJoin || isMove) {
+        if (isFirstJoin || isMove || shouldSupersede) {
             const roomId = voiceScopeKey(spaceId, requestedChannelId);
+            const tokenId = crypto.randomUUID();
 
             const voiceToken = generateVoiceToken(
                 userId.toString(),
                 sessionId,
                 roomId,
+                tokenId,
             );
+
+            await VoiceStateRedis.setActiveSession({
+                userId,
+                sessionId,
+                roomId,
+                tokenId,
+                updatedAt: Date.now(),
+            });
 
             await createVoiceSession(voiceToken, userId, sessionId, roomId);
 
@@ -156,6 +184,7 @@ export class VoiceStateService {
                     channelId: requestedChannelId,
                     voiceEndpoint: process.env.VOICE_ENDPOINT,
                     voiceToken,
+                    sessionId,
                 },
             });
 
@@ -189,19 +218,58 @@ export class VoiceStateService {
             existing.spaceId,
             userId,
         );
-        existing.spaceMute = moderation.spaceMute;
+
+        const isDmVoice = existing.spaceId == null;
+
+        const hasSpeak = isDmVoice
+            ? true
+            : await canVoiceSpeak({
+                  spaceId: existing.spaceId!,
+                  channelId: existing.channelId,
+                  userId: userId,
+              });
+
+        existing.spaceMute = moderation.spaceMute || !hasSpeak;
         existing.spaceDeaf = moderation.spaceDeaf;
 
         existing.sessionId = sessionId;
         existing.updatedAt = Date.now();
+
+        const active = await VoiceStateRedis.getActiveSession(userId);
+        if (active && active.sessionId !== sessionId) {
+            try {
+                await VoiceStateRedis.clearActiveSession(
+                    userId,
+                    active.tokenId,
+                );
+            } catch (err) {
+                logger.warn(
+                    "Failed to clear active voice session while superseding",
+                    { userId, err },
+                );
+                return;
+            }
+        }
+
         await VoiceStateRedis.upsertState(existing);
 
         const roomId = voiceScopeKey(existing.spaceId, existing.channelId);
+        const tokenId = crypto.randomUUID();
         const voiceToken = generateVoiceToken(
             userId.toString(),
             sessionId,
             roomId,
+            tokenId,
         );
+
+        await VoiceStateRedis.setActiveSession({
+            userId,
+            sessionId,
+            roomId,
+            tokenId,
+            updatedAt: Date.now(),
+        });
+
         await createVoiceSession(voiceToken, userId, sessionId, roomId);
 
         await Send(socket, {
@@ -214,6 +282,7 @@ export class VoiceStateService {
                 channelId: existing.channelId,
                 voiceEndpoint: process.env.VOICE_ENDPOINT,
                 voiceToken,
+                sessionId,
             },
         });
 

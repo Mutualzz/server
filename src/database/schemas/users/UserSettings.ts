@@ -1,10 +1,10 @@
 import {
     bigint,
+    boolean,
     pgEnum,
     pgTable,
     text,
     timestamp,
-    boolean,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./User";
 
@@ -23,6 +23,9 @@ export const userSettingsTable = pgTable("user_settings", {
 
     preferredMode: preferredModeEnum().default("spaces").notNull(),
     preferEmbossed: boolean().notNull().default(false),
+
+    preferredSelfMute: boolean().notNull().default(false),
+    preferredSelfDeaf: boolean().notNull().default(false),
 
     spacePositions: bigint({ mode: "bigint" }).array().default([]).notNull(),
 

@@ -6,6 +6,7 @@ export interface VoiceSession {
     sessionId: string;
     userId: string;
     roomId: string;
+    tokenId: string;
     createdAt: number;
 }
 
@@ -18,15 +19,17 @@ export const generateVoiceToken = (
     userId: string,
     sessionId: string,
     roomId: string,
+    tokenId: string,
 ) => {
     const timestamp = Snowflake.generate();
 
     const base64UrlUserId = base64UrlEncode(userId);
     const base64UrlSessionId = base64UrlEncode(sessionId);
     const base64UrlRoomId = base64UrlEncode(roomId);
+    const base64UrlTokenId = base64UrlEncode(tokenId);
     const base64UrlTimestamp = base64UrlEncode(timestamp);
 
-    const data = `${base64UrlUserId}.${base64UrlSessionId}.${base64UrlRoomId}.${base64UrlTimestamp}`;
+    const data = `${base64UrlUserId}.${base64UrlSessionId}.${base64UrlRoomId}.${base64UrlTokenId}.${base64UrlTimestamp}`;
     const signature = base64UrlEncode(
         crypto
             .createHmac("sha256", process.env.SECRET as string)
@@ -45,12 +48,14 @@ export const createVoiceSession = async (
     ttlSeconds = 300,
 ) => {
     const normalizedUserId = userId.toString();
+    const tokenId = crypto.randomUUID();
 
     const voiceSession: VoiceSession = {
         sessionId,
         userId: normalizedUserId,
         roomId,
         createdAt: Date.now(),
+        tokenId,
     };
 
     await redis.set(
@@ -74,12 +79,13 @@ export const createVoiceSession = async (
 
 export const verifyVoiceToken = async (token: string) => {
     const parts = token.split(".");
-    if (parts.length !== 5) return null;
+    if (parts.length !== 6) return null;
 
     const [
         base64UrlUserId,
         base64UrlSessionId,
         base64UrlRoomId,
+        base64UrlTokenId,
         base64UrlTimestamp,
         signature,
     ] = parts;
@@ -88,13 +94,14 @@ export const verifyVoiceToken = async (token: string) => {
         !base64UrlUserId ||
         !base64UrlSessionId ||
         !base64UrlRoomId ||
+        !base64UrlTokenId ||
         !base64UrlTimestamp ||
         !signature
     ) {
         return null;
     }
 
-    const data = `${base64UrlUserId}.${base64UrlSessionId}.${base64UrlRoomId}.${base64UrlTimestamp}`;
+    const data = `${base64UrlUserId}.${base64UrlSessionId}.${base64UrlRoomId}.${base64UrlTokenId}.${base64UrlTimestamp}`;
     const expectedSignature = base64UrlEncode(
         crypto
             .createHmac("sha256", process.env.SECRET as string)

@@ -37,14 +37,12 @@ export default async function Connection(
     };
 
     const existingActivePeer = this.activePeersByUserId.get(peer.userId);
-    if (existingActivePeer)
+    if (existingActivePeer) {
         if (existingActivePeer.socket !== socket)
-            // If it’s literally the same socket, ignore; otherwise replace.
-            this.disconnectPeer(
-                existingActivePeer,
-                4000,
-                "New voice connection",
-            );
+            this.disconnectPeer(existingActivePeer, 4000, "superseded");
+        else if (existingActivePeer.sessionId !== peer.sessionId)
+            this.disconnectPeer(existingActivePeer, 4001, "Invalid session");
+    }
 
     const existingRoomPeer = room.peers.get(peer.userId);
     if (existingRoomPeer && existingRoomPeer.socket !== socket)

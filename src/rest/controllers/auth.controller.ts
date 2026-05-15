@@ -194,6 +194,7 @@ export default class AuthController {
             // Respond with success and token and user data
             res.status(HttpStatusCode.Success).json({
                 token,
+                userId: user.id,
             });
         } catch (error) {
             next(error);
