@@ -5,19 +5,25 @@ import type { Encoding } from "./Negotation";
 
 export interface Codec {
     name: Encoding;
-    encode(data: WireGatewayPayload): Uint8Array;
+    encode(data: WireGatewayPayload): ArrayBuffer;
     decode(bytes: Uint8Array): any;
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    return copy.buffer;
 }
 
 export async function createCodec(encoding: Encoding): Promise<Codec> {
     if (encoding === "etf") {
         try {
-            const erl = await import("erlpack");
+            const erl = await import("harmony-erlpack");
+
             return {
                 name: "etf",
-                encode: (data) => erl.pack(data),
-                decode: (bytes) =>
-                    erl.unpack(bytes as ReturnType<typeof erl.pack>),
+                encode: (data) => erl.pack(data) as ArrayBuffer,
+                decode: (bytes) => erl.unpack(toArrayBuffer(bytes)),
             };
         } catch (err: any) {
             logger.error(
@@ -29,7 +35,7 @@ export async function createCodec(encoding: Encoding): Promise<Codec> {
     return {
         name: "json",
         encode: (data) =>
-            new TextEncoder().encode(JSON.stringify(data, JSONReplacer)),
+            new TextEncoder().encode(JSON.stringify(data, JSONReplacer)).buffer,
         decode: (bytes) => JSON.parse(new TextDecoder().decode(bytes)),
     };
 }

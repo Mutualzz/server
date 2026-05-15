@@ -1,4 +1,8 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { deleteCache, invalidateCache, setCache } from "@mutualzz/cache";
 import {
     channelsTable,
@@ -22,7 +26,13 @@ import {
     s3Client,
     Snowflake,
 } from "@mutualzz/util";
-import type { APIChannel, APIRole, APISpace, APISpaceMember, APIUserSettings, } from "@mutualzz/types";
+import type {
+    APIChannel,
+    APIRole,
+    APISpace,
+    APISpaceMember,
+    APIUserSettings,
+} from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     imageFileValidator,

@@ -7,50 +7,62 @@ import { OPCODE_LIMITS } from "../util";
 import { checkGlobalRateLimit, checkRateLimit } from "../util/RateLimit";
 import type { WebSocket } from "../util/WebSocket";
 
+function toUint8Array(buffer: Data): Uint8Array | null {
+    if (typeof buffer === "string") {
+        return new TextEncoder().encode(buffer);
+    }
+
+    if (buffer instanceof Buffer) {
+        return new Uint8Array(
+            buffer.buffer,
+            buffer.byteOffset,
+            buffer.byteLength,
+        );
+    }
+
+    if (buffer instanceof ArrayBuffer) {
+        return new Uint8Array(buffer);
+    }
+
+    if (Array.isArray(buffer)) {
+        const total = buffer.reduce((n, b) => n + b.byteLength, 0);
+        const out = new Uint8Array(total);
+        let offset = 0;
+
+        for (const part of buffer) {
+            out.set(part, offset);
+            offset += part.byteLength;
+        }
+
+        return out;
+    }
+
+    return null;
+}
+
 export default async function Message(this: WebSocket, buffer: Data) {
     if (!checkGlobalRateLimit(this)) {
         logger.warn(`Rate limit exceeded ${this.sessionId ?? ""}`);
         return this.close(GatewayCloseCodes.RateLimit, "Rate limit exceeded");
     }
 
-    let raw: Uint8Array;
-
-    // ws Data can be string | Buffer | ArrayBuffer | Buffer[]
-    if (typeof buffer === "string") {
-        raw = new TextEncoder().encode(buffer);
-    } else if (buffer instanceof Buffer) {
-        raw = new Uint8Array(
-            buffer.buffer,
-            buffer.byteOffset,
-            buffer.byteLength,
-        );
-    } else if (buffer instanceof ArrayBuffer) {
-        raw = new Uint8Array(buffer);
-    } else if (Array.isArray(buffer)) {
-        const total = buffer.reduce((n, b) => n + b.byteLength, 0);
-        const out = new Uint8Array(total);
-        let o = 0;
-        for (const b of buffer) {
-            out.set(b, o);
-            o += b.byteLength;
-        }
-        raw = out;
-    } else {
+    const raw = toUint8Array(buffer);
+    if (!raw) {
         logger.error("Unknown message type");
         return;
     }
 
     let decoded: any;
     try {
-        if (this.compressor && this.compress !== "none") {
-            raw = this.compressor.decompress(raw);
-        }
+        const bytes =
+            this.compressor && this.compress !== "none"
+                ? this.compressor.decompress(raw)
+                : raw;
 
         if (this.codec) {
-            decoded = this.codec.decode(raw);
+            decoded = this.codec.decode(bytes);
         } else {
-            // fallback JSON
-            decoded = JSON.parse(new TextDecoder().decode(raw), JSONReplacer);
+            decoded = JSON.parse(new TextDecoder().decode(bytes), JSONReplacer);
         }
     } catch (e: any) {
         logger.error(`Failed to decode message: ${e.stack}`);
@@ -78,6 +90,7 @@ export default async function Message(this: WebSocket, buffer: Data) {
             `Rate limit exceeded for Opcode ${decoded.op}`,
         );
     }
+
     const OPCodeHandler =
         OPCodeHandlers[decoded.op as keyof typeof OPCodeHandlers];
 
