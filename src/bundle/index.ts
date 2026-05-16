@@ -7,7 +7,7 @@ import {
 import * as Gateway from "@mutualzz/gateway";
 import { Logger } from "@mutualzz/logger";
 import * as REST from "@mutualzz/rest";
-import * as Voice from "@mutualzz/voice";
+import * as Voice from "../../../voice/src";
 import { RabbitMQ } from "@mutualzz/util";
 import { BotClient } from "../bot/Client";
 

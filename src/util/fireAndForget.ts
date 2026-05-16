@@ -2,7 +2,7 @@ import { logger as BotLogger } from "@mutualzz/bot/Logger";
 import { logger as CDNLogger } from "@mutualzz/cdn/Logger";
 import { logger as GatewayLogger } from "@mutualzz/gateway/Logger";
 import { logger as RESTLogger } from "@mutualzz/rest/Logger";
-import { logger as VoiceLogger } from "@mutualzz/voice/Logger";
+import { logger as VoiceLogger } from "../../../voice/src/Logger";
 import { Logger } from "@mutualzz/logger";
 
 type MaybePromise<T = unknown> = Promise<T> | T;
