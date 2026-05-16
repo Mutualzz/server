@@ -9,6 +9,17 @@ import { Send } from "../util/Common.ts";
 import config from "../Config.ts";
 import { getCloudflareTurnCredentials } from "@mutualzz/voice/util/CloudflareTurn.ts";
 
+function flattenIceServers(servers: RTCIceServer[]): RTCIceServer[] {
+    return servers.flatMap((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        return urls.map((url) => ({
+            urls: [url],
+            ...(server.username && { username: server.username }),
+            ...(server.credential && { credential: server.credential }),
+        }));
+    });
+}
+
 export default async function VoiceCreateTransport(
     _server: Server,
     room: VoiceRoom,
@@ -22,7 +33,7 @@ export default async function VoiceCreateTransport(
     const transport = await room.router.createWebRtcTransport({
         listenInfos,
         enableUdp: true,
-        enableTcp: false,
+        enableTcp: true,
         preferUdp: true,
         preferTcp: false,
         initialAvailableOutgoingBitrate:
@@ -35,7 +46,19 @@ export default async function VoiceCreateTransport(
     const iceServers =
         (await getCloudflareTurnCredentials().catch(() => null)) ?? [];
 
-    const limitedServers = iceServers.slice(0, 2);
+    const flat = flattenIceServers(iceServers);
+
+    const stun = flat.find((s) => [s.urls].flat()[0].startsWith("stun:"));
+    const turnUdp = flat.find((s) =>
+        [s.urls].flat()[0].includes("transport=udp"),
+    );
+    const turnTcp = flat.find(
+        (s) =>
+            [s.urls].flat()[0].includes("transport=tcp") &&
+            [s.urls].flat()[0].startsWith("turns:"),
+    );
+
+    const limitedServers = [stun, turnUdp, turnTcp].filter(Boolean);
 
     Send(
         {

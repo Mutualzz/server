@@ -9,26 +9,31 @@ import type {
 const numWorkers = Math.max(1, os.cpus().length - 1);
 
 const getLocalIP = () => {
-    const ifaces = os.networkInterfaces();
+    if (process.env.NODE_ENV !== "production") return "127.0.0.1";
 
-    return Object.values(ifaces)
+    const ifaces = os.networkInterfaces();
+    const address = Object.values(ifaces)
         .flatMap((iface) => iface ?? [])
         .find((iface) => iface?.family === "IPv4" && !iface?.internal)?.address;
+
+    if (!address)
+        throw new Error("Could not determine public IP for announcedAddress");
+    return address;
 };
 
 const listenInfo = {
     ip: "0.0.0.0",
-    announcedAddress:
-        process.env.NODE_ENV === "production"
-            ? process.env.ANNOUNCED_IP
-            : getLocalIP(),
-    port: process.env.VOICE_PORT ?? 3030,
+    announcedAddress: process.env.ANNOUNCED_IP
+        ? process.env.ANNOUNCED_IP
+        : getLocalIP(),
     portRange: {
         min: 40000,
         max: 49999,
     },
     exposeInternalIp: true,
 } as TransportListenInfo;
+
+console.log(listenInfo.announcedAddress);
 
 export default {
     listenIp: "localhost",
