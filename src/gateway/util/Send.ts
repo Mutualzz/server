@@ -26,7 +26,8 @@ export function Send(socket: WebSocket, data: GatewayPayload) {
 
         try {
             const encoded = socket.codec.encode(payload);
-            const compressed = socket.compressor.compress(encoded);
+            // NOTE: with "as any" it works, lets keep it for now
+            const compressed = socket.compressor.compress(encoded as any);
             socket.send(Buffer.from(compressed), { binary: true }, (err) =>
                 err ? reject(err) : resolve(null),
             );
