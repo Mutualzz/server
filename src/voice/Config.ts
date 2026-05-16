@@ -1,15 +1,11 @@
 import os from "os";
-import type {
-    RouterRtpCodecCapability,
-    TransportListenInfo,
-    WorkerLogLevel,
-    WorkerLogTag,
-} from "mediasoup/types";
+import type { RouterRtpCodecCapability, TransportListenInfo, WorkerLogLevel, WorkerLogTag, } from "mediasoup/types";
 
 const numWorkers = Math.max(1, os.cpus().length - 1);
+const isProduction = process.env.NODE_ENV === "production";
 
 const getLocalIP = () => {
-    if (process.env.NODE_ENV !== "production") return "127.0.0.1";
+    if (!isProduction) return "127.0.0.1";
 
     const ifaces = os.networkInterfaces();
     const address = Object.values(ifaces)
@@ -21,22 +17,29 @@ const getLocalIP = () => {
     return address;
 };
 
+if (isProduction && !process.env.ANNOUNCED_IP) {
+    throw new Error(
+        "[Config] ANNOUNCED_IP env var must be set in production to the server's public IP. " +
+            "ICE candidates will be unreachable without it.",
+    );
+}
+
+const announcedAddress = process.env.ANNOUNCED_IP ?? getLocalIP();
+
 const listenInfo = {
     ip: "0.0.0.0",
-    announcedAddress: process.env.ANNOUNCED_IP
-        ? process.env.ANNOUNCED_IP
-        : getLocalIP(),
+    announcedAddress,
     portRange: {
         min: 40000,
         max: 49999,
     },
-    exposeInternalIp: true,
+    exposeInternalIp: false,
 } as TransportListenInfo;
 
-console.log(listenInfo.announcedAddress);
+console.log("[Config] announcedAddress:", listenInfo.announcedAddress);
 
 export default {
-    listenIp: "localhost",
+    listenIp: isProduction ? "0.0.0.0" : "localhost",
     listenPort: process.env.VOICE_PORT
         ? parseInt(process.env.VOICE_PORT)
         : 3030,
@@ -116,4 +119,6 @@ export default {
         maxIncomingBitrate: 1500000,
         initialAvailableOutgoingBitrate: 800000,
     },
+
+    roomCloseDelayMs: 15_000,
 };

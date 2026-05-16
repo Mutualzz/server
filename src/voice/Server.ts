@@ -73,19 +73,19 @@ export class Server {
 
         await new Promise<void>((resolve, reject) => {
             this.server.once("error", reject);
-            this.server.listen(config.listenPort, () => resolve());
+            this.server.listen(config.listenPort, config.listenIp, () =>
+                resolve(),
+            );
         });
 
-        logger.info(`Online on port ${config.listenIp}:${config.listenPort}`);
+        logger.info(`Online on ${config.listenIp}:${config.listenPort}`);
     }
 
     async createWorkers() {
         let numWorkers = config.mediasoup.numWorkers;
 
         if (numWorkers === 0) {
-            logger.warn(
-                "Configured 0 mediasoup workers; defaulting to 1. Set numWorkers to 0 to disable this warning.",
-            );
+            logger.warn("Configured 0 mediasoup workers; defaulting to 1.");
             numWorkers += 1;
         }
 
@@ -164,7 +164,8 @@ export class Server {
             } catch {}
 
             this.rooms.delete(room.roomId);
-        }, 3000);
+            logger.debug(`Room ${room.roomId} closed`);
+        }, config.roomCloseDelayMs);
 
         this.roomCloseTimers.set(room.roomId, timer);
     }
@@ -220,14 +221,21 @@ export class Server {
             if (otherUserId === peer.userId) continue;
 
             for (const producer of otherPeer.producers.values()) {
-                this.push(peer, {
-                    op: VoiceDispatchEvents.VoiceNewProducer,
-                    data: {
-                        userId: otherUserId,
-                        producerId: producer.id,
-                        kind: producer.kind,
-                    },
-                });
+                try {
+                    this.push(peer, {
+                        op: VoiceDispatchEvents.VoiceNewProducer,
+                        data: {
+                            userId: otherUserId,
+                            producerId: producer.id,
+                            kind: producer.kind,
+                        },
+                    });
+                } catch (err) {
+                    logger.warn(
+                        `pushExistingProducers: failed to push producer ${producer.id} to peer ${peer.userId}`,
+                        { err },
+                    );
+                }
             }
         }
     }
