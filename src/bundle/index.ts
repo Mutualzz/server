@@ -7,7 +7,7 @@ import {
 import * as Gateway from "@mutualzz/gateway";
 import { Logger } from "@mutualzz/logger";
 import * as REST from "@mutualzz/rest";
-import * as Voice from "../../../voice/src";
+
 import { RabbitMQ } from "@mutualzz/util";
 import { BotClient } from "../bot/Client";
 
@@ -19,7 +19,6 @@ const rest = new REST.Server();
 const gateway = new Gateway.Server();
 const cdn = new CDN.Server();
 const botClient = new BotClient();
-const voice = new Voice.Server();
 
 process.on("SIGTERM", async () => {
     logger.warn("Shutting down due to SIGTERM");
@@ -30,7 +29,6 @@ process.on("SIGTERM", async () => {
         cdn.stop(),
         botClient.destroy(),
         RabbitMQ.connection.close(),
-        voice.stop(),
         closeDatabase(),
     ]);
 });
@@ -44,7 +42,6 @@ async function main() {
         rest.start(),
         gateway.start(),
         cdn.start(),
-        voice.start(),
         botClient.login(),
     ]);
 }

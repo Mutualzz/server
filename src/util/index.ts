@@ -9,5 +9,5 @@ export * from "./S3";
 export * from "./Session";
 export * from "./Snowflake";
 export * from "./permissions";
-export * from "./Voice";
 export * from "./fireAndForget";
+export * from "./Voice";

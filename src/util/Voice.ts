@@ -1,6 +1,7 @@
-import { base64UrlEncode, redis, Snowflake } from "@mutualzz/util";
 import crypto from "crypto";
-import { LRUCache } from "lru-cache";
+import { redis } from "@mutualzz/util/Redis.ts";
+import { base64UrlEncode } from "@mutualzz/util/Common.ts";
+import { Snowflake } from "@mutualzz/util/Snowflake.ts";
 
 export interface VoiceSession {
     sessionId: string;
@@ -9,11 +10,6 @@ export interface VoiceSession {
     tokenId: string;
     createdAt: number;
 }
-
-export const voiceSessionLRU = new LRUCache<string, VoiceSession>({
-    max: 5000,
-    ttl: 2 * 60 * 1000,
-});
 
 export const generateVoiceToken = (
     userId: string,
@@ -72,8 +68,6 @@ export const createVoiceSession = async (
         ttlSeconds,
     );
 
-    voiceSessionLRU.set(token, voiceSession);
-
     return voiceSession;
 };
 
@@ -111,17 +105,11 @@ export const verifyVoiceToken = async (token: string) => {
 
     if (expectedSignature !== signature) return null;
 
-    let session = voiceSessionLRU.get(token);
+    const raw = await redis.get(`voice:sessions:${token}`);
+    if (!raw) return null;
 
-    if (!session) {
-        const raw = await redis.get(`voice:sessions:${token}`);
-        if (!raw) return null;
-
-        session = JSON.parse(raw) as VoiceSession;
-        if (!session) return null;
-
-        voiceSessionLRU.set(token, session);
-    }
+    const session = JSON.parse(raw) as VoiceSession;
+    if (!session) return null;
 
     return session;
 };
