@@ -7,7 +7,7 @@ RUN corepack prepare pnpm@latest --activate
 FROM base AS build
 WORKDIR /app
 COPY . .
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install
 ENV NODE_ENV=production
 RUN pnpm build
 
