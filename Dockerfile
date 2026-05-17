@@ -9,7 +9,7 @@ WORKDIR /app
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install
 ENV NODE_ENV=production
-RUN pnpm build
+RUN pnpm build:server
 
 FROM base AS deploy
 ENV NODE_ENV=production
