@@ -1,21 +1,24 @@
 FROM node:lts AS base
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
-RUN corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
-FROM base AS build
+# Prune the monorepo to only server + its workspace deps
+FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
-ENV NODE_ENV=production
-RUN pnpm build:server
+RUN pnpm dlx turbo prune @mutualzz/server --docker
 
-FROM base AS deploy
-ENV NODE_ENV=production
+# Install only pruned deps
+FROM base AS builder
 WORKDIR /app
-COPY --from=build /app /app
+COPY --from=pruner /app/out/json/ .
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+COPY --from=pruner /app/out/full/ .
+RUN pnpm build --filter=@mutualzz/server
 
+# Final image
+FROM node:lts-slim AS runner
 WORKDIR /app/apps/server
-EXPOSE 3000 3001 4000
-CMD ["pnpm", "start"]
+COPY --from=builder /app/apps/server/dist ./dist
+COPY --from=builder /app/node_modules /app/node_modules
+COPY --from=builder /app/apps/server/package.json .
+CMD ["node", "-r", "dotenv/config", "./dist/bundle/index.mjs"]
