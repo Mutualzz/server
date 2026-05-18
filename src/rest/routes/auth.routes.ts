@@ -5,5 +5,15 @@ const router = createRouter();
 
 router.post(`/login`, createLimiter(30_000, 10), AuthController.login);
 router.post(`/register`, createLimiter(30_000, 10), AuthController.register);
+router.post(
+    "/forgot-password",
+    createLimiter(30_000, 10),
+    AuthController.forgotPassword,
+);
+router.post(
+    "/reset-password",
+    createLimiter(30_000, 10),
+    AuthController.resetPassword,
+);
 
 export default router;

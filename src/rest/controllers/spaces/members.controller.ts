@@ -1,4 +1,9 @@
-import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
+import {
+    deleteCache,
+    getCache,
+    invalidateCache,
+    setCache,
+} from "@mutualzz/cache";
 import {
     channelsTable,
     db,
@@ -445,7 +450,9 @@ export default class MembersController {
                     ),
                 );
 
-            res.status(HttpStatusCode.NoContent).send();
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
 
             fireAndForgetAll([
                 {
@@ -727,7 +734,9 @@ export default class MembersController {
                 )
                 .execute();
 
-            res.status(HttpStatusCode.NoContent).send();
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
 
             fireAndForgetAll([
                 {

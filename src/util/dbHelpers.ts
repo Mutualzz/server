@@ -7,6 +7,7 @@ export async function execNormalized<T = any>(
         console.error(err);
         return null;
     });
+
     return normalizeJSON(result) as T | null;
 }
 

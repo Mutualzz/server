@@ -3,6 +3,7 @@ import {
     GetObjectCommand,
     PutObjectCommand,
 } from "@aws-sdk/client-s3";
+import crypto from "crypto";
 import { setCache } from "@mutualzz/cache";
 import {
     db,
@@ -19,18 +20,25 @@ import {
     fireAndForgetAll,
     generateHash,
     genRandColor,
+    postmark,
+    redis,
     s3Client,
 } from "@mutualzz/util";
 import type { APIPrivateUser, APIUserSettings } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
     imageFileValidator,
+    validateChangePassword,
     validateMeSettingsUpdate,
     validateMeUpdate,
+    validateVerifyEmail,
 } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
+import { BitField, userFlags } from "@mutualzz/bitfield";
+import bcrypt from "bcrypt";
+import { BCRYPT_SALT_ROUNDS } from "@mutualzz/rest/util";
 
 export default class MeController {
     static async update(req: Request, res: Response, next: NextFunction) {
@@ -418,6 +426,216 @@ export default class MeController {
             ]);
         } catch (error) {
             next(error);
+        }
+    }
+
+    static async verifyEmail(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { code } = validateVerifyEmail.parse(req.body);
+
+            const key = `emailVerify:${user.id}`;
+            const storedCode = await redis.get(key);
+
+            if (!storedCode)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Verification code expired or not found",
+                );
+
+            if (storedCode !== code)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Invalid verification code",
+                );
+
+            await redis.del(key);
+            await redis.del(`emailVerifyCooldown:${user.id}`);
+
+            const currentUserFlags = BitField.fromString(
+                userFlags,
+                user.flags.toString(),
+            );
+
+            currentUserFlags.add("Verified");
+
+            const updatedUser = await execNormalized<APIPrivateUser>(
+                db
+                    .update(usersTable)
+                    .set({
+                        flags: currentUserFlags.toBigInt(),
+                    })
+                    .returning()
+                    .where(eq(usersTable.id, BigInt(user.id)))
+                    .then((results) => results[0]),
+            );
+
+            if (!updatedUser)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to verify email",
+                );
+
+            res.status(HttpStatusCode.Success).json(toPublicUser(updatedUser));
+
+            fireAndForgetAll([
+                {
+                    label: "event:UserUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserUpdate",
+                            user_id: updatedUser.id,
+                            data: updatedUser,
+                        }),
+                },
+                {
+                    label: "cache:update:user",
+                    run: () =>
+                        setCache("user", user.id, toPublicUser(updatedUser)),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async sendEmailCode(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const cooldownKey = `emailVerifyCooldown:${user.id}`;
+            const onCooldown = await redis.get(cooldownKey);
+
+            if (onCooldown) {
+                res.status(HttpStatusCode.Success).json({
+                    success: true,
+                });
+
+                return;
+            }
+
+            const code = crypto
+                .randomInt(0, 999_999)
+                .toString()
+                .padStart(6, "0");
+            const redisKey = `emailVerify:${user.id}`;
+
+            await redis.set(redisKey, code, "EX", 900);
+            await redis.set(cooldownKey, "1", "EX", 60);
+
+            const sentEmail = await postmark.sendEmailWithTemplate({
+                From: "verify@mutualzz.com",
+                To: user.email,
+                MessageStream: "email-verification",
+                TemplateAlias: "email-verification",
+                TemplateModel: {
+                    code,
+                    email: user.email,
+                },
+            });
+
+            if (sentEmail.ErrorCode !== 0)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to send verification email",
+                );
+
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async changePassword(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { currentPassword, newPassword } =
+                validateChangePassword.parse(req.body);
+
+            const dbUser = await db.query.usersTable.findFirst({
+                columns: {
+                    hash: true,
+                },
+                where: eq(usersTable.id, BigInt(user.id)),
+            });
+
+            if (!dbUser)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const correctCurrentPassword = await bcrypt.compare(
+                currentPassword,
+                dbUser.hash,
+            );
+
+            if (!correctCurrentPassword)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Current password is incorrect",
+                    [
+                        {
+                            path: "currentPassword",
+                            message: "Current Password is incorrect",
+                        },
+                    ],
+                );
+
+            const newHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+
+            const updatedUser = await execNormalized<APIPrivateUser>(
+                db
+                    .update(usersTable)
+                    .set({
+                        hash: newHash,
+                    })
+                    .where(eq(usersTable.id, BigInt(user.id)))
+                    .returning()
+                    .then((results) => results[0]),
+            );
+
+            if (!updatedUser)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to change password",
+                );
+
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
+        } catch (err) {
+            next(err);
         }
     }
 }

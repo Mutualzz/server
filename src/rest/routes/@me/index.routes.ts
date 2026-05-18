@@ -15,5 +15,20 @@ router.patch(
     createLimiter(60_000, 10),
     MeController.updateSettings,
 );
+router.post(
+    "/verify-email",
+    createLimiter(60_000, 5),
+    MeController.verifyEmail,
+);
+router.post(
+    "/send-email-code",
+    createLimiter(3_600_000, 3),
+    MeController.sendEmailCode,
+);
+router.post(
+    "/change-password",
+    createLimiter(60_000, 5),
+    MeController.changePassword,
+);
 
 export default router;

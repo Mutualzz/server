@@ -393,7 +393,9 @@ export default class InvitesController {
                 inviterId: session.inviterId,
             });
 
-            return res.status(HttpStatusCode.NoContent).send();
+            return res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
         } catch (err) {
             next(err);
         }
@@ -700,7 +702,9 @@ export default class InvitesController {
                 .delete(invitesTable)
                 .where(eq(invitesTable.spaceId, BigInt(spaceId)));
 
-            res.status(HttpStatusCode.NoContent).send();
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
 
             fireAndForgetAll([
                 {

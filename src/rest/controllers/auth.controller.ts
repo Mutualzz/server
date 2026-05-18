@@ -5,9 +5,16 @@ import {
     execNormalized,
     generateSessionId,
     genRandColor,
+    postmark,
+    redis,
     Snowflake,
 } from "@mutualzz/util";
-import { validateLogin, validateRegister } from "@mutualzz/validators";
+import {
+    validateForgotPassword,
+    validateLogin,
+    validateRegister,
+    validateResetPassword,
+} from "@mutualzz/validators";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { eq, or } from "drizzle-orm";
@@ -162,7 +169,7 @@ export default class AuthController {
             if (!pass)
                 throw new HttpException(
                     HttpStatusCode.BadRequest,
-                    "Invalid credentials",
+                    "Invalid username or password",
                     [
                         {
                             path: "password",
@@ -198,6 +205,125 @@ export default class AuthController {
             });
         } catch (error) {
             next(error);
+        }
+    }
+
+    static async forgotPassword(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { username, email } = validateForgotPassword.parse(req.body);
+
+            const whereConditions = [];
+            if (username)
+                whereConditions.push(eq(usersTable.username, username));
+            if (email) whereConditions.push(eq(usersTable.email, email));
+
+            const user = await execNormalized<APIPrivateUser>(
+                db.query.usersTable.findFirst({
+                    columns: {
+                        id: true,
+                        email: true,
+                    },
+                    where: or(...whereConditions),
+                }),
+            );
+
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "User does not exist",
+                );
+
+            const cooldownKey = `passwordResetCooldown`;
+            const onCooldown = await redis.get(cooldownKey);
+
+            if (onCooldown) {
+                res.status(HttpStatusCode.Success).json({
+                    success: true,
+                });
+
+                return;
+            }
+
+            const token = crypto.randomBytes(32).toString("hex");
+            const redisKey = `passwordReset:${token}`;
+
+            await redis.set(redisKey, user.id, "EX", 1800);
+            await redis.set(cooldownKey, "1", "EX", 60);
+
+            const resetDomain =
+                process.env.NODE_ENV === "development"
+                    ? process.env.FRONTEND_URL
+                    : "https://mutualzz.com";
+            const resetLink = `${resetDomain}/reset?token=${token}`;
+
+            const sentEmail = await postmark.sendEmailWithTemplate({
+                From: "reset@mutualzz.com",
+                To: user.email,
+                MessageStream: "forgot-password",
+                TemplateAlias: "forgot-password",
+                TemplateModel: {
+                    resetUrl: resetLink,
+                    email: user.email,
+                },
+            });
+
+            if (sentEmail.ErrorCode !== 0)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to send verification email",
+                );
+
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async resetPassword(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { token, password } = validateResetPassword.parse(req.body);
+
+            const redisKey = `passwordReset:${token}`;
+            const userId = await redis.get(redisKey);
+
+            if (!userId)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Reset link is invalid or has expired",
+                );
+
+            await redis.del(redisKey);
+
+            const newHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+
+            const updatedUser = await db
+                .update(usersTable)
+                .set({ hash: newHash })
+                .where(eq(usersTable.id, BigInt(userId)))
+                .returning()
+                .then((results) => results[0]);
+
+            if (!updatedUser)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to update user password",
+                );
+
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
+        } catch (err) {
+            next(err);
         }
     }
 }
