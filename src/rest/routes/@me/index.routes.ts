@@ -21,6 +21,21 @@ router.post(
     MeController.verifyEmail,
 );
 router.post(
+    "/change-email",
+    createLimiter(60_000, 5),
+    MeController.changeEmail,
+);
+router.post(
+    "/change-username",
+    createLimiter(60_000, 5),
+    MeController.changeUsername,
+);
+router.post(
+    "/change-email-unverified",
+    createLimiter(60_000, 5),
+    MeController.changeEmailUnverified,
+);
+router.post(
     "/send-email-code",
     createLimiter(3_600_000, 3),
     MeController.sendEmailCode,
@@ -29,6 +44,11 @@ router.post(
     "/change-password",
     createLimiter(60_000, 5),
     MeController.changePassword,
+);
+router.post(
+    "/confirm-email",
+    createLimiter(3_600_000, 3),
+    MeController.confirmEmail,
 );
 
 export default router;

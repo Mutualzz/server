@@ -125,7 +125,8 @@ export const createLimiter = (ms: number, limit: number) =>
         standardHeaders: true,
         legacyHeaders: false,
 
-        skip: (req) => req.method === "OPTIONS",
+        skip: (req) =>
+            req.method === "OPTIONS" || process.env.NODE_ENV === "development",
 
         message: {
             error: "Too many requests",

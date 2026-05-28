@@ -31,6 +31,7 @@ import {
     validateChangePassword,
     validateMeSettingsUpdate,
     validateMeUpdate,
+    validateUsernameChange,
     validateVerifyEmail,
 } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
@@ -39,6 +40,7 @@ import sharp from "sharp";
 import { BitField, userFlags } from "@mutualzz/bitfield";
 import bcrypt from "bcrypt";
 import { BCRYPT_SALT_ROUNDS } from "@mutualzz/rest/util";
+import { z } from "zod";
 
 export default class MeController {
     static async update(req: Request, res: Response, next: NextFunction) {
@@ -50,7 +52,7 @@ export default class MeController {
                     "Unauthorized",
                 );
 
-            const { username, avatar, defaultAvatar, globalName } =
+            const { avatar, defaultAvatar, globalName } =
                 validateMeUpdate.parse(req.body);
 
             const avatarFile = imageFileValidator.parse(req.file);
@@ -67,30 +69,8 @@ export default class MeController {
                     "Provide either defaultAvatar or avatar, not both",
                 );
 
-            if (username && user.username !== username) {
-                const exists = await db.query.usersTable.findFirst({
-                    where: eq(usersTable.username, username),
-                    columns: {},
-                });
-
-                if (exists)
-                    throw new HttpException(
-                        HttpStatusCode.BadRequest,
-                        "Username already taken",
-                        [
-                            {
-                                path: "username",
-                                message: "Username already taken",
-                            },
-                        ],
-                    );
-
-                user.username = username;
-            }
-
-            if (globalName && globalName !== user.globalName) {
+            if (globalName && globalName !== user.globalName)
                 user.globalName = globalName;
-            }
 
             if (avatarFile) {
                 if (
@@ -116,9 +96,7 @@ export default class MeController {
                 }
 
                 const isGif = avatarFile.mimetype === "image/gif";
-                let buffer:
-                    | Buffer<ArrayBufferLike>
-                    | Uint8Array<ArrayBufferLike> = avatarFile.buffer;
+                let buffer: Buffer | Uint8Array = avatarFile.buffer;
 
                 let expressionSharp: sharp.Sharp;
                 if (isGif) {
@@ -348,6 +326,10 @@ export default class MeController {
                         userId: user.id,
                     },
                 },
+                {
+                    label: "cache:update:authUser",
+                    run: () => setCache("authUser", user.id, newUser),
+                },
             ]);
         } catch (err) {
             next(err);
@@ -446,13 +428,25 @@ export default class MeController {
             if (!storedCode)
                 throw new HttpException(
                     HttpStatusCode.BadRequest,
-                    "Verification code expired or not found",
+                    "Invalid verification code",
+                    [
+                        {
+                            path: "code",
+                            message: "Invalid verification code",
+                        },
+                    ],
                 );
 
             if (storedCode !== code)
                 throw new HttpException(
                     HttpStatusCode.BadRequest,
                     "Invalid verification code",
+                    [
+                        {
+                            path: "code",
+                            message: "Invalid verification code",
+                        },
+                    ],
                 );
 
             await redis.del(key);
@@ -501,6 +495,356 @@ export default class MeController {
                     meta: {
                         userId: user.id,
                     },
+                },
+                {
+                    label: "cache:update:authUser",
+                    run: () => setCache("authUser", user.id, updatedUser),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async changeEmail(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { code, email } = z
+                .object({
+                    code: z.string().trim(),
+                    email: z.email().trim(),
+                })
+                .parse(req.body);
+
+            if (email === user.email)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "The email cannot be same as the old one",
+                    [
+                        {
+                            path: "email",
+                            message: "The email cannot be same as the old one",
+                        },
+                    ],
+                );
+
+            const emailExists = await db.query.usersTable.findFirst({
+                columns: {
+                    email: true,
+                },
+                where: eq(usersTable.email, email),
+            });
+
+            if (emailExists)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "This email is already taken",
+                    [
+                        {
+                            path: "email",
+                            message: "This email is already taken",
+                        },
+                    ],
+                );
+
+            const key = `emailConfirm:${user.id}`;
+            const storedCode = await redis.get(key);
+
+            if (!storedCode)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Invalid confirmation code",
+                    [
+                        {
+                            path: "code",
+                            message: "Invalid confirmation code",
+                        },
+                    ],
+                );
+
+            if (storedCode !== code)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Invalid verification code",
+                    [
+                        {
+                            path: "code",
+                            message: "Invalid confirmation code",
+                        },
+                    ],
+                );
+
+            await redis.del(key);
+            await redis.del(`emailConfirmCooldown:${user.id}`);
+
+            const currentUserFlags = BitField.fromString(
+                userFlags,
+                user.flags.toString(),
+            );
+
+            currentUserFlags.remove("Verified");
+
+            const updatedUser = await execNormalized<APIPrivateUser>(
+                db
+                    .update(usersTable)
+                    .set({
+                        email,
+                        flags: currentUserFlags.toBigInt(),
+                    })
+                    .returning()
+                    .where(eq(usersTable.id, BigInt(user.id)))
+                    .then((results) => results[0]),
+            );
+
+            if (!updatedUser)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to change email",
+                );
+
+            res.status(HttpStatusCode.Success).json(toPublicUser(updatedUser));
+
+            fireAndForgetAll([
+                {
+                    label: "event:UserUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserUpdate",
+                            user_id: updatedUser.id,
+                            data: updatedUser,
+                        }),
+                },
+                {
+                    label: "cache:update:user",
+                    run: () =>
+                        setCache("user", user.id, toPublicUser(updatedUser)),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+                {
+                    label: "cache:update:authUser",
+                    run: () => setCache("authUser", user.id, updatedUser),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async changeUsername(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        const { user } = req;
+        if (!user)
+            throw new HttpException(
+                HttpStatusCode.Unauthorized,
+                "Unauthorized",
+            );
+
+        const { username, password } = validateUsernameChange.parse(req.body);
+
+        if (username === user.username)
+            throw new HttpException(
+                HttpStatusCode.BadRequest,
+                "The new username cannot be same as the old one",
+                [
+                    {
+                        path: "username",
+                        message:
+                            "The new username cannot be same as the old one",
+                    },
+                ],
+            );
+
+        const usernameExists = await db.query.usersTable.findFirst({
+            columns: {
+                username: true,
+            },
+            where: eq(usersTable.username, username),
+        });
+
+        if (usernameExists)
+            throw new HttpException(
+                HttpStatusCode.Forbidden,
+                "This username is already taken",
+                [
+                    {
+                        path: "username",
+                        message: "This username is already taken",
+                    },
+                ],
+            );
+
+        const dbUser = await db.query.usersTable.findFirst({
+            columns: {
+                hash: true,
+            },
+            where: eq(usersTable.id, BigInt(user.id)),
+        });
+
+        if (!dbUser)
+            throw new HttpException(
+                HttpStatusCode.Unauthorized,
+                "Unauthorized",
+            );
+
+        const correctPassword = await bcrypt.compare(password, dbUser.hash);
+
+        if (!correctPassword)
+            throw new HttpException(
+                HttpStatusCode.BadRequest,
+                "Password is incorrect",
+                [
+                    {
+                        path: "password",
+                        message: "Password is incorrect",
+                    },
+                ],
+            );
+
+        const updatedUser = await execNormalized<APIPrivateUser>(
+            db
+                .update(usersTable)
+                .set({
+                    username,
+                })
+                .where(eq(usersTable.id, BigInt(user.id)))
+                .returning()
+                .then((results) => results[0]),
+        );
+
+        if (!updatedUser)
+            throw new HttpException(
+                HttpStatusCode.InternalServerError,
+                "Failed to change password",
+            );
+
+        res.status(HttpStatusCode.Success).json(toPublicUser(updatedUser));
+
+        fireAndForgetAll([
+            {
+                label: "event:UserUpdate",
+                run: () =>
+                    emitEvent({
+                        event: "UserUpdate",
+                        user_id: updatedUser.id,
+                        data: updatedUser,
+                    }),
+            },
+            {
+                label: "cache:update:user",
+                run: () => setCache("user", user.id, toPublicUser(updatedUser)),
+                meta: {
+                    userId: user.id,
+                },
+            },
+            {
+                label: "cache:update:authUser",
+                run: () => setCache("authUser", user.id, updatedUser),
+            },
+        ]);
+    }
+
+    static async changeEmailUnverified(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const currentUserFlags = BitField.fromString(
+                userFlags,
+                user.flags.toString(),
+            );
+
+            console.log(currentUserFlags.toArray());
+
+            if (currentUserFlags.has("Verified"))
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You cannot use this endpoint if your email is already verified",
+                );
+
+            const { email } = z
+                .object({
+                    email: z.email().trim(),
+                })
+                .parse(req.body);
+
+            if (email === user.email)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "The email cannot be same as the old one",
+                );
+
+            const emailExists = await db.query.usersTable.findFirst({
+                columns: {
+                    email: true,
+                },
+                where: eq(usersTable.email, email),
+            });
+
+            if (emailExists)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "This email is already taken",
+                );
+
+            const updatedUser = await execNormalized<APIPrivateUser>(
+                db
+                    .update(usersTable)
+                    .set({
+                        email,
+                    })
+                    .returning()
+                    .where(eq(usersTable.id, BigInt(user.id)))
+                    .then((results) => results[0]),
+            );
+
+            if (!updatedUser)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to change email",
+                );
+
+            res.status(HttpStatusCode.Success).json(toPublicUser(updatedUser));
+
+            fireAndForgetAll([
+                {
+                    label: "event:UserUpdate",
+                    run: () =>
+                        emitEvent({
+                            event: "UserUpdate",
+                            user_id: updatedUser.id,
+                            data: updatedUser,
+                        }),
+                },
+                {
+                    label: "cache:update:user",
+                    run: () =>
+                        setCache("user", user.id, toPublicUser(updatedUser)),
+                    meta: {
+                        userId: user.id,
+                    },
+                },
+                {
+                    label: "cache:update:authUser",
+                    run: () => setCache("authUser", user.id, updatedUser),
                 },
             ]);
         } catch (err) {
@@ -556,6 +900,61 @@ export default class MeController {
                 throw new HttpException(
                     HttpStatusCode.InternalServerError,
                     "Failed to send verification email",
+                );
+
+            res.status(HttpStatusCode.Success).json({
+                success: true,
+            });
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async confirmEmail(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const cooldownKey = `emailConfirmCooldown:${user.id}`;
+            const onCooldown = await redis.get(cooldownKey);
+
+            if (onCooldown) {
+                res.status(HttpStatusCode.Success).json({
+                    success: true,
+                });
+
+                return;
+            }
+
+            const code = crypto
+                .randomInt(0, 999_999)
+                .toString()
+                .padStart(6, "0");
+
+            const redisKey = `emailConfirm:${user.id}`;
+
+            await redis.set(redisKey, code, "EX", 900);
+            await redis.set(cooldownKey, "1", "EX", 60);
+
+            const sentEmail = await postmark.sendEmailWithTemplate({
+                From: "confirm@mutualzz.com",
+                To: user.email,
+                MessageStream: "email-confirm",
+                TemplateAlias: "email-confirm",
+                TemplateModel: {
+                    code,
+                    email: user.email,
+                },
+            });
+
+            if (sentEmail.ErrorCode !== 0)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to send confirm email",
                 );
 
             res.status(HttpStatusCode.Success).json({
