@@ -3,6 +3,7 @@ import {
     authUserLRU,
     channelLRU,
     channelOverwritesLRU,
+    channelRecipientLRU,
     channelsLRU,
     everyoneRoleLRU,
     expressionLRU,
@@ -19,6 +20,7 @@ import {
     spaceMemberLRU,
     spaceMembersLRU,
     spacesLRU,
+    systemUserLRU,
     themeLRU,
     themesLRU,
     turnCredentialsLRU,
@@ -44,8 +46,10 @@ export const caches = {
 
     // REST
     authUser: authUserLRU,
+    systemUser: systemUserLRU,
     channels: channelsLRU,
     channel: channelLRU,
+    channelRecipient: channelRecipientLRU,
     expression: expressionLRU,
     space: spaceLRU,
     spaceHydrated: spaceHydratedLRU,

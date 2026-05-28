@@ -1,4 +1,5 @@
 import {
+    channelRecipientsTable,
     channelsTable,
     db,
     spaceMembersTable,
@@ -11,7 +12,7 @@ import {
     RabbitMQ,
 } from "@mutualzz/util";
 import type { Channel } from "amqplib";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { logger } from "./Logger";
 import { Send, type WebSocket } from "./util";
 import { resyncMemberListWindows } from "@mutualzz/gateway/util/Calculations.ts";
@@ -105,6 +106,25 @@ export async function setupListener(this: WebSocket) {
 
         for (const channel of space.channels) {
             const chid = channel.id.toString();
+            this.events[chid] = await listenEvent(
+                chid,
+                consumer,
+                this.listenOptions,
+            );
+        }
+    }
+
+    const dmRows = await db.query.channelRecipientsTable.findMany({
+        columns: { channelId: true },
+        where: and(
+            eq(channelRecipientsTable.userId, userId),
+            eq(channelRecipientsTable.closed, false),
+        ),
+    });
+
+    for (const row of dmRows) {
+        const chid = row.channelId.toString();
+        if (!this.events[chid]) {
             this.events[chid] = await listenEvent(
                 chid,
                 consumer,

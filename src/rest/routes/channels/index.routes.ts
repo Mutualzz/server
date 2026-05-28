@@ -12,6 +12,13 @@ router.post(
     upload.single("icon"),
     ChannelsController.create,
 );
+router.post("/@me", createLimiter(5_000, 10), ChannelsController.createDM);
+router.delete(
+    "/@me/:channelId",
+    createLimiter(10_000, 50),
+    ChannelsController.closeDM,
+);
+
 router.patch("/bulk", createLimiter(60_000, 10), ChannelsController.updateBulk);
 router.get("/:channelId", createLimiter(60_000, 60), ChannelsController.getOne);
 router.patch(

@@ -81,6 +81,33 @@ router.patch(
     MembersController.patchVoiceModeration,
 );
 
+// Members Moderation
+router.post(
+    "/:spaceId/members/:userId/kick",
+    createLimiter(60_000, 30),
+    MembersController.kick,
+);
+router.put(
+    "/:spaceId/members/:userId/ban",
+    createLimiter(60_000, 10),
+    MembersController.ban,
+);
+router.delete(
+    "/:spaceId/members/:userId/unban",
+    createLimiter(60_000, 10),
+    MembersController.unban,
+);
+router.get(
+    "/:spaceId/bans",
+    createLimiter(60_000, 20),
+    MembersController.getBans,
+);
+router.get(
+    "/:spaceId/bans/:userId",
+    createLimiter(60_000, 30),
+    MembersController.getBan,
+);
+
 // Roles assignments
 router.put(
     "/:spaceId/members/:userId/roles/:roleId",

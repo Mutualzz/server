@@ -1,9 +1,11 @@
 import { getCache, setCache } from "@mutualzz/cache";
 import {
     channelPermissionOverwritesTable,
+    channelRecipientsTable,
     channelsTable,
     db,
     expressionsTable,
+    relationshipsTable,
     rolesTable,
     spaceMemberRolesTable,
     spaceMembersTable,
@@ -13,7 +15,11 @@ import {
     userSettingsTable,
     usersTable,
 } from "@mutualzz/database";
-import type { APIExpression } from "@mutualzz/types";
+import type {
+    APIExpression,
+    APIRelationship,
+    APIUserSettings,
+} from "@mutualzz/types";
 import {
     type APIChannel,
     type APIPrivateUser,
@@ -21,12 +27,12 @@ import {
     type APISpaceMember,
     type APITheme,
     type APIUser,
-    type APIUserSettings,
     type Snowflake,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
+import { perspectiveForUser } from "@mutualzz/rest/util";
 
 export const publicUserColumns = {
     hash: false,
@@ -35,81 +41,141 @@ export const publicUserColumns = {
     email: false,
 } as const;
 
-export const prepareReadyData = async (user: APIPrivateUser) => {
-    const [themes, settings] = await Promise.all([
-        execNormalizedMany<APITheme>(
-            db.query.themesTable.findMany({
-                with: {
-                    author: true,
-                },
-                where: eq(themesTable.authorId, BigInt(user.id)),
-            }),
-        ),
-        execNormalized<APIUserSettings>(
-            db.query.userSettingsTable.findFirst({
-                where: eq(userSettingsTable.userId, BigInt(user.id)),
-            }),
-        ),
-    ]);
+export async function isChannelRecipient(channelId: string, userId: string) {
+    const cacheKey = `${channelId}:${userId}`;
 
-    const expressions = await execNormalizedMany<APIExpression>(
-        db.query.expressionsTable.findMany({
-            where: or(
-                eq(expressionsTable.authorId, BigInt(user.id)),
-                sql`exists (
+    const cached = await getCache("channelRecipient", cacheKey);
+    if (typeof cached === "boolean") return cached;
+
+    const row = await db.query.channelRecipientsTable.findFirst({
+        columns: { userId: true },
+        where: and(
+            eq(channelRecipientsTable.channelId, BigInt(channelId)),
+            eq(channelRecipientsTable.userId, BigInt(userId)),
+        ),
+    });
+
+    const isRecipient = !!row;
+    await setCache("channelRecipient", cacheKey, isRecipient);
+    return isRecipient;
+}
+
+export const prepareReadyData = async (user: APIPrivateUser) => {
+    const [themes, spaces, dmChannels, relationships, expressions, settings] =
+        await Promise.all([
+            // Get all themes owned by the user
+            execNormalizedMany<APITheme>(
+                db.query.themesTable.findMany({
+                    with: {
+                        author: {
+                            columns: publicUserColumns,
+                        },
+                    },
+                    where: eq(themesTable.authorId, BigInt(user.id)),
+                }),
+            ),
+
+            // Get all spaces that the user is part of or is owner of.
+            execNormalizedMany<APISpace>(
+                db.query.spacesTable.findMany({
+                    with: {
+                        members: {
+                            with: {
+                                user: { columns: publicUserColumns },
+                                roles: true,
+                            },
+                        },
+                        channels: {
+                            with: {
+                                parent: true,
+                                overwrites: true,
+                                space: true,
+                            },
+                        },
+                        roles: true,
+                        owner: true,
+                    },
+                    where: or(
+                        eq(spacesTable.ownerId, BigInt(user.id)),
+                        sql`exists (
                     select 1 from "space_members" sm
                     where sm."spaceId" = ${spacesTable.id}
                     and sm."userId" = ${BigInt(user.id)}
                 )`,
+                    ),
+                }),
             ),
-        }),
-    );
 
-    const spaces = await execNormalizedMany<APISpace>(
-        db.query.spacesTable.findMany({
-            with: {
-                members: {
+            // Get all the DM Channels
+            execNormalizedMany(
+                db.query.channelRecipientsTable.findMany({
+                    where: and(
+                        eq(channelRecipientsTable.userId, BigInt(user.id)),
+                        eq(channelRecipientsTable.closed, false),
+                    ),
                     with: {
-                        user: {
-                            columns: publicUserColumns,
-                        },
-                        roles: true,
-                    },
-                },
-                channels: {
-                    with: {
-                        parent: true,
-                        lastMessage: {
+                        channel: {
                             with: {
-                                author: {
-                                    columns: publicUserColumns,
+                                recipients: {
+                                    with: {
+                                        user: { columns: publicUserColumns },
+                                    },
                                 },
                             },
                         },
-                        overwrites: true,
-                        space: true,
                     },
-                },
-                roles: true,
-                owner: true,
-            },
-            where: or(
-                eq(spacesTable.ownerId, BigInt(user.id)),
-                sql`exists (
+                }),
+            ),
+
+            execNormalizedMany<APIRelationship>(
+                db.query.relationshipsTable.findMany({
+                    where: or(
+                        eq(relationshipsTable.userId, BigInt(user.id)),
+                        eq(relationshipsTable.otherUserId, BigInt(user.id)),
+                    ),
+                }),
+            ),
+
+            // Get expressions that a user can access to or is owner of
+            execNormalizedMany<APIExpression>(
+                db.query.expressionsTable.findMany({
+                    where: or(
+                        eq(expressionsTable.authorId, BigInt(user.id)),
+                        sql`exists (
                     select 1 from "space_members" sm
                     where sm."spaceId" = ${spacesTable.id}
                     and sm."userId" = ${BigInt(user.id)}
                 )`,
+                    ),
+                }),
             ),
-        }),
+
+            // Get user settings
+            execNormalized<APIUserSettings>(
+                db.query.userSettingsTable.findFirst({
+                    where: eq(userSettingsTable.userId, BigInt(user.id)),
+                }),
+            ),
+        ]);
+
+    const channels: APIChannel[] = dmChannels.map((row) => ({
+        ...row.channel,
+        recipients: row.channel.recipients.map((r: any) => r.user),
+        recipientIds: row.channel.recipients.map((r: any) => r.user.id),
+    })) satisfies APIChannel[];
+
+    const relationshipsForReady = relationships.map((r) =>
+        perspectiveForUser(r, user.id),
     );
 
     return {
         user,
         themes,
         spaces,
-        settings,
+        channels,
+        relationships: relationshipsForReady,
         expressions,
+        settings,
     };
 };
 
@@ -128,8 +194,8 @@ export async function getUser(
     if (!id) return null;
 
     let user: APIUser | APIPrivateUser | null;
-    if (!privateUser) user = await getCache("user", id);
-    else user = await getCache("authUser", id);
+    if (privateUser) user = await getCache("authUser", id);
+    else user = await getCache("user", id);
     if (user) return user;
 
     user = await execNormalized<APIUser | APIPrivateUser>(
@@ -196,7 +262,7 @@ export const getSpaceHydrated = async (id: string) => {
                         overwrites: true,
                     },
                 },
-                owner: true,
+                owner: { columns: publicUserColumns },
             },
             where: eq(spacesTable.id, BigInt(id)),
         }),
@@ -209,19 +275,35 @@ export const getSpaceHydrated = async (id: string) => {
 };
 
 export const getChannel = async (id: string) => {
-    let channel = await getCache("channel", id);
+    const channel = await getCache("channel", id);
     if (channel) return channel;
 
-    channel = await execNormalized<APIChannel>(
+    const row = await execNormalized<APIChannel>(
         db.query.channelsTable.findFirst({
             where: eq(channelsTable.id, BigInt(id)),
+            with: {
+                recipients: {
+                    with: {
+                        user: { columns: publicUserColumns },
+                    },
+                },
+            },
         }),
     );
 
-    if (!channel) return null;
+    if (!row) return null;
 
-    await setCache("channel", id, channel);
-    return channel;
+    const hydrated: APIChannel = {
+        ...row,
+        recipientIds:
+            row.recipients?.map((r: any) => r.user.id) ??
+            row.recipientIds ??
+            null,
+        recipients: row.recipients?.map((r: any) => r.user) ?? null,
+    };
+
+    await setCache("channel", id, hydrated);
+    return hydrated;
 };
 
 export const getExpression = async (id: string) => {

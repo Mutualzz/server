@@ -1,10 +1,9 @@
-export * from "./Channel";
-export * from "./Invite";
+export * from "./channel";
 export * from "./spaces";
-export * from "./Theme";
 export * from "./users";
 export * from "./discord";
 
+export * from "./Theme";
+export * from "./Invite";
 export * from "./Message";
-export * from "./ChannelPermissionOverwrite";
 export * from "./Expression";

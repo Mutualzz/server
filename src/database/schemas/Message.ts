@@ -1,6 +1,6 @@
-import { usersTable } from "@mutualzz/database/schemas/users";
+import { usersTable } from "./users/User";
 import type { APIMessageEmbed } from "@mutualzz/types";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
     bigint,
     boolean,
@@ -11,7 +11,7 @@ import {
     text,
     timestamp,
 } from "drizzle-orm/pg-core";
-import { channelsTable } from "./Channel";
+import { channelsTable } from "./channel/Channel.ts";
 import { spacesTable } from "./spaces";
 
 export const messagesTable = pgTable(
@@ -36,6 +36,10 @@ export const messagesTable = pgTable(
         content: text(),
 
         edited: boolean().default(false).notNull(),
+
+        flags: bigint("flags", { mode: "bigint" })
+            .notNull()
+            .default(sql`0`),
 
         embeds: jsonb().$type<APIMessageEmbed[]>().notNull().default([]),
 

@@ -24,6 +24,15 @@ export const authUserLRU = new LRUCache<string, APIPrivateUser>({
 });
 // [END] Auth User Caches
 
+// [START] System User Cache
+export const systemUserLRU = new LRUCache<string, APIUser>({
+    max: 5,
+    ttl: 1000 * 60 * 60 * 24 * 7, // 7 days
+    forEach: (value: any) => {
+        delete value.hash;
+    },
+});
+
 // [START] Expression Cache
 export const expressionLRU = new LRUCache<string, APIExpression>({
     max: 5000,
@@ -47,6 +56,17 @@ export const channelLRU = new LRUCache<string, APIChannel>({
     max: 1000,
     ttl: 1000 * 60,
 });
+
+export const channelRecipientLRU = new LRUCache<string, boolean>({
+    max: 1000,
+    ttl: 1000 * 60,
+});
+
+export const channelRecipientsLRU = new LRUCache<string, string[]>({
+    max: 500,
+    ttl: 1000 * 60,
+});
+
 // [END] Channel Caches
 
 // [START] Space Caches

@@ -44,7 +44,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
-import { permissionFlags, roleFlags } from "@mutualzz/bitfield";
+import { memberFlags, permissionFlags, roleFlags } from "@mutualzz/bitfield";
 
 export default class SpacesController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -180,6 +180,7 @@ export default class SpacesController {
                         .values({
                             spaceId: BigInt(newSpace.id),
                             userId: BigInt(user.id),
+                            flags: memberFlags.Owner,
                         })
                         .returning()
                         .then((results) => results[0]),

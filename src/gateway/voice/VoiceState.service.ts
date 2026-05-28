@@ -8,16 +8,20 @@ import {
     createVoiceSession,
     emitEvent,
     generateVoiceToken,
-    getMember,
+    redis,
 } from "@mutualzz/util";
 import { canVoiceConnect, canVoiceSpeak } from "../util/VoicePermissions.ts";
 import { logger } from "../Logger.ts";
-import { BitField, memberFlags } from "@mutualzz/bitfield";
 import { voiceScopeKey } from "./VoiceState.util";
+import { and, eq } from "drizzle-orm";
+import { db, voiceModerationTable } from "@mutualzz/database";
 
 export class VoiceStateService {
     static readonly instanceId: string =
         process.env.INSTANCE_ID ?? crypto.randomUUID();
+
+    private static readonly STREAM_CHUNK_SIZE = 25;
+    private static readonly STREAM_PAUSE_MS = 10;
 
     static async handleVoiceStateUpdate(
         socket: WebSocket,
@@ -25,8 +29,8 @@ export class VoiceStateService {
     ) {
         if (!socket.userId || !socket.sessionId) return;
 
-        const userId = socket.userId as Snowflake;
-        const sessionId = socket.sessionId as string;
+        const userId = socket.userId;
+        const sessionId = socket.sessionId;
 
         const requestedChannelId = body.channelId ?? null;
         const spaceId = body.spaceId ?? null;
@@ -53,22 +57,10 @@ export class VoiceStateService {
                     },
                 });
 
-                if (previous.channelId) {
-                    const remainingStates =
-                        await VoiceStateRedis.listChannelStates(
-                            previous.spaceId ?? null,
-                            previous.channelId,
-                        );
-
-                    await emitEvent({
-                        space_id: previous.spaceId ?? null,
-                        event: "VoiceStateSync",
-                        data: {
-                            channelId: previous.channelId,
-                            states: remainingStates,
-                        },
-                    });
-                }
+                void VoiceStateService.emitStatesAsUpdates(
+                    previous.spaceId ?? null,
+                    previous.channelId!,
+                );
             }
 
             return;
@@ -188,28 +180,80 @@ export class VoiceStateService {
                 },
             });
 
-            const states = await VoiceStateRedis.listChannelStates(
+            void VoiceStateService.streamStatesToSocket(
+                socket,
+                spaceId,
+                requestedChannelId,
+                socket.userId,
+            );
+
+            void VoiceStateService.emitStatesAsUpdates(
                 spaceId,
                 requestedChannelId,
             );
-
-            await Send(socket, {
-                op: "Dispatch",
-                t: "VoiceStateSync",
-                s: socket.sequence++,
-                d: {
-                    channelId: requestedChannelId,
-                    states,
-                },
-            });
         }
+    }
+
+    static async kickMemberFromVoice(
+        spaceId: Snowflake,
+        targetUserId: Snowflake,
+        reason = "Kicked from voice",
+    ) {
+        const existing = await VoiceStateRedis.getState(targetUserId);
+        if (!existing?.channelId) return false;
+        if (existing.spaceId !== spaceId) return false;
+
+        try {
+            const payload = JSON.stringify({
+                userId: String(targetUserId),
+                spaceId: existing.spaceId,
+                reason,
+                instanceId: this.instanceId,
+            });
+
+            await redis.publish("voice:control:kick", payload);
+        } catch (err) {
+            logger.error("Failed to publish voice kick control event", err);
+        }
+
+        const active = await VoiceStateRedis.getActiveSession(targetUserId);
+        if (active) {
+            try {
+                await VoiceStateRedis.clearActiveSession(
+                    targetUserId,
+                    active.tokenId,
+                );
+            } catch {
+                /* empty */
+            }
+        }
+
+        await VoiceStateRedis.removeState({
+            userId: targetUserId,
+            spaceId,
+            channelId: existing.channelId,
+        });
+
+        await emitEvent({
+            event: "VoiceStateUpdate",
+            space_id: spaceId,
+            data: {
+                userId: targetUserId,
+                spaceId,
+                channelId: null,
+            },
+        });
+
+        void VoiceStateService.emitStatesAsUpdates(spaceId, existing.channelId);
+
+        return true;
     }
 
     static async sendRejoinIfNeeded(socket: WebSocket) {
         if (!socket.userId || !socket.sessionId) return;
 
-        const userId = socket.userId as Snowflake;
-        const sessionId = socket.sessionId as string;
+        const userId = socket.userId;
+        const sessionId = socket.sessionId;
 
         const existing = await VoiceStateRedis.getState(userId);
         if (!existing?.channelId) return;
@@ -286,20 +330,12 @@ export class VoiceStateService {
             },
         });
 
-        const states = await VoiceStateRedis.listChannelStates(
+        void VoiceStateService.streamStatesToSocket(
+            socket,
             existing.spaceId,
             existing.channelId,
+            socket.userId,
         );
-
-        await Send(socket, {
-            op: "Dispatch",
-            t: "VoiceStateSync",
-            s: socket.sequence++,
-            d: {
-                channelId: existing.channelId,
-                states,
-            },
-        });
     }
 
     static async applyMemberVoiceModeration(
@@ -317,6 +353,42 @@ export class VoiceStateService {
         existing.updatedAt = Date.now();
         await VoiceStateRedis.upsertState(existing);
 
+        try {
+            const current = await db.query.voiceModerationTable.findFirst({
+                where: and(
+                    eq(voiceModerationTable.spaceId, BigInt(spaceId)),
+                    eq(voiceModerationTable.userId, BigInt(targetUserId)),
+                ),
+            });
+
+            if (current) {
+                await db
+                    .update(voiceModerationTable)
+                    .set({
+                        spaceMute: patch.spaceMute ?? current.spaceMute,
+                        spaceDeaf: patch.spaceDeaf ?? current.spaceDeaf,
+                    })
+                    .where(
+                        and(
+                            eq(voiceModerationTable.spaceId, BigInt(spaceId)),
+                            eq(
+                                voiceModerationTable.userId,
+                                BigInt(targetUserId),
+                            ),
+                        ),
+                    );
+            } else if (patch.spaceMute || patch.spaceDeaf) {
+                await db.insert(voiceModerationTable).values({
+                    spaceId: BigInt(spaceId),
+                    userId: BigInt(targetUserId),
+                    spaceMute: patch.spaceMute ?? false,
+                    spaceDeaf: patch.spaceDeaf ?? false,
+                });
+            }
+        } catch (err) {
+            logger.error("Failed to persist voice moderation", err);
+        }
+
         await emitEvent({
             event: "VoiceStateUpdate",
             space_id: spaceId,
@@ -329,18 +401,114 @@ export class VoiceStateService {
         userId: Snowflake,
     ) {
         if (!spaceId) return { spaceMute: false, spaceDeaf: false };
-        const member = await getMember(spaceId, userId);
 
-        if (!member) return { spaceMute: false, spaceDeaf: false };
+        try {
+            const moderation = await db.query.voiceModerationTable.findFirst({
+                where: and(
+                    eq(voiceModerationTable.spaceId, BigInt(spaceId)),
+                    eq(voiceModerationTable.userId, BigInt(userId)),
+                ),
+            });
 
-        const memberBitfield = BitField.fromString(
-            memberFlags,
-            member.flags.toString(),
-        );
+            if (!moderation) return { spaceMute: false, spaceDeaf: false };
 
-        return {
-            spaceMute: memberBitfield.has("VoiceMuted"),
-            spaceDeaf: memberBitfield.has("VoiceDeafened"),
-        };
+            return {
+                spaceMute: moderation.spaceMute,
+                spaceDeaf: moderation.spaceDeaf,
+            };
+        } catch (err) {
+            logger.error("Failed to get moderation for user", err);
+            return { spaceMute: false, spaceDeaf: false };
+        }
+    }
+
+    private static async streamStatesToSocket(
+        socket: WebSocket,
+        spaceId: Snowflake | null,
+        channelId: Snowflake,
+        skipUserId?: Snowflake | null,
+    ) {
+        try {
+            const states = await VoiceStateRedis.listChannelStates(
+                spaceId,
+                channelId,
+            );
+            if (!states || states.length === 0) return;
+
+            const filtered = skipUserId
+                ? states.filter((s) => String(s.userId) !== String(skipUserId))
+                : states;
+
+            const chunkSize = VoiceStateService.STREAM_CHUNK_SIZE;
+            const pauseMs = VoiceStateService.STREAM_PAUSE_MS;
+
+            for (let i = 0; i < filtered.length; i += chunkSize) {
+                const chunk = filtered.slice(i, i + chunkSize);
+
+                for (const state of chunk) {
+                    try {
+                        await Send(socket, {
+                            op: "Dispatch",
+                            t: "VoiceStateUpdate",
+                            s: socket.sequence++,
+                            d: state,
+                        });
+                    } catch (sendErr) {
+                        logger.debug(
+                            "Failed to send streamed VoiceStateUpdate to socket",
+                            {
+                                err: sendErr,
+                                userId: state.userId,
+                                channelId,
+                            },
+                        );
+                    }
+                }
+
+                // pause briefly to avoid blocking
+                await new Promise((resolve) => setTimeout(resolve, pauseMs));
+            }
+        } catch (err) {
+            logger.error("Failed to stream voice states to socket", {
+                spaceId,
+                channelId,
+                err,
+            });
+        }
+    }
+
+    private static async emitStatesAsUpdates(
+        spaceId: Snowflake | null,
+        channelId: Snowflake,
+    ) {
+        try {
+            const states = await VoiceStateRedis.listChannelStates(
+                spaceId,
+                channelId,
+            );
+            if (states.length === 0) return;
+
+            for (const st of states) {
+                try {
+                    await emitEvent({
+                        event: "VoiceStateUpdate",
+                        space_id: spaceId,
+                        data: st,
+                    });
+                } catch (emitErr) {
+                    logger.debug("Failed to emit per-member VoiceStateUpdate", {
+                        err: emitErr,
+                        userId: st.userId,
+                        channelId,
+                    });
+                }
+            }
+        } catch (err) {
+            logger.error("Failed to emit per-member voice state updates", {
+                spaceId,
+                channelId,
+                err,
+            });
+        }
     }
 }

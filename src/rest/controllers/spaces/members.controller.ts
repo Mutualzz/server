@@ -10,9 +10,11 @@ import {
     invitesTable,
     messagesTable,
     rolesTable,
+    spaceBansTable,
     spaceMemberRolesTable,
     spaceMembersTable,
     userSettingsTable,
+    voiceModerationTable,
 } from "@mutualzz/database";
 import {
     type APIChannel,
@@ -33,6 +35,7 @@ import {
     getMember,
     getMemberRoles,
     getSpaceHydrated,
+    getUser,
     publicUserColumns,
     requireSpacePermissions,
 } from "@mutualzz/util";
@@ -49,7 +52,7 @@ import {
 } from "@mutualzz/validators";
 import { and, eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import { BitField, memberFlags, permissionFlags } from "@mutualzz/bitfield";
+import { permissionFlags } from "@mutualzz/bitfield";
 import dayjs from "dayjs";
 import { VoiceStateService } from "@mutualzz/gateway";
 
@@ -177,6 +180,85 @@ export default class MembersController {
         }
     }
 
+    static async unban(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { spaceId, userId } = validateMembersActionParams.parse(
+                req.params,
+            );
+
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            await requireSpacePermissions({
+                spaceId,
+                userId: user.id,
+                needed: ["BanMembers"],
+            });
+
+            const ban = await db.query.spaceBansTable.findFirst({
+                where: and(
+                    eq(spaceBansTable.spaceId, BigInt(space.id)),
+                    eq(spaceBansTable.userId, BigInt(userId)),
+                ),
+            });
+
+            if (!ban)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Ban not found",
+                );
+
+            await db
+                .delete(spaceBansTable)
+                .where(
+                    and(
+                        eq(spaceBansTable.spaceId, BigInt(space.id)),
+                        eq(spaceBansTable.userId, BigInt(userId)),
+                    ),
+                );
+
+            res.status(HttpStatusCode.Success).json({ spaceId, userId });
+
+            fireAndForgetAll([
+                {
+                    label: "event:SpaceBanRemove",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceBanRemove",
+                            space_id: space.id,
+                            data: { spaceId, userId },
+                        }),
+                },
+                {
+                    label: "cache:delete:spaceMember",
+                    run: () =>
+                        deleteCache("spaceMember", `${space.id}:${ban.userId}`),
+                },
+                {
+                    label: "cache:invalidate:spaceMembers",
+                    run: () => invalidateCache("spaceMembers", space.id),
+                },
+                {
+                    label: "cache:invalidate:spaceHydrated",
+                    run: () => invalidateCache("spaceHydrated", spaceId),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
     static async addMe(req: Request, res: Response, next: NextFunction) {
         try {
             const { user } = req;
@@ -194,6 +276,19 @@ export default class MembersController {
                 throw new HttpException(
                     HttpStatusCode.NotFound,
                     "Space not found",
+                );
+
+            const existingBan = await db.query.spaceBansTable.findFirst({
+                where: and(
+                    eq(spaceBansTable.spaceId, BigInt(space.id)),
+                    eq(spaceBansTable.userId, BigInt(user.id)),
+                ),
+            });
+
+            if (existingBan)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You are banned from this space",
                 );
 
             const member = await getMember(space.id, user.id);
@@ -239,8 +334,8 @@ export default class MembersController {
                         "Invalid invite",
                     );
 
-                const maxUses = Number(invite.maxUses ?? 0);
-                const uses = Number(invite.uses ?? 0);
+                const maxUses = Number(invite.maxUses);
+                const uses = Number(invite.uses);
 
                 if (maxUses !== 0 && uses >= maxUses) {
                     await tx
@@ -297,13 +392,6 @@ export default class MembersController {
                         where: eq(channelsTable.spaceId, BigInt(space.id)),
                         with: {
                             parent: true,
-                            lastMessage: {
-                                with: {
-                                    author: {
-                                        columns: publicUserColumns,
-                                    },
-                                },
-                            },
                         },
                     }),
                 );
@@ -771,7 +859,97 @@ export default class MembersController {
         }
     }
 
-    // TODO: in the future implement the reason parameter and create logs for moderation actions on the spaces
+    static async getBans(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { spaceId } = validateMembersGetAllParams.parse(req.params);
+
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            await requireSpacePermissions({
+                spaceId,
+                userId: user.id,
+                needed: ["BanMembers"],
+            });
+
+            const bans = await execNormalizedMany(
+                db.query.spaceBansTable.findMany({
+                    with: {
+                        user: { with: publicUserColumns },
+                        bannedBy: { with: publicUserColumns },
+                    },
+                    where: eq(spaceBansTable.spaceId, BigInt(spaceId)),
+                }),
+            );
+
+            res.status(HttpStatusCode.Success).json(bans);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async getBan(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { spaceId, userId } = validateMembersActionParams.parse(
+                req.params,
+            );
+
+            const space = await getSpaceHydrated(spaceId);
+            if (!space)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Space not found",
+                );
+
+            await requireSpacePermissions({
+                spaceId,
+                userId: user.id,
+                needed: ["BanMembers"],
+            });
+
+            const ban = await execNormalized(
+                db.query.spaceBansTable.findFirst({
+                    with: {
+                        user: { with: publicUserColumns },
+                        bannedBy: { with: publicUserColumns },
+                    },
+                    where: and(
+                        eq(spaceBansTable.spaceId, BigInt(spaceId)),
+                        eq(spaceBansTable.userId, BigInt(userId)),
+                    ),
+                }),
+            );
+
+            if (!ban)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Ban not found",
+                );
+
+            res.status(HttpStatusCode.Success).json(ban);
+        } catch (err) {
+            next(err);
+        }
+    }
+
     static async kick(req: Request, res: Response, next: NextFunction) {
         try {
             const { user } = req;
@@ -857,6 +1035,19 @@ export default class MembersController {
                             data: {
                                 spaceId: spaceId,
                                 userId: member.userId,
+                                reason: "kicked",
+                            },
+                        }),
+                },
+                {
+                    label: "event:SpaceDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceDelete",
+                            user_id: member.userId,
+                            data: {
+                                id: space.id,
+                                reason: "kicked",
                             },
                         }),
                 },
@@ -882,7 +1073,6 @@ export default class MembersController {
         }
     }
 
-    // TODO: Add ban database schema
     static async ban(req: Request, res: Response, next: NextFunction) {
         try {
             const { user } = req;
@@ -943,11 +1133,10 @@ export default class MembersController {
                     );
             }
 
-            const { deleteMessageTimeframe } = validateMemberBanBody.parse(
-                req.body,
-            );
+            const { deleteMessageTimeframe, reason } =
+                validateMemberBanBody.parse(req.body);
 
-            await db.transaction(async (tx) => {
+            const ban = await db.transaction(async (tx) => {
                 await tx
                     .delete(spaceMembersTable)
                     .where(
@@ -958,8 +1147,20 @@ export default class MembersController {
                     )
                     .execute();
 
+                const ban = await tx
+                    .insert(spaceBansTable)
+                    .values({
+                        spaceId: BigInt(space.id),
+                        userId: BigInt(member.userId),
+                        bannedById: BigInt(user.id),
+                        reason,
+                    })
+                    .returning()
+                    .execute()
+                    .then((rows) => rows[0]);
+
                 // 0 = do not delete messages, -1 = delete all messages, > 0 = delete messages from the last x seconds
-                if (deleteMessageTimeframe === 0) return;
+                if (deleteMessageTimeframe === 0) return ban;
                 if (deleteMessageTimeframe === -1) {
                     const messages = await execNormalizedMany<APIMessage>(
                         tx
@@ -987,11 +1188,13 @@ export default class MembersController {
                             })),
                         }),
                     );
+
+                    return ban;
                 }
 
                 const deleteBefore = dayjs()
                     .subtract(deleteMessageTimeframe, "seconds")
-                    .date();
+                    .toDate();
 
                 const messages = await execNormalizedMany<APIMessage>(
                     tx
@@ -1020,12 +1223,17 @@ export default class MembersController {
                         })),
                     }),
                 );
+
+                return ban;
             });
 
-            res.status(HttpStatusCode.Success).json({
-                spaceId,
-                userId: member.userId,
-            });
+            const banResult = {
+                ...ban,
+                bannedBy: await getUser(ban.bannedById.toString()),
+                user: await getUser(ban.userId.toString()),
+            };
+
+            res.status(HttpStatusCode.Success).json(banResult);
 
             fireAndForgetAll([
                 {
@@ -1037,6 +1245,28 @@ export default class MembersController {
                             data: {
                                 spaceId,
                                 userId: member.userId,
+                                reason: "banned",
+                            },
+                        }),
+                },
+                {
+                    label: "event:SpaceBanAdd",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceBanAdd",
+                            space_id: space.id,
+                            data: banResult,
+                        }),
+                },
+                {
+                    label: "event:SpaceDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "SpaceDelete",
+                            user_id: member.userId,
+                            data: {
+                                id: member.spaceId,
+                                reason: "banned",
                             },
                         }),
                 },
@@ -1093,56 +1323,96 @@ export default class MembersController {
                     "Member not found",
                 );
 
-            const { spaceMute, spaceDeaf } =
+            const { spaceMute, spaceDeaf, disconnect } =
                 validateMemberVoiceModerationBody.parse(req.body);
 
-            if (spaceMute != null) {
+            if (disconnect) {
+                const kicked = await VoiceStateService.kickMemberFromVoice(
+                    space.id,
+                    userId,
+                );
+
+                if (!kicked)
+                    throw new HttpException(
+                        HttpStatusCode.NotFound,
+                        "Member is not connected to voice",
+                    );
+
+                res.status(HttpStatusCode.Success).json({
+                    ...member,
+                    disconnected: true,
+                });
+
+                fireAndForgetAll([
+                    {
+                        label: "cache:delete:spaceMember",
+                        run: () =>
+                            deleteCache("spaceMember", `${space.id}:${userId}`),
+                    },
+                    {
+                        label: "cache:invalidate:spaceMembers",
+                        run: () => invalidateCache("spaceMembers", space.id),
+                    },
+                    {
+                        label: "cache:invalidate:spaceHydrated",
+                        run: () => invalidateCache("spaceHydrated", spaceId),
+                    },
+                ]);
+
+                return;
+            }
+
+            if (spaceMute != null)
                 await requireSpacePermissions({
                     spaceId,
                     userId: user.id,
                     needed: ["MuteMembers"],
                 });
-            }
 
-            if (spaceDeaf != null) {
+            if (spaceDeaf != null)
                 await requireSpacePermissions({
                     spaceId,
                     userId: user.id,
                     needed: ["DeafenMembers"],
                 });
-            }
 
-            const memberBitfield = BitField.fromString(
-                memberFlags,
-                member.flags.toString(),
-            );
-
-            if (spaceMute != null) {
-                if (spaceMute) memberBitfield.add("VoiceMuted");
-                else memberBitfield.remove("VoiceMuted");
-            }
-
-            if (spaceDeaf != null) {
-                if (spaceDeaf) memberBitfield.add("VoiceDeafened");
-                else memberBitfield.remove("VoiceDeafened");
-            }
-
-            const nextFlags = memberBitfield.toBigInt();
-
-            await db
-                .update(spaceMembersTable)
-                .set({ flags: nextFlags })
-                .where(
-                    and(
-                        eq(spaceMembersTable.spaceId, BigInt(space.id)),
-                        eq(spaceMembersTable.userId, BigInt(userId)),
+            try {
+                const current = await db.query.voiceModerationTable.findFirst({
+                    where: and(
+                        eq(voiceModerationTable.spaceId, BigInt(space.id)),
+                        eq(voiceModerationTable.userId, BigInt(userId)),
                     ),
-                );
+                });
 
-            res.status(HttpStatusCode.Success).json({
-                ...member,
-                flags: nextFlags,
-            });
+                if (current) {
+                    await db
+                        .update(voiceModerationTable)
+                        .set({
+                            spaceMute: spaceMute ?? current.spaceMute,
+                            spaceDeaf: spaceDeaf ?? current.spaceDeaf,
+                        })
+                        .where(
+                            and(
+                                eq(
+                                    voiceModerationTable.spaceId,
+                                    BigInt(space.id),
+                                ),
+                                eq(voiceModerationTable.userId, BigInt(userId)),
+                            ),
+                        );
+                } else if (spaceMute || spaceDeaf) {
+                    await db.insert(voiceModerationTable).values({
+                        spaceId: BigInt(space.id),
+                        userId: BigInt(userId),
+                        spaceMute: spaceMute ?? false,
+                        spaceDeaf: spaceDeaf ?? false,
+                    });
+                }
+            } catch {
+                /** empty **/
+            }
+
+            res.status(HttpStatusCode.Success).json(member);
 
             fireAndForgetAll([
                 {

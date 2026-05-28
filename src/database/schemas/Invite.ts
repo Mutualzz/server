@@ -7,7 +7,7 @@ import {
     text,
     timestamp,
 } from "drizzle-orm/pg-core";
-import { channelsTable } from "./Channel";
+import { channelsTable } from "./channel/Channel.ts";
 import { spacesTable } from "./spaces/Space";
 import { usersTable } from "./users";
 

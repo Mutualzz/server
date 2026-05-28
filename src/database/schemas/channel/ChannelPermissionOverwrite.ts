@@ -6,8 +6,8 @@ import {
     timestamp,
 } from "drizzle-orm/pg-core";
 import { channelsTable } from "./Channel";
-import { rolesTable, spacesTable } from "./spaces";
-import { usersTable } from "./users";
+import { rolesTable, spacesTable } from "../spaces";
+import { usersTable } from "../users";
 import { sql } from "drizzle-orm";
 
 export const channelPermissionOverwritesTable = pgTable(

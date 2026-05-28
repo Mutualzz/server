@@ -4,13 +4,20 @@ import {
     invalidateCache,
     setCache,
 } from "@mutualzz/cache";
-import { channelsTable, db, messagesTable } from "@mutualzz/database";
-import type { APIMessage } from "@mutualzz/types";
 import {
+    channelRecipientsTable,
+    db,
+    messagesTable,
+    relationshipsTable,
+} from "@mutualzz/database";
+import {
+    type APIMessage,
+    type APIRelationship,
     ChannelType,
     HttpException,
     HttpStatusCode,
     MessageType,
+    RelationshipType,
 } from "@mutualzz/types";
 import {
     buildEmbeds,
@@ -22,6 +29,7 @@ import {
     getMember,
     getSpace,
     getUser,
+    isChannelRecipient,
     requireChannelPermissions,
     sanitizeContent,
     Snowflake,
@@ -32,9 +40,14 @@ import {
     validateMessageParamsModify,
     validateMessageParamsPut,
 } from "@mutualzz/validators";
-import { and, asc, desc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, ne } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import { BitField, type PermissionFlags } from "@mutualzz/bitfield";
+import {
+    type BitField,
+    messageFlags,
+    type PermissionFlags,
+} from "@mutualzz/bitfield";
+import { createSystemMessage } from "@mutualzz/util/systemUser.ts";
 
 export default class MessagesController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -73,13 +86,10 @@ export default class MessagesController {
             switch (channel.type) {
                 case ChannelType.DM:
                 case ChannelType.GroupDM:
-                    if (
-                        !channel.recipientIds ||
-                        !channel.recipientIds.includes(user.id)
-                    ) {
+                    if (!(await isChannelRecipient(channel.id, user.id))) {
                         throw new HttpException(
                             HttpStatusCode.Forbidden,
-                            "You are not part of this DM",
+                            "You are not part of this DMChannel",
                         );
                     }
                     break;
@@ -153,6 +163,84 @@ export default class MessagesController {
                 ? await sanitizeContent(content, channel, canUseExternalEmojis)
                 : null;
 
+            if (
+                channel.type === ChannelType.DM ||
+                channel.type === ChannelType.GroupDM
+            ) {
+                const recipientRows = await execNormalizedMany(
+                    db.query.channelRecipientsTable.findMany({
+                        where: eq(
+                            channelRecipientsTable.channelId,
+                            BigInt(channel.id),
+                        ),
+                    }),
+                );
+
+                const otherRecipients = recipientRows
+                    .map((r) => r.userId)
+                    .filter((id: string) => id !== user.id);
+
+                const enforceBlockCheck = otherRecipients.length === 1;
+
+                if (enforceBlockCheck) {
+                    for (const otherId of otherRecipients) {
+                        const canonicalUserId =
+                            BigInt(user.id) < BigInt(otherId)
+                                ? user.id
+                                : otherId;
+                        const canonicalOtherId =
+                            BigInt(user.id) < BigInt(otherId)
+                                ? otherId
+                                : user.id;
+
+                        const existingRel =
+                            await execNormalized<APIRelationship>(
+                                db.query.relationshipsTable.findFirst({
+                                    where: and(
+                                        eq(
+                                            relationshipsTable.userId,
+                                            BigInt(canonicalUserId),
+                                        ),
+                                        eq(
+                                            relationshipsTable.otherUserId,
+                                            BigInt(canonicalOtherId),
+                                        ),
+                                    ),
+                                }),
+                            );
+
+                        if (
+                            existingRel &&
+                            existingRel.type === RelationshipType.Blocked &&
+                            existingRel.userId.toString() === otherId.toString()
+                        ) {
+                            const sysMsg = await createSystemMessage(
+                                channelId,
+                                "You cannot message this person",
+                                messageFlags.Ephemeral,
+                            );
+
+                            fireAndForgetAll([
+                                {
+                                    label: `event:MessageCreate:ephemeral:${user.id}`,
+                                    run: () =>
+                                        emitEvent({
+                                            event: "MessageCreate",
+                                            user_id: user.id,
+                                            data: sysMsg,
+                                        }),
+                                },
+                            ]);
+
+                            throw new HttpException(
+                                HttpStatusCode.Forbidden,
+                                "You cannot message this person",
+                            );
+                        }
+                    }
+                }
+            }
+
             const newMessage = await execNormalized<APIMessage>(
                 db
                     .insert(messagesTable)
@@ -180,13 +268,6 @@ export default class MessagesController {
                     "Failed to create message",
                 );
 
-            await db
-                .update(channelsTable)
-                .set({
-                    lastMessageId: BigInt(newMessage.id),
-                })
-                .where(eq(channelsTable.id, BigInt(channel.id)));
-
             const message = {
                 ...newMessage,
                 channel: channel,
@@ -208,15 +289,19 @@ export default class MessagesController {
                 },
                 {
                     label: "event:ChannelUpdate",
-                    run: () =>
+                    run: () => {
+                        const updatedChannel = {
+                            ...channel,
+
+                            lastMessage: message,
+                        };
+
                         emitEvent({
                             event: "ChannelUpdate",
                             channel_id: channel.id,
-                            data: {
-                                id: channel.id,
-                                lastMessageId: message.id,
-                            },
-                        }),
+                            data: updatedChannel,
+                        });
+                    },
                 },
                 {
                     label: "cache:set:message",
@@ -227,6 +312,57 @@ export default class MessagesController {
                     run: () => invalidateCache("messages", channel.id),
                 },
             ]);
+
+            if (
+                channel.type === ChannelType.DM ||
+                channel.type === ChannelType.GroupDM
+            ) {
+                const closedRecipients = await db
+                    .select()
+                    .from(channelRecipientsTable)
+                    .where(
+                        and(
+                            eq(
+                                channelRecipientsTable.channelId,
+                                BigInt(channel.id),
+                            ),
+                            eq(channelRecipientsTable.closed, true),
+                            ne(channelRecipientsTable.userId, BigInt(user.id)),
+                        ),
+                    );
+
+                if (closedRecipients.length > 0) {
+                    await db
+                        .update(channelRecipientsTable)
+                        .set({ closed: false })
+                        .where(
+                            and(
+                                eq(
+                                    channelRecipientsTable.channelId,
+                                    BigInt(channel.id),
+                                ),
+                                eq(channelRecipientsTable.closed, true),
+                                ne(
+                                    channelRecipientsTable.userId,
+                                    BigInt(user.id),
+                                ),
+                            ),
+                        );
+
+                    fireAndForgetAll(
+                        closedRecipients.map((r) => ({
+                            label: `event:ChannelCreate:${r.userId}`,
+                            run: () => {
+                                emitEvent({
+                                    event: "ChannelCreate",
+                                    user_id: r.userId.toString(),
+                                    data: channel,
+                                });
+                            },
+                        })),
+                    );
+                }
+            }
         } catch (err) {
             next(err);
         }
@@ -430,13 +566,10 @@ export default class MessagesController {
                 channel.type === ChannelType.DM ||
                 channel.type === ChannelType.GroupDM
             ) {
-                if (
-                    !channel.recipientIds ||
-                    !channel.recipientIds.includes(user.id)
-                ) {
+                if (!(await isChannelRecipient(channel.id, user.id))) {
                     throw new HttpException(
                         HttpStatusCode.Forbidden,
-                        "You are not part of this DM",
+                        "You are not part of this DMChannel",
                     );
                 }
             }

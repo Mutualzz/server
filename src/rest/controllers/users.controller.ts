@@ -6,9 +6,9 @@ import type { NextFunction, Request, Response } from "express";
 export default class UsersController {
     static async get(req: Request, res: Response, next: NextFunction) {
         try {
-            const { id } = validateUserGet.parse(req.params);
+            const { userId } = validateUserGet.parse(req.params);
 
-            const user = await getUser(id);
+            const user = await getUser(userId);
 
             if (!user)
                 throw new HttpException(

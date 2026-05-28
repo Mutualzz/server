@@ -1,5 +1,5 @@
 import { deleteCache, invalidateCache, setCache } from "@mutualzz/cache";
-import { channelsTable, db } from "@mutualzz/database";
+import { channelRecipientsTable, channelsTable, db } from "@mutualzz/database";
 import type { APIChannel } from "@mutualzz/types";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
@@ -25,6 +25,7 @@ import {
     validateChannelParamsGet,
     validateChannelParamsUpdate,
     validateChannelQueryDelete,
+    validateDmChannelCreateBody,
 } from "@mutualzz/validators";
 import { and, eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -84,7 +85,7 @@ export default class ChannelsController {
                     "Unauthorized",
                 );
 
-            const { name, parentId, spaceId, ownerId, recipientIds, ...rest } =
+            const { name, parentId, spaceId, ...rest } =
                 validateChannelBodyCreate.parse(req.body);
 
             const type = parseInt(rest.type);
@@ -93,34 +94,7 @@ export default class ChannelsController {
                 case ChannelType.Text:
                 case ChannelType.Voice:
                 case ChannelType.Category:
-                    if (ownerId || recipientIds)
-                        throw new HttpException(
-                            HttpStatusCode.BadRequest,
-                            "Space channels cannot have an owner or recipient ids",
-                        );
                     break;
-                case ChannelType.DM:
-                case ChannelType.GroupDM: {
-                    if (spaceId)
-                        throw new HttpException(
-                            HttpStatusCode.BadRequest,
-                            "Cannot create DM or Group DM channels in spaces",
-                            [
-                                {
-                                    path: "type",
-                                    message:
-                                        "Cannot create DM or Group DM channels in spaces",
-                                },
-                            ],
-                        );
-
-                    if (parentId)
-                        throw new HttpException(
-                            HttpStatusCode.BadRequest,
-                            "DM or Group DM channels cannot have parent id",
-                        );
-                    break;
-                }
                 default:
                     throw new HttpException(
                         HttpStatusCode.BadRequest,
@@ -134,52 +108,6 @@ export default class ChannelsController {
                     );
             }
 
-            if (!spaceId) {
-                const channel = await execNormalized<APIChannel>(
-                    db
-                        .insert(channelsTable)
-                        .values({
-                            id: BigInt(Snowflake.generate()),
-                            type,
-                            name,
-                            ownerId: ownerId ? BigInt(ownerId) : undefined,
-                            parentId: null,
-                            recipientIds: recipientIds
-                                ? recipientIds.map((id) => BigInt(id))
-                                : undefined,
-                            flags: 0n,
-                        })
-                        .returning()
-                        .then((res) => res[0]),
-                ).then(async (channel) => {
-                    if (!channel) return null;
-                    return channel.parentId
-                        ? {
-                              ...channel,
-                              parent: await getChannel(channel.parentId),
-                          }
-                        : channel;
-                });
-
-                if (!channel)
-                    throw new HttpException(
-                        HttpStatusCode.InternalServerError,
-                        "Failed to create channel",
-                    );
-
-                // TODO: Implement proper events for DM and Group DM channels
-                // await emitEvent({
-                //     event: "ChannelCreate",
-                //     user_id: channel.id,
-                //     data: channel,
-                // });
-
-                res.status(HttpStatusCode.Created).json(channel);
-
-                void setCache("channel", channel.id, channel);
-                return;
-            }
-
             const space = await getSpaceHydrated(spaceId);
             if (!space)
                 throw new HttpException(
@@ -187,19 +115,18 @@ export default class ChannelsController {
                     "Space not found",
                 );
 
-            if (parentId) {
+            if (parentId)
                 await requireChannelPermissions({
                     userId: user.id,
                     channelId: parentId,
                     needed: ["ManageChannels"],
                 });
-            } else {
+            else
                 await requireSpacePermissions({
                     spaceId,
                     userId: user.id,
                     needed: ["ManageChannels"],
                 });
-            }
 
             const iconFile = imageFileValidator.optional().parse(req.file);
 
@@ -377,7 +304,7 @@ export default class ChannelsController {
             if (channel.type === ChannelType.DM)
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
-                    "You cannot update DM channels",
+                    "You cannot update DMChannel channels",
                 );
 
             if (channel.spaceId) {
@@ -719,6 +646,187 @@ export default class ChannelsController {
                     // ignore since it might be already deleted
                 }
             }
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async createDM(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { recipientId } = validateDmChannelCreateBody.parse(req.body);
+
+            if (recipientId === user.id)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "You cannot DMChannel yourself",
+                );
+
+            // Check if a DMChannel channel already exists between these two users
+            const existing = await db
+                .select({ channelId: channelRecipientsTable.channelId })
+                .from(channelRecipientsTable)
+                .where(
+                    and(
+                        eq(channelRecipientsTable.userId, BigInt(user.id)),
+                        sql`exists (
+                        select 1 from ${channelRecipientsTable} cr2
+                        where cr2."channelId" = ${channelRecipientsTable.channelId}
+                        and cr2."userId" = ${BigInt(recipientId)}
+                        )`,
+                    ),
+                )
+                .then((r) => r[0]);
+
+            if (existing) {
+                // Reopen it for the current user if closed
+                await db
+                    .update(channelRecipientsTable)
+                    .set({ closed: false })
+                    .where(
+                        and(
+                            eq(
+                                channelRecipientsTable.channelId,
+                                existing.channelId,
+                            ),
+                            eq(channelRecipientsTable.userId, BigInt(user.id)),
+                        ),
+                    );
+
+                const channel = await getChannel(existing.channelId.toString());
+                if (!channel)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to retrieve DMChannel channel",
+                    );
+
+                return res.status(HttpStatusCode.Success).json(channel);
+            }
+
+            // Create new DMChannel channel + recipient rows
+            const channelId = BigInt(Snowflake.generate());
+
+            const channel = await db.transaction(async (tx) => {
+                const [created] = await tx
+                    .insert(channelsTable)
+                    .values({
+                        id: channelId,
+                        type: ChannelType.DM,
+                        flags: 0n,
+                        position: 0,
+                    })
+                    .returning();
+
+                await tx.insert(channelRecipientsTable).values([
+                    { channelId, userId: BigInt(user.id) },
+                    { channelId, userId: BigInt(recipientId) },
+                ]);
+
+                return created;
+            });
+
+            const hydrated = await getChannel(channel.id.toString());
+            if (!hydrated)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to create DMChannel channel",
+                );
+
+            res.status(HttpStatusCode.Created).json(hydrated);
+
+            fireAndForgetAll([
+                {
+                    label: "event:ChannelCreate:sender",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelCreate",
+                            user_id: user.id,
+                            data: hydrated,
+                        }),
+                },
+                {
+                    label: "cache:set:channel",
+                    run: () => setCache("channel", hydrated.id, hydrated),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async closeDM(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { channelId } = validateChannelParamsDelete.parse(req.params);
+
+            const channel = await getChannel(channelId);
+            if (!channel)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Channel not found",
+                );
+
+            if (
+                channel.type !== ChannelType.DM &&
+                channel.type !== ChannelType.GroupDM
+            )
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Channel is not a DM channel",
+                );
+
+            const recipient = await db.query.channelRecipientsTable.findFirst({
+                where: and(
+                    eq(channelRecipientsTable.channelId, BigInt(channelId)),
+                    eq(channelRecipientsTable.userId, BigInt(user.id)),
+                ),
+            });
+
+            if (!recipient)
+                throw new HttpException(
+                    HttpStatusCode.Forbidden,
+                    "You are not a recipient of this channel",
+                );
+
+            await db
+                .update(channelRecipientsTable)
+                .set({ closed: true })
+                .where(
+                    and(
+                        eq(channelRecipientsTable.channelId, BigInt(channelId)),
+                        eq(channelRecipientsTable.userId, BigInt(user.id)),
+                    ),
+                );
+
+            res.status(HttpStatusCode.Success).json({ id: channelId });
+
+            fireAndForgetAll([
+                {
+                    label: "event:ChannelDelete",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelDelete",
+                            user_id: user.id,
+                            data: { id: channelId },
+                        }),
+                },
+                {
+                    label: "cache:delete:channel",
+                    run: () => deleteCache("channel", channelId),
+                },
+            ]);
         } catch (err) {
             next(err);
         }

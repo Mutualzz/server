@@ -29,7 +29,7 @@ export async function onVoiceStateUpdate(
         return;
     }
 
-    // join DM or space voice
+    // join DMChannel or space voice
     await VoiceStateService.handleVoiceStateUpdate(this, {
         spaceId,
         channelId,

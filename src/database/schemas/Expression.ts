@@ -1,6 +1,7 @@
 import { bigint, boolean, index, pgTable, smallint, text, timestamp, } from "drizzle-orm/pg-core";
-import { spacesTable, usersTable } from "@mutualzz/database";
 import { relations, sql } from "drizzle-orm";
+import { usersTable } from "./users/User";
+import { spacesTable } from "./spaces/Space";
 
 // Expression Type
 // 0 - Preview
@@ -11,7 +12,7 @@ import { relations, sql } from "drizzle-orm";
 
 // If spaceId set the expression belongs to a space
 // Otherwise is it belongs to a user
-// AuthorId is when set
+// AuthorId is always set to the user who created the expression, even if it's in a space. This is for permissions and audit purposes.
 export const expressionsTable = pgTable(
     "expressions",
     {

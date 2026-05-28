@@ -1,4 +1,4 @@
-import { relations, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
     bigint,
     boolean,
@@ -9,10 +9,8 @@ import {
     timestamp,
     uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { messagesTable } from "./Message";
-import { spacesTable } from "./spaces";
-import { usersTable } from "./users";
-import { channelPermissionOverwritesTable } from "./ChannelPermissionOverwrite";
+import { spacesTable } from "../spaces";
+import { usersTable } from "../users";
 
 export const channelsTable = pgTable(
     "channels",
@@ -26,7 +24,7 @@ export const channelsTable = pgTable(
 
         name: text(),
 
-        // This will be assigned if the channel is a Group DM
+        // This will be assigned if the channel is a Group DMChannel
         ownerId: bigint({ mode: "bigint" }).references(() => usersTable.id, {
             onDelete: "set null",
         }),
@@ -41,17 +39,7 @@ export const channelsTable = pgTable(
 
         icon: text(),
 
-        // For direct messages, this will contain the list of user IDs
-        recipientIds: bigint({ mode: "bigint" }).array(),
-
         nsfw: boolean().notNull().default(false),
-
-        lastMessageId: bigint({ mode: "bigint" }).references(
-            (): any => messagesTable.id,
-            {
-                onDelete: "set null",
-            },
-        ),
 
         flags: bigint({ mode: "bigint" })
             .notNull()
@@ -78,36 +66,4 @@ export const channelsTable = pgTable(
         index("channel_created_at_idx").on(table.createdAt),
         index("channel_type_idx").on(table.type),
     ],
-);
-
-export const channelRelations = relations(channelsTable, ({ one, many }) => ({
-    space: one(spacesTable, {
-        fields: [channelsTable.spaceId],
-        references: [spacesTable.id],
-    }),
-    owner: one(usersTable, {
-        fields: [channelsTable.ownerId],
-        references: [usersTable.id],
-    }),
-    parent: one(channelsTable, {
-        fields: [channelsTable.parentId],
-        references: [channelsTable.id],
-    }),
-    recipients: many(usersTable),
-    messages: many(messagesTable),
-    lastMessage: one(messagesTable, {
-        fields: [channelsTable.lastMessageId],
-        references: [messagesTable.id],
-    }),
-    overwrites: many(channelPermissionOverwritesTable),
-}));
-
-export const channelOverwriteRelations = relations(
-    channelPermissionOverwritesTable,
-    ({ one }) => ({
-        channel: one(channelsTable, {
-            fields: [channelPermissionOverwritesTable.channelId],
-            references: [channelsTable.id],
-        }),
-    }),
 );

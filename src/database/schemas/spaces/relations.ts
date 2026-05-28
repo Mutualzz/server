@@ -1,10 +1,11 @@
 import { relations } from "drizzle-orm";
-import { channelsTable } from "../Channel";
+import { channelsTable } from "../channel/Channel.ts";
 import { usersTable } from "../users";
 import { rolesTable } from "./Role";
 import { spacesTable } from "./Space";
 import { spaceMembersTable } from "./SpaceMember";
 import { spaceMemberRolesTable } from "./SpaceMemberRoles";
+import { spaceBansTable } from "@mutualzz/database/schemas";
 
 export const spaceRelations = relations(spacesTable, ({ one, many }) => ({
     owner: one(usersTable, {
@@ -54,4 +55,21 @@ export const roleRelations = relations(rolesTable, ({ one, many }) => ({
         references: [spacesTable.id],
     }),
     memberRoles: many(spaceMemberRolesTable),
+}));
+
+export const spaceBanRelations = relations(spaceBansTable, ({ one }) => ({
+    user: one(usersTable, {
+        fields: [spaceBansTable.userId],
+        references: [usersTable.id],
+        relationName: "bannedUser",
+    }),
+    bannedBy: one(usersTable, {
+        fields: [spaceBansTable.bannedById],
+        references: [usersTable.id],
+        relationName: "bannedBy",
+    }),
+    space: one(spacesTable, {
+        fields: [spaceBansTable.spaceId],
+        references: [spacesTable.id],
+    }),
 }));
