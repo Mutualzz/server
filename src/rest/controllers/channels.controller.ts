@@ -421,6 +421,13 @@ export default class ChannelsController {
                 async (tx) => {
                     const updated: APIChannel[] = [];
 
+                    const resolved: {
+                        chBody: (typeof channels)[number];
+                        channel: NonNullable<
+                            Awaited<ReturnType<typeof getChannel>>
+                        >;
+                    }[] = [];
+
                     for (const chBody of channels) {
                         const channel = await getChannel(chBody.id);
                         if (!channel)
@@ -435,6 +442,36 @@ export default class ChannelsController {
                                 `Channel ${chBody.id} does not belong to space ${spaceId}`,
                             );
 
+                        resolved.push({ chBody, channel });
+                    }
+
+                    for (let i = 0; i < resolved.length; i++) {
+                        const entry = resolved[i];
+                        if (!entry)
+                            throw new HttpException(
+                                HttpStatusCode.InternalServerError,
+                                `Missing resolved channel at index ${i}`,
+                            );
+
+                        const staged = await tx
+                            .update(channelsTable)
+                            .set({
+                                position: -32768 + i,
+                            })
+                            .where(
+                                eq(channelsTable.id, BigInt(entry.channel.id)),
+                            )
+                            .returning()
+                            .then((res) => res[0]);
+
+                        if (!staged)
+                            throw new HttpException(
+                                HttpStatusCode.InternalServerError,
+                                `Failed to stage channel with ID ${entry.channel.id}`,
+                            );
+                    }
+
+                    for (const { chBody, channel } of resolved) {
                         const nextParentId: bigint | null | undefined =
                             chBody.parentId === undefined
                                 ? undefined

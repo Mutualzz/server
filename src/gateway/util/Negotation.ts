@@ -26,6 +26,6 @@ export function parseNegotiationParams(url: string): {
     return {
         encoding: ALLOWED_ENCODINGS.has(enc) ? enc : "json",
         // default to zlib-stream if not chosen
-        compress: ALLOWED_COMPRESSIONS.has(cmp) ? cmp : "zlib-stream",
+        compress: ALLOWED_COMPRESSIONS.has(cmp) ? cmp : "none",
     };
 }
