@@ -23,7 +23,6 @@ router.delete(
     createLimiter(10_000, 50),
     ChannelsController.closeDM,
 );
-
 router.patch("/bulk", createLimiter(60_000, 10), ChannelsController.updateBulk);
 router.get("/:channelId", createLimiter(60_000, 60), ChannelsController.getOne);
 router.patch(
@@ -66,5 +65,12 @@ router.post(
     MessagesController.ack,
 );
 router.post("/ack-bulk", createLimiter(20_000, 10), MessagesController.ackBulk);
+
+// Typing
+router.post(
+    "/:channelId/typing",
+    createLimiter(10_000, 5),
+    ChannelsController.typing,
+);
 
 export default router;

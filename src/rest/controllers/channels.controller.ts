@@ -1014,4 +1014,47 @@ export default class ChannelsController {
             next(err);
         }
     }
+
+    static async typing(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { channelId } = z
+                .object({
+                    channelId: z.string("Invalid Channel ID"),
+                })
+                .parse(req.params);
+
+            const channel = await getChannel(channelId);
+            if (!channel)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Channel not found",
+                );
+
+            res.sendStatus(HttpStatusCode.NoContent);
+
+            fireAndForgetAll([
+                {
+                    label: "event:TypingStart",
+                    run: () =>
+                        emitEvent({
+                            event: "TypingStart",
+                            channel_id: channelId,
+                            data: {
+                                channelId,
+                                userId: user.id,
+                            },
+                        }),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
 }
