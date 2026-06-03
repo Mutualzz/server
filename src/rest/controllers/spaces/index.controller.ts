@@ -153,7 +153,7 @@ export default class SpacesController {
                             name: "@everyone",
                             spaceId: BigInt(newSpace.id),
                             flags: roleFlags.Everyone,
-                            permissions:
+                            allow:
                                 permissionFlags.ViewChannel |
                                 permissionFlags.SendMessages |
                                 permissionFlags.CreateInvites |

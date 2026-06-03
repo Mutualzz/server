@@ -25,7 +25,8 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
 
     const memberCount = await getMemberCount(spaceId);
 
-    const everyonePerms = await getEveryonePermissions(spaceId);
+    const { allow: everyoneAllow, deny: everyoneDeny } =
+        await getEveryonePermissions(spaceId);
     const channelOverwrites = await getChannelOverwrites(spaceId, channelId);
     const parentOverwrites = await getParentOverwrites(spaceId, channelId);
 
@@ -50,7 +51,8 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
                 x,
                 channelOverwrites,
                 parentOverwrites,
-                everyonePerms,
+                everyoneAllow,
+                everyoneDeny,
             ),
         ),
     );

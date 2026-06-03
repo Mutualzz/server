@@ -16,23 +16,32 @@ import {
 interface ResolveSpacePermissionsOptions {
     spaceOwnerId: Snowflake;
     userId: Snowflake;
-    everyonePerms: bigint;
-    rolePerms: bigint[];
+    everyoneAllow: bigint;
+    everyoneDeny: bigint;
+    roleAllows: bigint[];
+    roleDenies: bigint[];
 }
 
 export const resolveSpacePermissions = ({
     userId,
     spaceOwnerId,
-    everyonePerms,
-    rolePerms,
+    everyoneAllow,
+    everyoneDeny,
+    roleAllows,
+    roleDenies,
 }: ResolveSpacePermissionsOptions) => {
     if (userId === spaceOwnerId)
         return BitField.fromBits(permissionFlags, ALL_BITS);
 
     let bits = 0n;
-    // For some reason we need to cast bigint here?
-    bits |= BigInt(everyonePerms);
-    for (const perm of rolePerms) bits |= BigInt(perm);
+
+    // Collect all allows first
+    bits |= BigInt(everyoneAllow);
+    for (const allow of roleAllows) bits |= BigInt(allow);
+
+    // Then apply all denies
+    bits &= ~BigInt(everyoneDeny);
+    for (const deny of roleDenies) bits &= ~BigInt(deny);
 
     return BitField.fromBits(permissionFlags, bits);
 };
@@ -69,8 +78,10 @@ export const requireSpacePermissions = async ({
     const permissions = resolveSpacePermissions({
         spaceOwnerId: space.ownerId,
         userId,
-        everyonePerms: everyoneRole?.permissions ?? 0n,
-        rolePerms: memberRoles.map((r) => r.permissions),
+        everyoneAllow: everyoneRole?.allow ?? 0n,
+        everyoneDeny: everyoneRole?.deny ?? 0n,
+        roleAllows: memberRoles.map((r) => r.allow),
+        roleDenies: memberRoles.map((r) => r.deny ?? 0n),
     });
 
     if (permissions.has("Administrator")) return { space, permissions };

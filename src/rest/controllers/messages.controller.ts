@@ -9,6 +9,7 @@ import {
     db,
     messagesTable,
     relationshipsTable,
+    spaceMembersTable,
 } from "@mutualzz/database";
 import {
     type APIMessage,
@@ -16,7 +17,9 @@ import {
     ChannelType,
     HttpException,
     HttpStatusCode,
+    type MentionType,
     MessageType,
+    ReadStateType,
     RelationshipType,
 } from "@mutualzz/types";
 import {
@@ -26,9 +29,11 @@ import {
     execNormalizedMany,
     fireAndForgetAll,
     getChannel,
+    getChannels,
     getMember,
     getSpace,
     getUser,
+    incrementMentionCounts,
     isChannelRecipient,
     requireChannelPermissions,
     sanitizeContent,
@@ -36,11 +41,12 @@ import {
 } from "@mutualzz/util";
 import {
     validateChannelParamsGet,
+    validateMessageAckParams,
     validateMessageBodyPut,
     validateMessageParamsModify,
     validateMessageParamsPut,
 } from "@mutualzz/validators";
-import { and, asc, desc, eq, gte, lt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import {
     type BitField,
@@ -48,6 +54,10 @@ import {
     type PermissionFlags,
 } from "@mutualzz/bitfield";
 import { createSystemMessage } from "@mutualzz/util/systemUser.ts";
+import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
+import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
+import { offlineLike } from "@mutualzz/gateway/util/Calculations.ts";
+import { z } from "zod";
 
 export default class MessagesController {
     static async create(req: Request, res: Response, next: NextFunction) {
@@ -268,8 +278,47 @@ export default class MessagesController {
                     "Failed to create message",
                 );
 
+            const userMentionMatches = (
+                sanitizedContent?.match(/<@(\d+)>/g) ?? []
+            )
+                .map((m) => m.replace(/<@|>/g, ""))
+                .filter((id) => id !== user.id)
+                .map((id) => ({
+                    type: "user" as MentionType,
+                    id: id,
+                }));
+
+            const roleMentionMatches = (
+                sanitizedContent?.match(/<@&(\d+)>/g) ?? []
+            )
+                .map((m) => m.replace(/<@&|>/g, ""))
+                .filter((id) => id !== user.id)
+                .map((id) => ({
+                    type: "role" as MentionType,
+                    id: id,
+                }));
+
+            const everyoneMentions = sanitizedContent?.includes("@everyone")
+                ? [{ type: "everyone" as MentionType, id: "0" }]
+                : [];
+            const hereMentions = sanitizedContent?.includes("@here")
+                ? [{ type: "here" as MentionType, id: "0" }]
+                : [];
+
+            const uniqueMentions = [
+                ...new Map(
+                    [
+                        ...userMentionMatches,
+                        ...roleMentionMatches,
+                        ...everyoneMentions,
+                        ...hereMentions,
+                    ].map((m) => [`${m.type}:${m.id.toString()}`, m]),
+                ).values(),
+            ];
+
             const message = {
                 ...newMessage,
+                mentions: uniqueMentions,
                 channel: channel,
                 author: user,
                 space: channel.spaceId ? await getSpace(channel.spaceId) : null,
@@ -288,11 +337,112 @@ export default class MessagesController {
                         }),
                 },
                 {
+                    label: "readState:mentions",
+                    run: async () => {
+                        if (uniqueMentions.length > 0) {
+                            await db
+                                .update(messagesTable)
+                                .set({ mentions: uniqueMentions })
+                                .where(
+                                    eq(messagesTable.id, BigInt(newMessage.id)),
+                                );
+
+                            const userMentionIds = userMentionMatches.map((m) =>
+                                m.id.toString(),
+                            );
+                            const roleMentionIds = roleMentionMatches.map((m) =>
+                                m.id.toString(),
+                            );
+
+                            const membersToNotify = [...userMentionIds];
+
+                            if (
+                                everyoneMentions.length > 0 &&
+                                channel.spaceId
+                            ) {
+                                const allMembers = await db
+                                    .select({
+                                        userId: spaceMembersTable.userId,
+                                    })
+                                    .from(spaceMembersTable)
+                                    .where(
+                                        eq(
+                                            spaceMembersTable.spaceId,
+                                            BigInt(channel.spaceId),
+                                        ),
+                                    );
+                                membersToNotify.push(
+                                    ...allMembers
+                                        .map((m) => m.userId.toString())
+                                        .filter((id) => id !== user.id),
+                                );
+                            }
+
+                            if (hereMentions.length > 0 && channel.spaceId) {
+                                const allMembers = await db
+                                    .select({
+                                        userId: spaceMembersTable.userId,
+                                    })
+                                    .from(spaceMembersTable)
+                                    .where(
+                                        eq(
+                                            spaceMembersTable.spaceId,
+                                            BigInt(channel.spaceId),
+                                        ),
+                                    );
+
+                                const memberIds = allMembers
+                                    .map((m) => m.userId.toString())
+                                    .filter((id) => id !== user.id);
+
+                                const presences = await Promise.all(
+                                    memberIds.map((id) =>
+                                        PresenceService.get(id),
+                                    ),
+                                );
+
+                                const onlineMemberIds = memberIds.filter(
+                                    (_, idx) => {
+                                        const p = presences[idx];
+                                        return !offlineLike(p ?? null);
+                                    },
+                                );
+
+                                membersToNotify.push(...onlineMemberIds);
+                            }
+
+                            const uniqueMembers = Array.from(
+                                new Set(membersToNotify),
+                            );
+
+                            console.log({
+                                userMentionIds,
+                                roleMentionIds,
+                                membersToNotify,
+                                uniqueMembers,
+                                willCall:
+                                    uniqueMembers.length > 0 ||
+                                    roleMentionIds.length > 0,
+                            });
+
+                            if (
+                                uniqueMembers.length > 0 ||
+                                roleMentionIds.length > 0
+                            ) {
+                                await incrementMentionCounts(
+                                    channel.id,
+                                    uniqueMembers,
+                                    roleMentionIds,
+                                );
+                            }
+                        }
+                    },
+                },
+                {
                     label: "event:ChannelUpdate",
                     run: () => {
                         const updatedChannel = {
                             ...channel,
-
                             lastMessage: message,
                         };
 
@@ -810,6 +960,212 @@ export default class MessagesController {
                 {
                     label: "cache:invalidate:messages",
                     run: () => invalidateCache("messages", channel.id),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async ack(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { channelId, messageId } = validateMessageAckParams.parse(
+                req.params,
+            );
+
+            const channel = await getChannel(channelId);
+            if (!channel)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Channel not found",
+                );
+
+            if (channel.spaceId) {
+                if (!(await getMember(channel.spaceId, user.id, true)))
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "You are not a member of this space",
+                    );
+            } else {
+                if (!(await isChannelRecipient(channel.id, user.id)))
+                    throw new HttpException(
+                        HttpStatusCode.Forbidden,
+                        "You are not part of this channel",
+                    );
+            }
+
+            await db
+                .insert(readStatesTable)
+                .values({
+                    userId: BigInt(user.id),
+                    channelId: BigInt(channelId),
+                    type: ReadStateType.Messages,
+                    lastMessageId: BigInt(messageId),
+                    notificationsCursor: BigInt(messageId),
+                    lastAckedId: BigInt(messageId),
+                    mentionCount: 0,
+                    updatedAt: new Date(),
+                })
+                .onConflictDoUpdate({
+                    target: [
+                        readStatesTable.userId,
+                        readStatesTable.channelId,
+                        readStatesTable.type,
+                    ],
+                    set: {
+                        lastMessageId: BigInt(messageId),
+
+                        notificationsCursor: sql`GREATEST(read_states."notificationsCursor", EXCLUDED."notificationsCursor")`,
+                        lastAckedId: sql`GREATEST(read_states."lastAckedId", EXCLUDED."lastAckedId")`,
+
+                        mentionCount: 0,
+                        updatedAt: new Date(),
+                    },
+                });
+
+            res.sendStatus(HttpStatusCode.NoContent);
+
+            fireAndForgetAll([
+                {
+                    label: "event:MessageAck",
+                    run: () =>
+                        emitEvent({
+                            event: "MessageAck",
+                            user_id: user.id,
+                            data: {
+                                channelId,
+                                lastMessageId: messageId,
+                                notificationCursor: messageId,
+                                lastAckedId: messageId,
+                                type: ReadStateType.Messages,
+                            },
+                        }),
+                },
+            ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async ackBulk(req: Request, res: Response, next: NextFunction) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { readStates } = z
+                .object({
+                    readStates: z
+                        .object({
+                            channelId: z.string("Invalid Channel ID"),
+                            lastMessageId: z.string("Invalid Last Message ID"),
+                            type: z
+                                .number("Invalid Read State Type")
+                                .refine(
+                                    (v) => v === ReadStateType.Messages,
+                                    "Only Messages type is supported",
+                                ),
+                        })
+                        .array(),
+                })
+                .parse(req.body);
+
+            // Batch fetch all channels at once
+            const channels = await getChannels(
+                readStates.map((s) => s.channelId),
+            );
+
+            // Filter out channels user doesn't have access to
+            const validStates = (
+                await Promise.all(
+                    readStates.map(async (state) => {
+                        const channel = channels.get(state.channelId);
+                        if (!channel) return null;
+
+                        if (channel.spaceId) {
+                            if (
+                                !(await getMember(
+                                    channel.spaceId,
+                                    user.id,
+                                    true,
+                                ))
+                            )
+                                return null;
+                        } else {
+                            if (
+                                !(await isChannelRecipient(channel.id, user.id))
+                            )
+                                return null;
+                        }
+
+                        return state;
+                    }),
+                )
+            ).filter((state) => !!state);
+
+            if (!validStates.length) {
+                res.sendStatus(HttpStatusCode.NoContent);
+                return;
+            }
+
+            await db
+                .insert(readStatesTable)
+                .values(
+                    validStates.map((state) => ({
+                        userId: BigInt(user.id),
+                        channelId: BigInt(state.channelId),
+                        type: state.type,
+                        lastMessageId: BigInt(state.lastMessageId),
+                        notificationsCursor: BigInt(state.lastMessageId),
+                        lastAckedId: BigInt(state.lastMessageId),
+                        mentionCount: 0,
+                        updatedAt: new Date(),
+                    })),
+                )
+                .onConflictDoUpdate({
+                    target: [
+                        readStatesTable.userId,
+                        readStatesTable.channelId,
+                        readStatesTable.type,
+                    ],
+                    set: {
+                        lastMessageId: sql`EXCLUDED."lastMessageId"`,
+                        notificationsCursor: sql`GREATEST(read_states."notificationsCursor", EXCLUDED."notificationsCursor")`,
+                        lastAckedId: sql`GREATEST(read_states."lastAckedId", EXCLUDED."lastAckedId")`,
+                        mentionCount: 0,
+                        updatedAt: new Date(),
+                    },
+                });
+
+            const results = validStates.map((state) => ({
+                channelId: state.channelId,
+                lastMessageId: state.lastMessageId,
+                notificationCursor: state.lastMessageId,
+                lastAckedId: state.lastMessageId,
+                type: ReadStateType.Messages,
+            }));
+
+            res.sendStatus(HttpStatusCode.NoContent);
+
+            fireAndForgetAll([
+                {
+                    label: "event:MessageAckBulk",
+                    run: () =>
+                        emitEvent({
+                            event: "MessageAckBulk",
+                            user_id: user.id,
+                            data: results,
+                        }),
                 },
             ]);
         } catch (err) {

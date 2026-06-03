@@ -22,7 +22,10 @@ export const rolesTable = pgTable(
             }),
 
         hoist: boolean().notNull().default(false),
-        permissions: bigint("permissions", { mode: "bigint" })
+        allow: bigint("allow", { mode: "bigint" })
+            .notNull()
+            .default(sql`0`),
+        deny: bigint("deny", { mode: "bigint" })
             .notNull()
             .default(sql`0`),
         position: smallint().notNull().default(0),

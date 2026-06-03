@@ -29,10 +29,13 @@ export function computeBaseBitsFromSpace(
 
     const roles = (space.roles ?? []).map((r) => ({
         id: r.id.toString(),
-        permissions: r.permissions,
+        allow: r.allow,
+        deny: r.deny,
     }));
 
+    // resolveBaseBits in engine.ts now handles allow/deny internally
     const baseBits = resolveBaseBits(space.id.toString(), roles, memberRoleIds);
+
     return { baseBits, memberRoleIds };
 }
 

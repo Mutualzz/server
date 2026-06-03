@@ -44,18 +44,27 @@ export async function getEffectiveChannelBits(opts: {
 
     if (BigInt(space.ownerId) === BigInt(userId)) return ALL_BITS;
 
-    const [member, everyonePerms, channelOverwrites, parentOverwrites] =
-        await Promise.all([
-            getMemberWithRoles(spaceId, userId),
-            getEveryonePermissions(spaceId),
-            getChannelOverwrites(spaceId, channelId),
-            getParentOverwrites(spaceId, channelId),
-        ]);
+    const [
+        member,
+        { allow: everyoneAllow, deny: everyoneDeny },
+        channelOverwrites,
+        parentOverwrites,
+    ] = await Promise.all([
+        getMemberWithRoles(spaceId, userId),
+        getEveryonePermissions(spaceId),
+        getChannelOverwrites(spaceId, channelId),
+        getParentOverwrites(spaceId, channelId),
+    ]);
 
     if (!member) return 0n;
 
     const memberRoleIds = computeMemberRoleIds(member, spaceId);
-    const baseBits = computeMemberBaseBits(member, everyonePerms, spaceId);
+    const baseBits = computeMemberBaseBits(
+        member,
+        everyoneAllow,
+        everyoneDeny,
+        spaceId,
+    );
 
     if (hasAny(baseBits, permissionFlags.Administrator)) return ALL_BITS;
 

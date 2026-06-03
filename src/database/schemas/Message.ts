@@ -1,5 +1,5 @@
 import { usersTable } from "./users/User";
-import type { APIMessageEmbed } from "@mutualzz/types";
+import type { APIMessageEmbed, APIMessageMention } from "@mutualzz/types";
 import { relations, sql } from "drizzle-orm";
 import {
     bigint,
@@ -53,6 +53,8 @@ export const messagesTable = pgTable(
             .defaultNow()
             .notNull()
             .$onUpdate(() => new Date()),
+
+        mentions: jsonb().$type<APIMessageMention[]>().notNull().default([]),
     },
     (table) => [
         index("message_channel_id_idx").on(table.channelId),

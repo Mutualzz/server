@@ -365,13 +365,18 @@ export default class ExpressionsController {
                     "Expression not found",
                 );
 
-            if (expression.spaceId)
-                await requireSpacePermissions({
-                    spaceId: expression.spaceId,
-                    userId: user.id,
-                    needed: ["ManageExpressions"],
-                });
-            else if (BigInt(expression.authorId) !== BigInt(user.id))
+            // TODO: Left here, we made it so the owner can delete the expression but maybe we should make it so only
+            // space managers can delete expressions in their space? Idk
+            // We should test this tho
+
+            if (expression.spaceId) {
+                if (BigInt(expression.authorId) !== BigInt(user.id))
+                    await requireSpacePermissions({
+                        spaceId: expression.spaceId,
+                        userId: user.id,
+                        needed: ["ManageExpressions"],
+                    });
+            } else if (BigInt(expression.authorId) !== BigInt(user.id))
                 throw new HttpException(
                     HttpStatusCode.Forbidden,
                     "You cannot delete this expression",

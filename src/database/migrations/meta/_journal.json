@@ -162,6 +162,34 @@
       "when": 1779925539662,
       "tag": "0022_opposite_zeigeist",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780191697910,
+      "tag": "0023_careless_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1780292541724,
+      "tag": "0024_ancient_bishop",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780293758061,
+      "tag": "0025_glorious_flatman",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1780305609090,
+      "tag": "0026_jazzy_sharon_carter",
+      "breakpoints": true
     }
   ]
 }

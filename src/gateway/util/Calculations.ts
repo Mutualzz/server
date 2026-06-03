@@ -22,17 +22,18 @@ import {
 import type {
     APIMemberRole,
     APISpaceMember,
+    APIUser,
     PresencePayload,
     Snowflake,
 } from "@mutualzz/types";
 import { PresenceService } from "../presence/Presence.service.ts";
 
-type OverwriteLike = {
+interface OverwriteLike {
     roleId?: string | null;
     userId?: string | null;
     allow: bigint;
     deny: bigint;
-};
+}
 
 export function normalizeRange(range: MemberListRange): {
     start: number;
@@ -50,14 +51,21 @@ export function normalizeRange(range: MemberListRange): {
 }
 
 export async function getEveryonePermissions(spaceId: Snowflake) {
-    const perms = await db
-        .select({ permissions: rolesTable.permissions })
+    const row = await db
+        .select({
+            allow: rolesTable.allow,
+            deny: rolesTable.deny,
+        })
         .from(rolesTable)
         .where(eq(rolesTable.id, BigInt(spaceId)))
         .limit(1)
         .then((res) => res[0]);
 
-    return perms != null ? perms.permissions : 0n;
+    if (row == null) return { allow: 0n, deny: 0n };
+    return {
+        allow: row.allow ?? 0n,
+        deny: row.deny ?? 0n,
+    };
 }
 
 export async function getChannelOverwrites(
@@ -155,19 +163,30 @@ export function computeListIdFromOverwrites(opts: {
 
 export function computeMemberBaseBits(
     member: APISpaceMember,
-    everyonePerms: bigint,
+    everyoneAllow: bigint,
+    everyoneDeny: bigint,
     spaceId: Snowflake,
 ): bigint {
+    // Start with @everyone allow
     let bits = 0n;
-    bits |= everyonePerms;
+    bits |= everyoneAllow;
 
+    // Add all role allows
     const roles = member.roles ?? [];
     for (const mr of roles) {
         const { roleId } = mr;
         if (!roleId || roleId === spaceId) continue;
+        bits |= BigInt(mr.role?.allow ?? 0n);
+    }
 
-        const perms = BigInt(mr.role?.permissions ?? 0n);
-        bits |= perms;
+    // Apply @everyone deny
+    bits &= ~everyoneDeny;
+
+    // Apply role denies
+    for (const mr of roles) {
+        const { roleId } = mr;
+        if (!roleId || roleId === spaceId) continue;
+        bits &= ~BigInt(mr.role?.deny ?? 0n);
     }
 
     return bits;
@@ -186,18 +205,25 @@ export function canViewChannel(opts: {
     spaceId: Snowflake;
     channelOverwrites: OverwriteLike[];
     parentOverwrites: OverwriteLike[] | null;
-    everyonePerms: bigint;
+    everyoneAllow: bigint;
+    everyoneDeny: bigint;
 }): boolean {
     const {
         member,
         spaceId,
         channelOverwrites,
         parentOverwrites,
-        everyonePerms,
+        everyoneAllow,
+        everyoneDeny,
     } = opts;
 
     const memberRoleIds = computeMemberRoleIds(member, spaceId);
-    const baseBits = computeMemberBaseBits(member, everyonePerms, spaceId);
+    const baseBits = computeMemberBaseBits(
+        member,
+        everyoneAllow,
+        everyoneDeny,
+        spaceId,
+    );
 
     const bits = resolveEffectiveChannelBits({
         baseBits,
@@ -216,7 +242,7 @@ export function offlineLike(presence: PresencePayload | null): boolean {
     return status === "offline" || status === "invisible";
 }
 
-export async function attachPresence(member: APISpaceMember): Promise<
+export async function attachPresenceMember(member: APISpaceMember): Promise<
     APISpaceMember & {
         presence?: PresencePayload;
     }
@@ -236,12 +262,29 @@ export async function attachPresence(member: APISpaceMember): Promise<
     };
 }
 
+export async function attachPresenceUser(user: APIUser): Promise<APIUser> {
+    const presence = await PresenceService.get(user.id);
+
+    return {
+        ...user,
+        presence:
+            presence ??
+            ({
+                status: "offline",
+                activities: [],
+                device: "web",
+                updatedAt: 0,
+            } satisfies PresencePayload),
+    };
+}
+
 export async function getMembers(
     spaceId: Snowflake,
     range: MemberListRange,
     channelOverwrites: OverwriteLike[],
     parentOverwrites: OverwriteLike[] | null,
-    everyonePerms: bigint,
+    everyoneAllow: bigint,
+    everyoneDeny: bigint,
 ) {
     const { start, end, limit } = normalizeRange(range);
 
@@ -284,7 +327,8 @@ export async function getMembers(
             spaceId,
             channelOverwrites,
             parentOverwrites,
-            everyonePerms,
+            everyoneAllow,
+            everyoneDeny,
         }),
     );
 
@@ -300,7 +344,9 @@ export async function getMembers(
     const groups: any[] = [];
     const items: any[] = [];
 
-    const membersWithPresence = await Promise.all(members.map(attachPresence));
+    const membersWithPresence = await Promise.all(
+        members.map(attachPresenceMember),
+    );
 
     let onlineMembers = membersWithPresence.filter(
         (m) => !offlineLike(m.presence ?? null),
@@ -446,9 +492,7 @@ export async function getMemberCount(spaceId: Snowflake): Promise<number> {
         .catch(() => 0);
 }
 
-export function computeVisibleUserIds(
-    ops: Array<{ members: any[] }>,
-): Set<string> {
+export function computeVisibleUserIds(ops: { members: any[] }[]): Set<string> {
     const out = new Set<string>();
     for (const op of ops) {
         for (const m of op.members ?? []) {
@@ -501,7 +545,8 @@ export async function resyncMemberListWindows(
                     range,
                     channelOverwrites,
                     parentOverwrites,
-                    everyonePerms,
+                    everyonePerms.allow,
+                    everyonePerms.deny,
                 ),
             ),
         );

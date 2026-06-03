@@ -17,7 +17,7 @@ export class PresenceStore {
         const now = Date.now();
         const newEntry: PresencePayload = { ...presence, updatedAt: now };
 
-        this.entries.set(userId as any, {
+        this.entries.set(userId, {
             presence: newEntry,
             expiresAt: now + this.ttlMs,
         });

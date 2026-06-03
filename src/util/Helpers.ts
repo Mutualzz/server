@@ -15,24 +15,26 @@ import {
     userSettingsTable,
     usersTable,
 } from "@mutualzz/database";
-import type {
-    APIExpression,
-    APIRelationship,
-    APIUserSettings,
-} from "@mutualzz/types";
 import {
     type APIChannel,
+    type APIExpression,
     type APIPrivateUser,
+    type APIReadState,
+    type APIRelationship,
     type APISpace,
     type APISpaceMember,
     type APITheme,
     type APIUser,
+    type APIUserSettings,
+    ReadStateType,
     type Snowflake,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
 import { perspectiveForUser } from "@mutualzz/rest/util";
+import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
+import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
 
 export const publicUserColumns = {
     hash: false,
@@ -61,108 +63,122 @@ export async function isChannelRecipient(channelId: string, userId: string) {
 }
 
 export const prepareReadyData = async (user: APIPrivateUser) => {
-    const [themes, spaces, dmChannels, relationships, expressions, settings] =
-        await Promise.all([
-            // Get all themes owned by the user
-            execNormalizedMany<APITheme>(
-                db.query.themesTable.findMany({
-                    with: {
-                        author: {
-                            columns: publicUserColumns,
-                        },
+    const [
+        themes,
+        spaces,
+        dmChannels,
+        relationships,
+        expressions,
+        settings,
+        readStates,
+    ] = await Promise.all([
+        // Get all themes owned by the user
+        execNormalizedMany<APITheme>(
+            db.query.themesTable.findMany({
+                with: {
+                    author: {
+                        columns: publicUserColumns,
                     },
-                    where: eq(themesTable.authorId, BigInt(user.id)),
-                }),
-            ),
+                },
+                where: eq(themesTable.authorId, BigInt(user.id)),
+            }),
+        ),
 
-            // Get all spaces that the user is part of or is owner of.
-            execNormalizedMany<APISpace>(
-                db.query.spacesTable.findMany({
-                    with: {
-                        members: {
-                            with: {
-                                user: { columns: publicUserColumns },
-                                roles: true,
-                            },
+        // Get all spaces that the user is part of or is owner of.
+        execNormalizedMany<APISpace>(
+            db.query.spacesTable.findMany({
+                with: {
+                    members: {
+                        with: {
+                            user: { columns: publicUserColumns },
+                            roles: true,
                         },
-                        channels: {
-                            with: {
-                                parent: true,
-                                overwrites: true,
-                                space: true,
-                            },
-                        },
-                        roles: true,
-                        owner: true,
                     },
-                    where: or(
-                        eq(spacesTable.ownerId, BigInt(user.id)),
-                        sql`exists (
+                    channels: {
+                        with: {
+                            parent: true,
+                            overwrites: true,
+                            space: true,
+                        },
+                    },
+                    roles: true,
+                    owner: true,
+                },
+                where: or(
+                    eq(spacesTable.ownerId, BigInt(user.id)),
+                    sql`exists (
                     select 1 from "space_members" sm
                     where sm."spaceId" = ${spacesTable.id}
                     and sm."userId" = ${BigInt(user.id)}
                 )`,
-                    ),
-                }),
-            ),
+                ),
+            }),
+        ),
 
-            // Get all the DM Channels
-            execNormalizedMany(
-                db.query.channelRecipientsTable.findMany({
-                    where: and(
-                        eq(channelRecipientsTable.userId, BigInt(user.id)),
-                        eq(channelRecipientsTable.closed, false),
-                    ),
-                    with: {
-                        channel: {
-                            with: {
-                                recipients: {
-                                    with: {
-                                        user: { columns: publicUserColumns },
-                                    },
+        // Get all the DM Channels
+        execNormalizedMany(
+            db.query.channelRecipientsTable.findMany({
+                where: and(
+                    eq(channelRecipientsTable.userId, BigInt(user.id)),
+                    eq(channelRecipientsTable.closed, false),
+                ),
+                with: {
+                    channel: {
+                        with: {
+                            recipients: {
+                                with: {
+                                    user: { columns: publicUserColumns },
                                 },
                             },
                         },
                     },
-                }),
-            ),
+                },
+            }),
+        ),
 
-            execNormalizedMany<APIRelationship>(
-                db.query.relationshipsTable.findMany({
-                    where: or(
-                        eq(relationshipsTable.userId, BigInt(user.id)),
-                        eq(relationshipsTable.otherUserId, BigInt(user.id)),
-                    ),
-                }),
-            ),
+        execNormalizedMany<APIRelationship>(
+            db.query.relationshipsTable.findMany({
+                where: or(
+                    eq(relationshipsTable.userId, BigInt(user.id)),
+                    eq(relationshipsTable.otherUserId, BigInt(user.id)),
+                ),
+            }),
+        ),
 
-            // Get expressions that a user can access to or is owner of
-            execNormalizedMany<APIExpression>(
-                db.query.expressionsTable.findMany({
-                    where: or(
-                        eq(expressionsTable.authorId, BigInt(user.id)),
-                        sql`exists (
+        // Get expressions that a user can access to or is owner of
+        execNormalizedMany<APIExpression>(
+            db.query.expressionsTable.findMany({
+                where: or(
+                    eq(expressionsTable.authorId, BigInt(user.id)),
+                    sql`exists (
                     select 1 from "space_members" sm
                     where sm."spaceId" = ${spacesTable.id}
                     and sm."userId" = ${BigInt(user.id)}
                 )`,
-                    ),
-                }),
-            ),
+                ),
+            }),
+        ),
 
-            // Get user settings
-            execNormalized<APIUserSettings>(
-                db.query.userSettingsTable.findFirst({
-                    where: eq(userSettingsTable.userId, BigInt(user.id)),
-                }),
-            ),
-        ]);
+        // Get user settings
+        execNormalized<APIUserSettings>(
+            db.query.userSettingsTable.findFirst({
+                where: eq(userSettingsTable.userId, BigInt(user.id)),
+            }),
+        ),
+        getReadStates(user.id),
+    ]);
 
-    const channels: APIChannel[] = dmChannels.map((row) => ({
-        ...row.channel,
-        recipients: row.channel.recipients.map((r: any) => r.user),
-        recipientIds: row.channel.recipients.map((r: any) => r.user.id),
-    })) satisfies APIChannel[];
+    const channels: APIChannel[] = (await Promise.all(
+        dmChannels.map(async (row) => ({
+            ...row.channel,
+            recipients: await Promise.all(
+                row.channel.recipients.map(
+                    async (r: any) => await attachPresenceUser(r.user),
+                ),
+            ),
+            recipientIds: row.channel.recipients.map((r: any) => r.user.id),
+        })),
+    )) satisfies APIChannel[];
 
     const relationshipsForReady = relationships.map((r) =>
         perspectiveForUser(r, user.id),
@@ -176,7 +192,123 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
         relationships: relationshipsForReady,
         expressions,
         settings,
+        readStates,
     };
+};
+
+export async function getReadStates(userId: string): Promise<APIReadState[]> {
+    const rows = await db
+        .select()
+        .from(readStatesTable)
+        .where(eq(readStatesTable.userId, BigInt(userId)));
+
+    return rows.map((r) => ({
+        ...r,
+        id: r.channelId.toString(),
+        lastMessageId: r.lastMessageId?.toString() ?? null,
+        notificationsCursor: r.notificationsCursor?.toString() ?? null,
+        lastAckedId: r.lastAckedId?.toString() ?? null,
+    })) satisfies APIReadState[];
+}
+
+export async function incrementMentionCounts(
+    channelId: string,
+    userIds: string[],
+    roleIds?: string[],
+) {
+    const mentionedUserIds = Array.from(new Set(userIds));
+    let allUserIds = [...mentionedUserIds];
+
+    if (roleIds && roleIds.length > 0) {
+        const uniqueRoleIds = Array.from(new Set(roleIds));
+
+        const roleMembers = await db
+            .select({ userId: spaceMemberRolesTable.userId })
+            .from(spaceMemberRolesTable)
+            .where(
+                sql`${spaceMemberRolesTable.roleId} = ANY(ARRAY[${sql.raw(uniqueRoleIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+            );
+
+        const roleMemberIds = roleMembers.map((r) => r.userId.toString());
+        allUserIds = Array.from(new Set([...allUserIds, ...roleMemberIds]));
+    }
+
+    if (allUserIds.length === 0) return;
+
+    await db
+        .insert(readStatesTable)
+        .values(
+            allUserIds.map((uid) => ({
+                userId: BigInt(uid),
+                channelId: BigInt(channelId),
+                type: ReadStateType.Messages,
+                mentionCount: 1,
+            })),
+        )
+        .onConflictDoUpdate({
+            target: [
+                readStatesTable.userId,
+                readStatesTable.channelId,
+                readStatesTable.type,
+            ],
+            set: {
+                mentionCount: sql`read_states."mentionCount" + 1`,
+            },
+        });
+}
+
+export const getChannels = async (ids: string[]) => {
+    const result = new Map<string, APIChannel>();
+    const misses: string[] = [];
+
+    // Check cache first for each id
+    await Promise.all(
+        ids.map(async (id) => {
+            const cached = await getCache("channel", id);
+            if (cached) result.set(id, cached);
+            else misses.push(id);
+        }),
+    );
+
+    if (misses.length === 0) return result;
+
+    const rows = await execNormalizedMany<APIChannel>(
+        db.query.channelsTable.findMany({
+            where: sql`${channelsTable.id} = ANY(ARRAY[${sql.raw(misses.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+            with: {
+                recipients: {
+                    with: {
+                        user: { columns: publicUserColumns },
+                    },
+                },
+            },
+        }),
+    );
+
+    await Promise.all(
+        rows.map(async (row) => {
+            const hydrated: APIChannel = {
+                ...row,
+                recipientIds:
+                    row.recipients?.map((r: any) => r.user.id) ??
+                    row.recipientIds ??
+                    null,
+                recipients: row.recipients
+                    ? await Promise.all(
+                          row.recipients.map((r: any) =>
+                              attachPresenceUser(r.user),
+                          ),
+                      )
+                    : null,
+            };
+
+            const id = row.id.toString();
+            await setCache("channel", id, hydrated);
+            result.set(id, hydrated);
+        }),
+    );
+
+    return result;
 };
 
 export async function getUser(
@@ -299,7 +431,11 @@ export const getChannel = async (id: string) => {
             row.recipients?.map((r: any) => r.user.id) ??
             row.recipientIds ??
             null,
-        recipients: row.recipients?.map((r: any) => r.user) ?? null,
+        recipients: row.recipients
+            ? await Promise.all(
+                  row.recipients.map((r: any) => attachPresenceUser(r.user)),
+              )
+            : null,
     };
 
     await setCache("channel", id, hydrated);
@@ -380,7 +516,8 @@ export async function getEveryoneRole(spaceId: Snowflake) {
         db
             .select({
                 id: rolesTable.id,
-                permissions: rolesTable.permissions,
+                allow: rolesTable.allow,
+                deny: rolesTable.deny,
                 flags: rolesTable.flags,
                 position: rolesTable.position,
             })
@@ -410,7 +547,8 @@ export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
     const rows = await db
         .select({
             id: rolesTable.id,
-            permissions: rolesTable.permissions,
+            allow: rolesTable.allow,
+            deny: rolesTable.deny,
             flags: rolesTable.flags,
             position: rolesTable.position,
         })

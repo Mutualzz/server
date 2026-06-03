@@ -182,7 +182,7 @@ export const roleLRU = new LRUCache<string, APIRole>({
 // [START] Permission Related Caches
 export const memberRolesLRU = new LRUCache<
     string,
-    Pick<APIRole, "id" | "permissions" | "flags" | "position">[]
+    Pick<APIRole, "id" | "allow" | "deny" | "flags" | "position">[]
 >({
     max: 1000,
     ttl: 1000 * 60 * 5,
@@ -190,7 +190,7 @@ export const memberRolesLRU = new LRUCache<
 
 export const everyoneRoleLRU = new LRUCache<
     string,
-    Pick<APIRole, "id" | "permissions" | "flags" | "position">
+    Pick<APIRole, "id" | "allow" | "deny" | "flags" | "position">
 >({
     max: 1000,
     ttl: 1000 * 60 * 5,

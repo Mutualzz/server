@@ -1,0 +1,1 @@
+ALTER TABLE "read_states" ADD CONSTRAINT "read_states_userId_channelId_type_pk" PRIMARY KEY("userId","channelId","type");

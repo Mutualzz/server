@@ -13,6 +13,11 @@ router.post(
     ChannelsController.create,
 );
 router.post("/@me", createLimiter(5_000, 10), ChannelsController.createDM);
+router.post(
+    "/@me/group",
+    createLimiter(5_000, 10),
+    ChannelsController.createGroupDM,
+);
 router.delete(
     "/@me/:channelId",
     createLimiter(10_000, 50),
@@ -53,5 +58,13 @@ router.delete(
     createLimiter(60_000, 20),
     MessagesController.delete,
 );
+
+// Read State Management
+router.post(
+    "/:channelId/messages/:messageId/ack",
+    createLimiter(5_000, 15),
+    MessagesController.ack,
+);
+router.post("/ack-bulk", createLimiter(20_000, 10), MessagesController.ackBulk);
 
 export default router;

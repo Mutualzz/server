@@ -59,8 +59,10 @@ export const requireChannelPermissions = async ({
     const base = resolveSpacePermissions({
         spaceOwnerId: space.ownerId,
         userId,
-        everyonePerms: BigInt(everyoneRole?.permissions ?? 0n),
-        rolePerms: memberRoles.map((r) => BigInt(r.permissions)),
+        everyoneAllow: BigInt(everyoneRole?.allow ?? 0n),
+        everyoneDeny: BigInt(everyoneRole?.deny ?? 0n),
+        roleAllows: memberRoles.map((r) => BigInt(r.allow)),
+        roleDenies: memberRoles.map((r) => BigInt(r.deny ?? 0n)),
     });
 
     if (BigInt(userId) === BigInt(space.ownerId))

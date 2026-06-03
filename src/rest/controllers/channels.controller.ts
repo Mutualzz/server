@@ -36,6 +36,7 @@ import {
     PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { BitField, channelFlags } from "@mutualzz/bitfield";
+import { z } from "zod";
 
 export default class ChannelsController {
     static async getOne(req: Request, res: Response, next: NextFunction) {
@@ -327,13 +328,13 @@ export default class ChannelsController {
                 validateChannelBodyUpdate.parse(req.body);
 
             const newParentId: bigint | null | undefined =
-                parentId !== undefined
-                    ? parentId === null
-                        ? null
-                        : BigInt(parentId)
-                    : channel.parentId
-                      ? BigInt(channel.parentId)
-                      : null;
+                parentId === undefined
+                    ? channel.parentId
+                        ? BigInt(channel.parentId)
+                        : null
+                    : parentId === null
+                      ? null
+                      : BigInt(parentId);
 
             const updatedChannel = await execNormalized<APIChannel>(
                 db
@@ -792,6 +793,151 @@ export default class ChannelsController {
                     run: () => setCache("channel", hydrated.id, hydrated),
                 },
             ]);
+        } catch (err) {
+            next(err);
+        }
+    }
+
+    static async createGroupDM(
+        req: Request,
+        res: Response,
+        next: NextFunction,
+    ) {
+        try {
+            const { user } = req;
+            if (!user)
+                throw new HttpException(
+                    HttpStatusCode.Unauthorized,
+                    "Unauthorized",
+                );
+
+            const { recipientIds } = z
+                .object({
+                    recipientIds: z.string().array().min(2),
+                })
+                .parse(req.body);
+
+            const filteredRecipientIds = [
+                ...new Set(recipientIds.filter((id) => id !== user.id)),
+            ];
+
+            if (filteredRecipientIds.length > 9)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Group DMs cannot have more than 9 recipients (10 including you)",
+                );
+
+            if (filteredRecipientIds.length === 0)
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Group DM must include at least one other user",
+                );
+
+            const expectedRecipientIds = [
+                BigInt(user.id),
+                ...filteredRecipientIds.map((id) => BigInt(id)),
+            ].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+            const expectedRecipientIdsSql = sql`array[${sql.join(
+                expectedRecipientIds.map((id) => sql`${id}`),
+                sql`, `,
+            )}]::bigint[]`;
+
+            const existing = await db
+                .select({
+                    channelId: channelRecipientsTable.channelId,
+                })
+                .from(channelRecipientsTable)
+                .where(
+                    and(
+                        eq(channelRecipientsTable.userId, BigInt(user.id)),
+                        sql`exists (
+                            select 1
+                            from ${channelsTable} c
+                            where c.id = ${channelRecipientsTable.channelId}
+                            and c.type = ${ChannelType.GroupDM}
+                        )`,
+                        sql`(
+                            select array_agg(cr2."userId" order by cr2."userId")
+                            from ${channelRecipientsTable} cr2
+                            where cr2."channelId" = ${channelRecipientsTable.channelId}
+                        ) = ${expectedRecipientIdsSql}`,
+                    ),
+                )
+                .then((r) => r[0]);
+
+            if (existing) {
+                const channel = await getChannel(existing.channelId.toString());
+                if (!channel)
+                    throw new HttpException(
+                        HttpStatusCode.InternalServerError,
+                        "Failed to retrieve group DM channel",
+                    );
+
+                return res.status(HttpStatusCode.Success).json(channel);
+            }
+
+            const channelId = BigInt(Snowflake.generate());
+
+            const channel = await db.transaction(async (tx) => {
+                const [created] = await tx
+                    .insert(channelsTable)
+                    .values({
+                        id: channelId,
+                        type: ChannelType.GroupDM,
+                        flags: 0n,
+                        position: 0,
+                        ownerId: BigInt(user.id),
+                    })
+                    .returning();
+
+                await tx.insert(channelRecipientsTable).values([
+                    { channelId, userId: BigInt(user.id) },
+                    ...filteredRecipientIds.map((id) => ({
+                        channelId,
+                        userId: BigInt(id),
+                    })),
+                ]);
+
+                return created;
+            });
+
+            const hydrated = await getChannel(channel.id.toString());
+            if (!hydrated)
+                throw new HttpException(
+                    HttpStatusCode.InternalServerError,
+                    "Failed to create group DM channel",
+                );
+
+            res.status(HttpStatusCode.Created).json(hydrated);
+
+            fireAndForgetAll([
+                {
+                    label: "event:ChannelCreate:sender",
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelCreate",
+                            user_id: user.id,
+                            data: hydrated,
+                        }),
+                },
+                {
+                    label: "cache:set:channel",
+                    run: () => setCache("channel", hydrated.id, hydrated),
+                },
+            ]);
+
+            fireAndForgetAll(
+                filteredRecipientIds.map((recipientId) => ({
+                    label: `event:ChannelCreate:${recipientId}`,
+                    run: () =>
+                        emitEvent({
+                            event: "ChannelCreate",
+                            user_id: recipientId,
+                            data: hydrated,
+                        }),
+                })),
+            );
         } catch (err) {
             next(err);
         }

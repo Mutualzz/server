@@ -168,6 +168,8 @@ export default class RolesController {
                     name: "New Role",
                     color: "#99aab5",
                     position: (maxPosition ?? -1) + 1,
+                    allow: 0n,
+                    deny: 0n,
                 })
                 .returning()
                 .then((res) => res[0]);
@@ -365,7 +367,7 @@ export default class RolesController {
                     "Role not found",
                 );
 
-            const { name, color, position, mentionable, hoist, permissions } =
+            const { name, color, position, mentionable, hoist, allow, deny } =
                 validateRoleUpdate.parse(req.body);
 
             assertEveryoneUpdateRules(spaceId, role, { name, position });
@@ -401,9 +403,9 @@ export default class RolesController {
                 }
             }
 
-            // Prevent permission escalation
-            if (permissions != null) {
-                const newBits = BigInt(permissions);
+            // Prevent permission escalation on allow bits
+            if (allow != null) {
+                const newBits = BigInt(allow);
                 assertNoPermissionEscalation(
                     actorIsOwner,
                     actorIsAdmin,
@@ -420,10 +422,8 @@ export default class RolesController {
                     position: position ?? role.position,
                     mentionable: mentionable ?? role.mentionable,
                     hoist: hoist ?? role.hoist,
-                    permissions:
-                        permissions != null
-                            ? BigInt(permissions)
-                            : BigInt(role.permissions),
+                    allow: allow == null ? BigInt(role.allow) : BigInt(allow),
+                    deny: deny == null ? BigInt(role.deny) : BigInt(deny),
                 })
                 .where(
                     and(
