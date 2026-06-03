@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "mentions" jsonb DEFAULT '[]'::jsonb NOT NULL;
