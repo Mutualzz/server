@@ -7,6 +7,8 @@ import {
     channelsLRU,
     everyoneRoleLRU,
     expressionLRU,
+    gifSearchLRU,
+    gifTagsLRU,
     inviteEditLRU,
     inviteLRU,
     invitesLRU,
@@ -76,6 +78,10 @@ export const caches = {
 
     // Cloudflare
     turnCredentials: turnCredentialsLRU,
+
+    // GIFs
+    gifSearch: gifSearchLRU,
+    gifTags: gifTagsLRU,
 };
 
 export type CacheName = keyof typeof caches;

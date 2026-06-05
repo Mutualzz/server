@@ -216,3 +216,15 @@ export const turnCredentialsLRU = new LRUCache<
     ttl: 1000 * 60 * 60 * 24, // 24 hours
 });
 // [END] TURN credentials cache
+
+// [START] GIFs
+export const gifSearchLRU = new LRUCache<string, any>({
+    max: 200,
+    ttl: 1000 * 60 * 5, // 5 minutes
+});
+
+export const gifTagsLRU = new LRUCache<string, any>({
+    max: 1,
+    ttl: 1000 * 60 * 60, // 1 hour
+});
+// [END] GIFs

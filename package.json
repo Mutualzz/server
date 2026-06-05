@@ -6,6 +6,8 @@
         "@discordjs/opus": "^0.10.0",
         "@discordjs/voice": "^0.19.2",
         "@faker-js/faker": "^10.4.0",
+        "@giphy/js-fetch-api": "^5.8.0",
+        "@giphy/js-types": "^5.1.0",
         "@mutualzz/bitfield": "workspace:*",
         "@mutualzz/logger": "workspace:*",
         "@mutualzz/validators": "workspace:*",

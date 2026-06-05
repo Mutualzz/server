@@ -29,6 +29,9 @@ export const userSettingsTable = pgTable("user_settings", {
 
     spacePositions: bigint({ mode: "bigint" }).array().default([]).notNull(),
 
+    favoriteEmojis: text().array().default([]).notNull(),
+    favoriteGifs: text().array().default([]).notNull(),
+
     updatedAt: timestamp()
         .notNull()
         .defaultNow()

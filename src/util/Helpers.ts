@@ -26,6 +26,7 @@ import {
     type APITheme,
     type APIUser,
     type APIUserSettings,
+    type PresencePayload,
     ReadStateType,
     type Snowflake,
 } from "@mutualzz/types";
@@ -35,6 +36,7 @@ import { roleFlags } from "@mutualzz/bitfield";
 import { perspectiveForUser } from "@mutualzz/rest/util";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
+import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
 
 export const publicUserColumns = {
     hash: false,
@@ -60,6 +62,21 @@ export async function isChannelRecipient(channelId: string, userId: string) {
     const isRecipient = !!row;
     await setCache("channelRecipient", cacheKey, isRecipient);
     return isRecipient;
+}
+
+export async function getBulkPresences(
+    userIds: string[],
+): Promise<Record<string, PresencePayload>> {
+    const results = await Promise.all(
+        userIds.map(async (id) => {
+            const presence = await PresenceService.get(id);
+            return [id, presence] as const;
+        }),
+    );
+
+    return Object.fromEntries(
+        results.filter(([, presence]) => presence !== null),
+    );
 }
 
 export const prepareReadyData = async (user: APIPrivateUser) => {
@@ -151,10 +168,10 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
                 where: or(
                     eq(expressionsTable.authorId, BigInt(user.id)),
                     sql`exists (
-                    select 1 from "space_members" sm
-                    where sm."spaceId" = ${spacesTable.id}
-                    and sm."userId" = ${BigInt(user.id)}
-                )`,
+                        select 1 from "space_members" sm
+                        where sm."spaceId" = ${expressionsTable.spaceId}
+                        and sm."userId" = ${BigInt(user.id)}
+                    )`,
                 ),
             }),
         ),
@@ -167,6 +184,21 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
         ),
         getReadStates(user.id),
     ]);
+
+    const presenceUserIds = new Set<string>();
+
+    for (const row of dmChannels) {
+        for (const r of row.channel.recipients) {
+            if (r.user.id !== user.id) presenceUserIds.add(r.user.id);
+        }
+    }
+
+    for (const r of relationships) {
+        const otherId = r.userId === user.id ? r.otherUserId : r.userId;
+        presenceUserIds.add(otherId);
+    }
+
+    const mergedPresences = await getBulkPresences([...presenceUserIds]);
 
     const channels: APIChannel[] = (await Promise.all(
         dmChannels.map(async (row) => ({
@@ -193,6 +225,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
         expressions,
         settings,
         readStates,
+        mergedPresences
     };
 };
 

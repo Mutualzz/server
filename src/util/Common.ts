@@ -14,8 +14,9 @@ import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
 import { getExpression } from "@mutualzz/util/Helpers.ts";
+import { gf } from "@mutualzz/util/Giphy.ts";
 
-type Services = "spotify" | "youtube" | "apple" | "tidal" | "other";
+type Services = "spotify" | "youtube" | "apple" | "tidal" | "giphy" | "other";
 
 let appleToken = null;
 try {
@@ -32,7 +33,7 @@ try {
             kid: process.env.APPLE_KEY_ID,
         },
     });
-} catch (err) {
+} catch {
     console.error("Apple embeds wont work");
 }
 
@@ -198,6 +199,37 @@ export const getUrls = (text: string) => {
     return Array.from(new Map(matches.map((m) => [m.url, m])).values());
 };
 
+export const fetchGiphyMetadata = async (
+    url: string,
+    spoiler = false,
+): Promise<APIMessageEmbed | null> => {
+    try {
+        const match = url.match(/giphy\.com\/gifs\/(?:[^/]+-)?([a-zA-Z0-9]+)$/);
+        if (!match) return null;
+
+        const id = match[1];
+        const { data: gif } = await gf.gif(id);
+
+        const mediaUrl = gif.images.original_mp4?.mp4?.split("?")[0];
+        const previewUrl = gif.images.fixed_height_small.url?.split("?")[0];
+
+        if (!mediaUrl) return null;
+
+        console.log(mediaUrl);
+
+        return {
+            type: "gifv",
+            url,
+            spoiler,
+            media: mediaUrl,
+            image: previewUrl ?? null,
+            title: gif.title ?? null,
+        };
+    } catch {
+        return null;
+    }
+};
+
 export const fetchSpotifyMetadata = async (
     url: string,
 ): Promise<APIMessageEmbed | null> => {
@@ -253,6 +285,7 @@ export const fetchSpotifyMetadata = async (
                 id,
                 embedUrl: `https://open.spotify.com/embed/${type}/${id}`,
             },
+            type: "rich",
         };
     } catch {
         return null;
@@ -290,6 +323,7 @@ export const fetchYoutubeMetadata = async (
                 videoId,
                 embedUrl: `https://www.youtube.com/embed/${videoId}`,
             },
+            type: "rich",
         };
     } catch {
         return null;
@@ -333,6 +367,7 @@ export const fetchAppleMusicMetadata = async (
                         type: "album",
                         embedUrl: `https://embed.music.apple.com/us/album/${album.id}`,
                     },
+                    type: "rich",
                 };
             }
             case "artist": {
@@ -361,6 +396,7 @@ export const fetchAppleMusicMetadata = async (
                         type: "artist",
                         embedUrl: `https://music.apple.com/us/artist/${artist.id}`,
                     },
+                    type: "rich",
                 };
             }
             case "playlist": {
@@ -389,6 +425,7 @@ export const fetchAppleMusicMetadata = async (
                         type: "playlist",
                         embedUrl: `https://embed.music.apple.com/us/playlist/${playlist.id}`,
                     },
+                    type: "rich",
                 };
             }
             case "song": {
@@ -417,6 +454,7 @@ export const fetchAppleMusicMetadata = async (
                         type: "song",
                         embedUrl: `https://embed.music.apple.com/us/song/${song.id}`,
                     },
+                    type: "rich",
                 };
             }
             default:
@@ -432,6 +470,7 @@ export const detectService = (url: string): Services => {
     if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
     if (/music\.apple\.com/.test(url)) return "apple";
     if (/tidal\.com/.test(url)) return "tidal";
+    if (/giphy\.com/.test(url)) return "giphy";
     return "other";
 };
 
@@ -440,14 +479,20 @@ export const buildEmbed = async (
     spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
     const service = detectService(url);
-    let embed: APIMessageEmbed | null = null;
+    let embed: APIMessageEmbed;
 
     if (service === "spotify") {
-        embed = { ...(await fetchSpotifyMetadata(url)), spoiler };
+        embed = { ...(await fetchSpotifyMetadata(url)), spoiler, type: "rich" };
     } else if (service === "youtube") {
-        embed = { ...(await fetchYoutubeMetadata(url)), spoiler };
+        embed = { ...(await fetchYoutubeMetadata(url)), spoiler, type: "rich" };
     } else if (service === "apple") {
-        embed = { ...(await fetchAppleMusicMetadata(url)), spoiler };
+        embed = {
+            ...(await fetchAppleMusicMetadata(url)),
+            spoiler,
+            type: "rich",
+        };
+    } else if (service === "giphy") {
+        embed = { ...(await fetchGiphyMetadata(url)), spoiler, type: "gifv" };
     } else {
         // TODO: Create a proper regex for this and apply to the links detection as well
         const normalizedUrl = url
@@ -469,6 +514,7 @@ export const buildEmbed = async (
             description = description.slice(0, limit) + "..."; // Limit to 100 chars
 
         embed = {
+            type: "rich",
             title: metadata["og:title"],
             description,
             url: metadata["og:url"] ?? url,
