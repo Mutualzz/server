@@ -25,129 +25,146 @@ export async function setupListener(this: WebSocket) {
         return;
     }
 
-    // ensure containers exist
-    this.events = this.events ?? {};
-    this.memberEvents = this.memberEvents ?? {};
-    this.listenOptions = this.listenOptions ?? {};
+    try {
+        // ensure containers exist
+        this.events = this.events ?? {};
+        this.memberEvents = this.memberEvents ?? {};
+        this.listenOptions = this.listenOptions ?? {};
 
-    this.memberListSubs = this.memberListSubs ?? new Map();
+        this.memberListSubs = this.memberListSubs ?? new Map();
 
-    const userId = BigInt(this.userId);
+        const userId = BigInt(this.userId);
 
-    const data = await db
-        .select()
-        .from(spacesTable)
-        .innerJoin(
-            spaceMembersTable,
-            eq(spaceMembersTable.spaceId, spacesTable.id),
-        )
-        .leftJoin(channelsTable, eq(channelsTable.spaceId, spacesTable.id))
-        .where(eq(spaceMembersTable.userId, userId));
+        const data = await db
+            .select()
+            .from(spacesTable)
+            .innerJoin(
+                spaceMembersTable,
+                eq(spaceMembersTable.spaceId, spacesTable.id),
+            )
+            .leftJoin(channelsTable, eq(channelsTable.spaceId, spacesTable.id))
+            .where(eq(spaceMembersTable.userId, userId));
 
-    const spacesMap = new Map<string, any>();
+        const spacesMap = new Map<string, any>();
 
-    for (const row of data) {
-        const space = row.spaces;
-        const channel = row.channels || null;
-        const key = String(space.id);
+        for (const row of data) {
+            const space = row.spaces;
+            const channel = row.channels || null;
+            const key = String(space.id);
 
-        let existing = spacesMap.get(key);
-        if (!existing) {
-            existing = { ...space, channels: [] };
-            spacesMap.set(key, existing);
-        }
+            let existing = spacesMap.get(key);
+            if (!existing) {
+                existing = { ...space, channels: [] };
+                spacesMap.set(key, existing);
+            }
 
-        if (channel) {
-            const cid = String(channel.id);
-            if (!existing.channels.some((c: any) => String(c.id) === cid)) {
-                existing.channels.push(channel);
+            if (channel) {
+                const cid = String(channel.id);
+                if (!existing.channels.some((c: any) => String(c.id) === cid)) {
+                    existing.channels.push(channel);
+                }
             }
         }
-    }
 
-    const spaces = Array.from(spacesMap.values());
+        const spaces = Array.from(spacesMap.values());
 
-    const opts: {
-        acknowledge: boolean;
-        channel?: Channel & { queues?: unknown; ch?: number };
-    } = {
-        acknowledge: true,
-    };
+        const opts: {
+            acknowledge: boolean;
+            channel?: Channel & { queues?: unknown; ch?: number };
+        } = {
+            acknowledge: true,
+        };
 
-    this.listenOptions = opts;
+        this.listenOptions = opts;
 
-    const consumer = consume.bind(this);
+        const consumer = consume.bind(this);
 
-    logger.debug(`[RabbitMQ] setupListener: open for ${this.userId}`);
+        logger.debug(`[RabbitMQ] setupListener: open for ${this.userId}`);
 
-    if (RabbitMQ.connection) {
-        logger.debug(
-            `[RabbitMQ] setupListener: opts.channel =`,
-            typeof opts.channel,
-            "with channel id",
-            opts.channel?.ch,
-        );
-        opts.channel = await RabbitMQ.connection.createChannel();
-        opts.channel.queues = {};
-        logger.debug(
-            "[RabbitMQ] channel created:",
-            typeof opts.channel,
-            "with channel id",
-            opts.channel?.ch,
-        );
-    }
+        if (RabbitMQ.connection) {
+            logger.debug(
+                `[RabbitMQ] setupListener: opts.channel =`,
+                typeof opts.channel,
+                "with channel id",
+                opts.channel?.ch,
+            );
+            opts.channel = await RabbitMQ.connection.createChannel();
+            opts.channel.queues = {};
+            logger.debug(
+                "[RabbitMQ] channel created:",
+                typeof opts.channel,
+                "with channel id",
+                opts.channel?.ch,
+            );
+        }
 
-    const uid = this.userId.toString();
-    this.events[uid] = await listenEvent(uid, consumer, this.listenOptions);
+        const uid = this.userId.toString();
+        this.events[uid] = await listenEvent(uid, consumer, this.listenOptions);
 
-    for (const space of spaces) {
-        const sid = space.id.toString();
-        this.events[sid] = await listenEvent(sid, consumer, this.listenOptions);
-
-        for (const channel of space.channels) {
-            const chid = channel.id.toString();
-            this.events[chid] = await listenEvent(
-                chid,
+        for (const space of spaces) {
+            const sid = space.id.toString();
+            this.events[sid] = await listenEvent(
+                sid,
                 consumer,
                 this.listenOptions,
             );
+
+            for (const channel of space.channels) {
+                const chid = channel.id.toString();
+                this.events[chid] = await listenEvent(
+                    chid,
+                    consumer,
+                    this.listenOptions,
+                );
+            }
         }
+
+        const dmRows = await db.query.channelRecipientsTable.findMany({
+            columns: { channelId: true },
+            where: and(
+                eq(channelRecipientsTable.userId, userId),
+                eq(channelRecipientsTable.closed, false),
+            ),
+        });
+
+        for (const row of dmRows) {
+            const chid = row.channelId.toString();
+            if (!this.events[chid]) {
+                this.events[chid] = await listenEvent(
+                    chid,
+                    consumer,
+                    this.listenOptions,
+                );
+            }
+        }
+
+        this.once("close", () => {
+            try {
+                logger.debug(
+                    `[RabbitMQ] setupListener: close for ${this.userId} =`,
+                    typeof opts.channel,
+                    "with channel id",
+                    opts.channel?.ch,
+                );
+                if (opts.channel) opts.channel.close();
+                else {
+                    Object.values(this.events).forEach((x) => x?.());
+                    Object.values(this.memberEvents).forEach((x) => x?.());
+                }
+
+                this.memberListSubs.clear();
+            } catch (err) {
+                logger.error(
+                    "[RabbitMQ] setupListener: ",
+                    err,
+                    "with channel id",
+                    opts.channel?.ch,
+                );
+            }
+        });
+    } catch (err) {
+        logger.error(`[RabbitMQ] setupListener: `, err);
     }
-
-    const dmRows = await db.query.channelRecipientsTable.findMany({
-        columns: { channelId: true },
-        where: and(
-            eq(channelRecipientsTable.userId, userId),
-            eq(channelRecipientsTable.closed, false),
-        ),
-    });
-
-    for (const row of dmRows) {
-        const chid = row.channelId.toString();
-        if (!this.events[chid]) {
-            this.events[chid] = await listenEvent(
-                chid,
-                consumer,
-                this.listenOptions,
-            );
-        }
-    }
-
-    this.once("close", () => {
-        logger.debug(
-            `[RabbitMQ] setupListener: close for ${this.userId} =`,
-            typeof opts.channel,
-            "with channel id",
-            opts.channel?.ch,
-        );
-        if (opts.channel) opts.channel.close();
-        else {
-            Object.values(this.events).forEach((x) => x?.());
-            Object.values(this.memberEvents).forEach((x) => x?.());
-        }
-
-        this.memberListSubs?.clear();
-    });
 }
 
 async function consume(this: WebSocket, opts: EventOpts) {
