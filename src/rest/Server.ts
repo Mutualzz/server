@@ -127,6 +127,7 @@ export class Server {
             res.setHeader("X-XSS-Protection", "1; mode=block");
             next();
         });
+        this.app.set("etag", false);
 
         this.app.disable("x-powered-by");
         this.app.set("trust proxy", true);

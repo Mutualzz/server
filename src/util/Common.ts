@@ -14,9 +14,9 @@ import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
 import { getExpression } from "@mutualzz/util/Helpers.ts";
-import { gf } from "@mutualzz/util/Giphy.ts";
+import { klipyFetch } from "@mutualzz/util/Klipy.ts";
 
-type Services = "spotify" | "youtube" | "apple" | "tidal" | "giphy" | "other";
+type Services = "spotify" | "youtube" | "apple" | "tidal" | "klipy" | "other";
 
 let appleToken = null;
 try {
@@ -199,30 +199,38 @@ export const getUrls = (text: string) => {
     return Array.from(new Map(matches.map((m) => [m.url, m])).values());
 };
 
-export const fetchGiphyMetadata = async (
+export const fetchKlipyMetadata = async (
     url: string,
     spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
     try {
-        const match = url.match(/giphy\.com\/gifs\/(?:[^/]+-)?([a-zA-Z0-9]+)$/);
+        const match = url.match(/klipy\.com\/gifs\/([^/?#]+)/);
         if (!match) return null;
 
-        const id = match[1];
-        const { data: gif } = await gf.gif(id);
+        const slug = match[1];
+        const data = await klipyFetch("/gifs/items", { slugs: slug });
+        const gif = data.data?.data?.[0];
+        if (!gif) return null;
 
-        const mediaUrl = gif.images.original_mp4?.mp4?.split("?")[0];
-        const previewUrl = gif.images.fixed_height_small.url?.split("?")[0];
+        const file = gif.file ?? {};
+        const full = file.hd ?? file.md ?? file.sm ?? {};
+        const preview = file.sm ?? file.md ?? file.hd ?? {};
+
+        const mediaUrl = String(full.mp4?.url ?? full.gif?.url ?? "").split(
+            "?",
+        )[0];
+        const previewUrl = String(
+            preview.gif?.url ?? preview.mp4?.url ?? "",
+        ).split("?")[0];
 
         if (!mediaUrl) return null;
-
-        console.log(mediaUrl);
 
         return {
             type: "gifv",
             url,
             spoiler,
             media: mediaUrl,
-            image: previewUrl ?? null,
+            image: previewUrl || null,
             title: gif.title ?? null,
         };
     } catch {
@@ -470,7 +478,7 @@ export const detectService = (url: string): Services => {
     if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
     if (/music\.apple\.com/.test(url)) return "apple";
     if (/tidal\.com/.test(url)) return "tidal";
-    if (/giphy\.com/.test(url)) return "giphy";
+    if (/klipy\.com\/gifs\//.test(url)) return "klipy";
     return "other";
 };
 
@@ -491,8 +499,8 @@ export const buildEmbed = async (
             spoiler,
             type: "rich",
         };
-    } else if (service === "giphy") {
-        embed = { ...(await fetchGiphyMetadata(url)), spoiler, type: "gifv" };
+    } else if (service === "klipy") {
+        embed = { ...(await fetchKlipyMetadata(url)), spoiler, type: "gifv" };
     } else {
         // TODO: Create a proper regex for this and apply to the links detection as well
         const normalizedUrl = url

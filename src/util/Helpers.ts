@@ -75,7 +75,9 @@ export async function getBulkPresences(
     );
 
     return Object.fromEntries(
-        results.filter(([, presence]) => presence !== null),
+        results.filter(
+            (entry): entry is [string, PresencePayload] => entry[1] !== null,
+        ),
     );
 }
 
@@ -225,7 +227,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
         expressions,
         settings,
         readStates,
-        mergedPresences
+        mergedPresences,
     };
 };
 

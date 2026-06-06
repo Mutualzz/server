@@ -1,14 +1,11 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import type { IGif } from "@giphy/js-types";
 import type { NextFunction, Request, Response } from "express";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { GiphyFetch } from "@giphy/js-fetch-api";
 import { z } from "zod";
 import { getCache, setCache } from "@mutualzz/cache";
 
-const gf = new GiphyFetch(process.env.GIPHY_API_KEY!);
+const KLIPY_API_KEY = process.env.KLIPY_API_KEY!;
+const BASE_URL = `https://api.klipy.com/api/v1/${KLIPY_API_KEY}`;
 const LIMIT = 30;
-const RATING = "pg-13" as const;
 
 const MEME_TAGS = [
     "reaction",
@@ -43,24 +40,34 @@ const MEME_TAGS = [
     "love",
 ];
 
-function mapGif(gif: IGif) {
-    const url = String(
-        gif.images.original_mp4?.mp4 ?? gif.images.original.url ?? "",
-    ).split("?")[0];
-    const preview = String(
-        gif.images.fixed_height_small.mp4 ??
-            gif.images.fixed_height_small.url ??
-            "",
-    ).split("?")[0];
+function mapGif(gif: any) {
+    const file = gif.file ?? {};
+    const full = file.hd ?? file.md ?? file.sm ?? {};
+    const preview = file.sm ?? file.md ?? file.hd ?? {};
 
     return {
-        id: gif.id.toString(),
-        title: gif.title,
-        url,
-        preview,
-        width: gif.images.original.width,
-        height: gif.images.original.height,
+        id: String(gif.id),
+        slug: gif.slug ?? String(gif.id),
+        title: gif.title ?? "",
+        url: String(full.mp4?.url ?? full.gif?.url ?? "").split("?")[0],
+        preview: String(preview.gif?.url ?? preview.mp4?.url ?? "").split(
+            "?",
+        )[0],
+        width: full.mp4?.width ?? full.gif?.width ?? 0,
+        height: full.mp4?.height ?? full.gif?.height ?? 0,
     };
+}
+
+async function klipyFetch(path: string, params: Record<string, any> = {}) {
+    const url = new URL(`${BASE_URL}${path}`);
+    for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined) url.searchParams.set(k, String(v));
+    }
+    const res = await fetch(url.toString());
+    const text = await res.text();
+    if (!res.ok) throw new Error(`KLIPY error: ${res.status} - ${text}`);
+    if (!text) return {};
+    return JSON.parse(text);
 }
 
 export default class GifsController {
@@ -76,29 +83,30 @@ export default class GifsController {
             const { q, next: nextParam } = z
                 .object({
                     q: z.string().trim(),
-                    next: z.number().optional(),
+                    next: z.coerce.number().optional(),
                 })
                 .parse(req.query);
 
-            const cacheKey = `${q}:${nextParam ?? 0}`;
+            const cacheKey = `${q}:${nextParam ?? 1}`;
             const cached = await getCache("gifSearch", cacheKey);
             if (cached) return res.status(HttpStatusCode.Success).json(cached);
 
-            const { data, pagination } = await gf.search(q, {
-                limit: LIMIT,
-                rating: RATING,
-                offset: nextParam || 0,
+            const data = await klipyFetch("/gifs/search", {
+                q,
+                per_page: LIMIT,
+                page: nextParam ?? 1,
             });
 
-            const offset = pagination.offset ?? 0;
-            const hasMore = offset + LIMIT < (pagination.total_count ?? 0);
+            const items = data.data?.data ?? [];
+            const hasNext = data.data?.has_next ?? false;
+            const currentPage = data.data?.current_page ?? 1;
+
             const result = {
-                results: data.map(mapGif),
-                next: hasMore ? String(offset + LIMIT) : null,
+                results: items.map(mapGif),
+                next: hasNext ? String(currentPage + 1) : null,
             };
 
             await setCache("gifSearch", cacheKey, result);
-
             return res.status(HttpStatusCode.Success).json(result);
         } catch (err) {
             next(err);
@@ -117,34 +125,22 @@ export default class GifsController {
             const cached = await getCache("gifTags", "tags");
             if (cached) return res.status(HttpStatusCode.Success).json(cached);
 
-            const tags = (
-                await Promise.all(
-                    MEME_TAGS.map(async (term) => {
-                        try {
-                            const { data } = await gf.search(term, {
-                                limit: 1,
-                                rating: RATING,
-                            });
-                            const gif = data[0];
-                            if (!gif) return null;
-                            return {
-                                name: term,
-                                preview: String(
-                                    gif.images.fixed_height_small.mp4 ??
-                                        gif.images.fixed_height_small.url ??
-                                        "",
-                                ).split("?")[0],
-                            };
-                        } catch {
-                            return null;
-                        }
-                    }),
-                )
-            ).filter(Boolean);
+            const tags: { name: string; preview?: string }[] = [];
+            for (const tag of MEME_TAGS) {
+                const data = await klipyFetch("/gifs/search", {
+                    q: tag,
+                    per_page: 1,
+                    page: 1,
+                });
+
+                const result = data.data.data[0];
+                const previewUrl =
+                    result.file.hd?.gif.url ?? result.file.md?.gif.url;
+                tags.push({ name: tag, preview: previewUrl });
+            }
 
             const result = { tags };
-            await   setCache("gifTags", "tags", result);
-
+            await setCache("gifTags", "tags", result);
             return res.status(HttpStatusCode.Success).json(result);
         } catch (err) {
             next(err);
