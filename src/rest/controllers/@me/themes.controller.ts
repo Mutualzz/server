@@ -4,174 +4,151 @@ import type { APITheme } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { execNormalized, fireAndForget, Snowflake } from "@mutualzz/util";
 import {
-    validateThemeCreate,
-    validateThemeUpdateBody,
-    validateThemeUpdateQuery,
+  validateThemeCreate,
+  validateThemeUpdateBody,
+  validateThemeUpdateQuery,
 } from "@mutualzz/validators";
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 export default class MeThemesController {
-    static async create(req: Request, res: Response, next: NextFunction) {
-        try {
-            const { user } = req;
-            if (!user)
-                throw new HttpException(
-                    HttpStatusCode.Unauthorized,
-                    "Unauthorized",
-                );
+  static async create(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
 
-            const validatedTheme = validateThemeCreate.parse(req.body);
+      const validatedTheme = validateThemeCreate.parse(req.body);
 
-            const insertedTheme = await execNormalized<APITheme>(
-                db
-                    .insert(themesTable)
-                    .values({
-                        id: BigInt(Snowflake.generate()),
-                        ...validatedTheme,
-                        authorId: BigInt(user.id),
-                    })
-                    .returning()
-                    .then((results) => results[0]),
-            );
+      const insertedTheme = await execNormalized<APITheme | null>(
+        db
+          .insert(themesTable)
+          .values({
+            id: BigInt(Snowflake.generate()),
+            ...validatedTheme,
+            authorId: BigInt(user.id),
+          })
+          .returning()
+          .then((res) => (res.length ? res[0] : null)),
+      );
 
-            if (!insertedTheme)
-                throw new HttpException(
-                    HttpStatusCode.InternalServerError,
-                    "Failed to create theme",
-                );
+      if (!insertedTheme)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to create theme",
+        );
 
-            const newTheme = {
-                ...insertedTheme,
-                author: user,
-            };
+      const newTheme = {
+        ...insertedTheme,
+        author: user,
+      };
 
-            res.status(HttpStatusCode.Created).json(newTheme);
+      res.status(HttpStatusCode.Created).json(newTheme);
 
-            fireAndForget(() => setCache("theme", newTheme.id, newTheme));
-        } catch (error) {
-            next(error);
-        }
+      fireAndForget(() => setCache("theme", newTheme.id, newTheme));
+    } catch (error) {
+      next(error);
     }
+  }
 
-    static async update(req: Request, res: Response, next: NextFunction) {
-        try {
-            const { user } = req;
-            if (!user)
-                throw new HttpException(
-                    HttpStatusCode.Unauthorized,
-                    "Unauthorized",
-                );
+  static async update(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
 
-            const { themeId } = validateThemeUpdateQuery.parse(req.params);
+      const { themeId } = validateThemeUpdateQuery.parse(req.params);
 
-            let theme = await getCache("theme", themeId);
-            if (!theme)
-                theme = await execNormalized<APITheme>(
-                    db.query.themesTable.findFirst({
-                        where: eq(themesTable.id, BigInt(themeId)),
-                    }),
-                );
+      let theme = await getCache("theme", themeId);
+      if (!theme)
+        theme = await execNormalized<APITheme | null>(
+          db.query.themesTable.findFirst({
+            where: eq(themesTable.id, BigInt(themeId)),
+          }),
+        );
 
-            if (!theme)
-                throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Theme not found",
-                );
+      if (!theme)
+        throw new HttpException(HttpStatusCode.NotFound, "Theme not found");
 
-            if (theme.authorId && BigInt(theme.authorId) !== BigInt(user.id))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You are not allowed to update this theme",
-                );
+      if (theme.authorId && BigInt(theme.authorId) !== BigInt(user.id))
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "You are not allowed to update this theme",
+        );
 
-            const validatedTheme = validateThemeUpdateBody.parse(req.body);
+      const validatedTheme = validateThemeUpdateBody.parse(req.body);
 
-            let updatedTheme = await execNormalized<APITheme>(
-                db
-                    .update(themesTable)
-                    .set({
-                        ...validatedTheme,
-                        updatedAt: new Date(),
-                    })
-                    .where(eq(themesTable.id, BigInt(theme.id)))
-                    .returning()
-                    .then((results) => results[0]),
-            );
+      let updatedTheme = await execNormalized<APITheme | null>(
+        db
+          .update(themesTable)
+          .set({
+            ...validatedTheme,
+            updatedAt: new Date(),
+          })
+          .where(eq(themesTable.id, BigInt(theme.id)))
+          .returning()
+          .then((res) => (res.length ? res[0] : null)),
+      );
 
-            if (!updatedTheme)
-                throw new HttpException(
-                    HttpStatusCode.InternalServerError,
-                    "Failed to update theme",
-                );
+      if (!updatedTheme)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to update theme",
+        );
 
-            updatedTheme = {
-                ...updatedTheme,
-                author: theme.author || user,
-            };
+      updatedTheme = {
+        ...updatedTheme,
+        author: theme.author || user,
+      };
 
-            res.status(HttpStatusCode.Success).json(updatedTheme);
+      res.status(HttpStatusCode.Success).json(updatedTheme);
 
-            fireAndForget(() => setCache("theme", themeId, updatedTheme), {
-                label: "cache:set:theme",
-                meta: { themeId },
-            });
-        } catch (error) {
-            next(error);
-        }
+      fireAndForget(() => setCache("theme", themeId, updatedTheme), {
+        label: "cache:set:theme",
+        meta: { themeId },
+      });
+    } catch (error) {
+      next(error);
     }
+  }
 
-    static async delete(req: Request, res: Response, next: NextFunction) {
-        try {
-            const { user } = req;
-            if (!user)
-                throw new HttpException(
-                    HttpStatusCode.Unauthorized,
-                    "Unauthorized",
-                );
+  static async delete(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
 
-            const { themeId } = validateThemeUpdateQuery.parse(req.params);
+      const { themeId } = validateThemeUpdateQuery.parse(req.params);
 
-            let theme = await getCache("theme", themeId);
-            if (!theme)
-                theme = await execNormalized<APITheme>(
-                    db.query.themesTable.findFirst({
-                        where: eq(themesTable.id, BigInt(themeId)),
-                    }),
-                );
+      let theme = await getCache("theme", themeId);
+      if (!theme)
+        theme = await execNormalized<APITheme | null>(
+          db.query.themesTable.findFirst({
+            where: eq(themesTable.id, BigInt(themeId)),
+          }),
+        );
 
-            if (!theme)
-                throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Theme not found",
-                );
+      if (!theme)
+        throw new HttpException(HttpStatusCode.NotFound, "Theme not found");
 
-            if (!theme.authorId)
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "Woah there! You can't delete an official theme",
-                );
+      if (!theme.authorId)
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "Woah there! You can't delete an official theme",
+        );
 
-            if (BigInt(theme.authorId) !== BigInt(user.id))
-                throw new HttpException(
-                    HttpStatusCode.Forbidden,
-                    "You are not allowed to delete this theme",
-                );
+      if (BigInt(theme.authorId) !== BigInt(user.id))
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "You are not allowed to delete this theme",
+        );
 
-            await db
-                .delete(themesTable)
-                .where(eq(themesTable.id, BigInt(themeId)));
+      await db.delete(themesTable).where(eq(themesTable.id, BigInt(themeId)));
 
-            res.status(HttpStatusCode.Success).send({
-                id: theme.id,
-            });
+      res.status(HttpStatusCode.Success).send({
+        id: theme.id,
+      });
 
-            fireAndForget(() => deleteCache("theme", themeId), {
-                label: "cache:delete:theme",
-                meta: { themeId },
-            });
-        } catch (error) {
-            next(error);
-        }
+      fireAndForget(() => deleteCache("theme", themeId), {
+        label: "cache:delete:theme",
+        meta: { themeId },
+      });
+    } catch (error) {
+      next(error);
     }
+  }
 }

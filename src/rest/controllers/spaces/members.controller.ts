@@ -55,7 +55,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { permissionFlags } from "@mutualzz/bitfield";
 import dayjs from "dayjs";
-import { VoiceStateService } from "@mutualzz/gateway";
+import { VoiceStateService } from "@mutualzz/gatexxway";
 import { z } from "zod";
 import {
   assertHierarchyCanAffectRole,
@@ -72,8 +72,6 @@ export default class MembersController {
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId } = validateMembersGetAllParams.parse(req.params);
       const { limit } = validateMembersGetAllQuery.parse(req.query);
@@ -131,8 +129,6 @@ export default class MembersController {
   static async getOne(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId } = validateMembersActionParams.parse(req.params);
 
@@ -172,8 +168,6 @@ export default class MembersController {
   static async unban(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId } = validateMembersActionParams.parse(req.params);
 
@@ -239,8 +233,6 @@ export default class MembersController {
   static async addMe(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId } = validateMembersAddParams.parse(req.params);
 
@@ -309,7 +301,7 @@ export default class MembersController {
           );
         }
 
-        const createdMember = await execNormalized<APISpaceMember>(
+        const createdMember = await execNormalized<APISpaceMember | null>(
           tx
             .insert(spaceMembersTable)
             .values({
@@ -318,7 +310,7 @@ export default class MembersController {
               joinedAt: new Date(),
             })
             .returning()
-            .then((r) => r[0]),
+            .then((res) => (res.length ? res[0] : null)),
         );
 
         if (!createdMember)
@@ -412,7 +404,7 @@ export default class MembersController {
         },
       ]);
 
-      const settings = await execNormalized<APIUserSettings>(
+      const settings = await execNormalized<APIUserSettings | null>(
         db
           .insert(userSettingsTable)
           .values({
@@ -426,7 +418,7 @@ export default class MembersController {
             },
           })
           .returning()
-          .then((results) => results[0]),
+          .then((res) => (res.length ? res[0] : null)),
       );
 
       if (settings) {
@@ -454,8 +446,6 @@ export default class MembersController {
   static async removeMe(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId } = validateMembersRemoveMeParams.parse(req.params);
 
@@ -535,8 +525,6 @@ export default class MembersController {
   static async addRole(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId, roleId } = validateRoleMemberParams.parse(
         req.params,
@@ -654,8 +642,6 @@ export default class MembersController {
   static async addRoleBulk(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, roleId } = validateRoleParams.parse(req.params);
 
@@ -674,15 +660,10 @@ export default class MembersController {
           userIds: z
             .string()
             .array()
+            .min(1, "You have to add at least 1 member to one role")
             .max(30, "You can add up to maximum of 30 members to one role"),
         })
         .parse(req.body);
-
-      if (!userIds.length)
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "No members provided",
-        );
 
       const role = await db
         .select()
@@ -693,21 +674,18 @@ export default class MembersController {
             eq(rolesTable.spaceId, BigInt(spaceId)),
           ),
         )
-        .then((res) => res[0]);
+        .then((res) => (res.length ? res[0] : null));
 
       if (!role)
         throw new HttpException(HttpStatusCode.NotFound, "Role not found");
 
-      const actorIsOwner = String(user.id) === String(space.ownerId);
+      const actorIsOwner = BigInt(user.id) === BigInt(space.ownerId);
       const actorIsAdmin =
         (actorPermissions.bits & permissionFlags.Administrator) ===
         permissionFlags.Administrator;
 
       if (!actorIsOwner && !actorIsAdmin) {
-        const actorTopPos = await getActorTopRolePosition(
-          String(spaceId),
-          String(user.id),
-        );
+        const actorTopPos = await getActorTopRolePosition(spaceId, user.id);
         assertHierarchyCanAffectRole(
           actorIsOwner,
           actorIsAdmin,
@@ -771,8 +749,6 @@ export default class MembersController {
   static async removeRole(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId, roleId } = validateRoleMemberParams.parse(
         req.params,
@@ -895,8 +871,6 @@ export default class MembersController {
   static async getBans(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId } = validateMembersGetAllParams.parse(req.params);
 
@@ -929,8 +903,6 @@ export default class MembersController {
   static async getBan(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId } = validateMembersActionParams.parse(req.params);
 
@@ -969,8 +941,6 @@ export default class MembersController {
   static async kick(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId } = validateMembersActionParams.parse(req.params);
 
@@ -1074,8 +1044,6 @@ export default class MembersController {
   static async ban(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId } = validateMembersActionParams.parse(req.params);
 
@@ -1274,8 +1242,6 @@ export default class MembersController {
   ) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { spaceId, userId } = validateMembersActionParams.parse(req.params);
 

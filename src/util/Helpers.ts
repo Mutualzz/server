@@ -1,34 +1,34 @@
 import { getCache, setCache } from "@mutualzz/cache";
 import {
-    channelPermissionOverwritesTable,
-    channelRecipientsTable,
-    channelsTable,
-    db,
-    expressionsTable,
-    relationshipsTable,
-    rolesTable,
-    spaceMemberRolesTable,
-    spaceMembersTable,
-    spacesTable,
-    themesTable,
-    toPublicUser,
-    userSettingsTable,
-    usersTable,
+  channelPermissionOverwritesTable,
+  channelRecipientsTable,
+  channelsTable,
+  db,
+  expressionsTable,
+  relationshipsTable,
+  rolesTable,
+  spaceMemberRolesTable,
+  spaceMembersTable,
+  spacesTable,
+  themesTable,
+  toPublicUser,
+  userSettingsTable,
+  usersTable,
 } from "@mutualzz/database";
 import {
-    type APIChannel,
-    type APIExpression,
-    type APIPrivateUser,
-    type APIReadState,
-    type APIRelationship,
-    type APISpace,
-    type APISpaceMember,
-    type APITheme,
-    type APIUser,
-    type APIUserSettings,
-    type PresencePayload,
-    ReadStateType,
-    type Snowflake,
+  type APIChannel,
+  type APIExpression,
+  type APIPrivateUser,
+  type APIReadState,
+  type APIRelationship,
+  type APISpace,
+  type APISpaceMember,
+  type APITheme,
+  type APIUser,
+  type APIUserSettings,
+  type PresencePayload,
+  ReadStateType,
+  type Snowflake,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
@@ -39,605 +39,598 @@ import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
 
 export const publicUserColumns = {
-    hash: false,
-    dateOfBirth: false,
-    previousAvatars: false,
-    email: false,
+  hash: false,
+  dateOfBirth: false,
+  previousAvatars: false,
+  email: false,
 } as const;
 
 export async function isChannelRecipient(channelId: string, userId: string) {
-    const cacheKey = `${channelId}:${userId}`;
+  const cacheKey = `${channelId}:${userId}`;
 
-    const cached = await getCache("channelRecipient", cacheKey);
-    if (typeof cached === "boolean") return cached;
+  const cached = await getCache("channelRecipient", cacheKey);
+  if (typeof cached === "boolean") return cached;
 
-    const row = await db.query.channelRecipientsTable.findFirst({
-        columns: { userId: true },
-        where: and(
-            eq(channelRecipientsTable.channelId, BigInt(channelId)),
-            eq(channelRecipientsTable.userId, BigInt(userId)),
-        ),
-    });
+  const row = await db.query.channelRecipientsTable.findFirst({
+    columns: { userId: true },
+    where: and(
+      eq(channelRecipientsTable.channelId, BigInt(channelId)),
+      eq(channelRecipientsTable.userId, BigInt(userId)),
+    ),
+  });
 
-    const isRecipient = !!row;
-    await setCache("channelRecipient", cacheKey, isRecipient);
-    return isRecipient;
+  const isRecipient = !!row;
+  await setCache("channelRecipient", cacheKey, isRecipient);
+  return isRecipient;
 }
 
 export async function getBulkPresences(
-    userIds: string[],
+  userIds: string[],
 ): Promise<Record<string, PresencePayload>> {
-    const results = await Promise.all(
-        userIds.map(async (id) => {
-            const presence = await PresenceService.get(id);
-            return [id, presence] as const;
-        }),
-    );
+  const results = await Promise.all(
+    userIds.map(async (id) => {
+      const presence = await PresenceService.get(id);
+      return [id, presence] as const;
+    }),
+  );
 
-    return Object.fromEntries(
-        results.filter(
-            (entry): entry is [string, PresencePayload] => entry[1] !== null,
-        ),
-    );
+  return Object.fromEntries(
+    results.filter(
+      (entry): entry is [string, PresencePayload] => entry[1] !== null,
+    ),
+  );
 }
 
 export const prepareReadyData = async (user: APIPrivateUser) => {
-    const [
-        themes,
-        spaces,
-        dmChannels,
-        relationships,
-        expressions,
-        settings,
-        readStates,
-    ] = await Promise.all([
-        // Get all themes owned by the user
-        execNormalizedMany<APITheme>(
-            db.query.themesTable.findMany({
-                with: {
-                    author: {
-                        columns: publicUserColumns,
-                    },
-                },
-                where: eq(themesTable.authorId, BigInt(user.id)),
-            }),
-        ),
+  const [
+    themes,
+    spaces,
+    dmChannels,
+    relationships,
+    expressions,
+    settings,
+    readStates,
+  ] = await Promise.all([
+    // Get all themes owned by the user
+    execNormalizedMany<APITheme>(
+      db.query.themesTable.findMany({
+        with: {
+          author: {
+            columns: publicUserColumns,
+          },
+        },
+        where: eq(themesTable.authorId, BigInt(user.id)),
+      }),
+    ),
 
-        // Get all spaces that the user is part of or is owner of.
-        execNormalizedMany<APISpace>(
-            db.query.spacesTable.findMany({
-                with: {
-                    members: {
-                        with: {
-                            user: { columns: publicUserColumns },
-                            roles: true,
-                        },
-                    },
-                    channels: {
-                        with: {
-                            parent: true,
-                            overwrites: true,
-                            space: true,
-                        },
-                    },
-                    roles: true,
-                    owner: true,
-                },
-                where: or(
-                    eq(spacesTable.ownerId, BigInt(user.id)),
-                    sql`exists (
+    // Get all spaces that the user is part of or is owner of.
+    execNormalizedMany<APISpace>(
+      db.query.spacesTable.findMany({
+        with: {
+          members: {
+            with: {
+              user: { columns: publicUserColumns },
+              roles: true,
+            },
+          },
+          channels: {
+            with: {
+              parent: true,
+              overwrites: true,
+              space: true,
+            },
+          },
+          roles: true,
+          owner: true,
+        },
+        where: or(
+          eq(spacesTable.ownerId, BigInt(user.id)),
+          sql`exists (
                     select 1 from "space_members" sm
                     where sm."spaceId" = ${spacesTable.id}
                     and sm."userId" = ${BigInt(user.id)}
                 )`,
-                ),
-            }),
         ),
+      }),
+    ),
 
-        // Get all the DM Channels
-        execNormalizedMany(
-            db.query.channelRecipientsTable.findMany({
-                where: and(
-                    eq(channelRecipientsTable.userId, BigInt(user.id)),
-                    eq(channelRecipientsTable.closed, false),
-                ),
+    // Get all the DM Channels
+    execNormalizedMany(
+      db.query.channelRecipientsTable.findMany({
+        where: and(
+          eq(channelRecipientsTable.userId, BigInt(user.id)),
+          eq(channelRecipientsTable.closed, false),
+        ),
+        with: {
+          channel: {
+            with: {
+              recipients: {
                 with: {
-                    channel: {
-                        with: {
-                            recipients: {
-                                with: {
-                                    user: { columns: publicUserColumns },
-                                },
-                            },
-                        },
-                    },
+                  user: { columns: publicUserColumns },
                 },
-            }),
-        ),
+              },
+            },
+          },
+        },
+      }),
+    ),
 
-        execNormalizedMany<APIRelationship>(
-            db.query.relationshipsTable.findMany({
-                where: or(
-                    eq(relationshipsTable.userId, BigInt(user.id)),
-                    eq(relationshipsTable.otherUserId, BigInt(user.id)),
-                ),
-            }),
+    execNormalizedMany<APIRelationship>(
+      db.query.relationshipsTable.findMany({
+        where: or(
+          eq(relationshipsTable.userId, BigInt(user.id)),
+          eq(relationshipsTable.otherUserId, BigInt(user.id)),
         ),
+      }),
+    ),
 
-        // Get expressions that a user can access to or is owner of
-        execNormalizedMany<APIExpression>(
-            db.query.expressionsTable.findMany({
-                where: or(
-                    eq(expressionsTable.authorId, BigInt(user.id)),
-                    sql`exists (
+    // Get expressions that a user can access to or is owner of
+    execNormalizedMany<APIExpression>(
+      db.query.expressionsTable.findMany({
+        where: or(
+          eq(expressionsTable.authorId, BigInt(user.id)),
+          sql`exists (
                         select 1 from "space_members" sm
                         where sm."spaceId" = ${expressionsTable.spaceId}
                         and sm."userId" = ${BigInt(user.id)}
                     )`,
-                ),
-            }),
         ),
+      }),
+    ),
 
-        // Get user settings
-        execNormalized<APIUserSettings>(
-            db.query.userSettingsTable.findFirst({
-                where: eq(userSettingsTable.userId, BigInt(user.id)),
-            }),
+    // Get user settings
+    execNormalized<APIUserSettings>(
+      db.query.userSettingsTable.findFirst({
+        where: eq(userSettingsTable.userId, BigInt(user.id)),
+      }),
+    ),
+    getReadStates(user.id),
+  ]);
+
+  const presenceUserIds = new Set<string>();
+
+  for (const row of dmChannels) {
+    for (const r of row.channel.recipients) {
+      if (r.user.id !== user.id) presenceUserIds.add(r.user.id);
+    }
+  }
+
+  for (const r of relationships) {
+    const otherId = r.userId === user.id ? r.otherUserId : r.userId;
+    presenceUserIds.add(otherId);
+  }
+
+  const mergedPresences = await getBulkPresences([...presenceUserIds]);
+
+  const channels: APIChannel[] = (await Promise.all(
+    dmChannels.map(async (row) => ({
+      ...row.channel,
+      recipients: await Promise.all(
+        row.channel.recipients.map(
+          async (r: any) => await attachPresenceUser(r.user),
         ),
-        getReadStates(user.id),
-    ]);
+      ),
+      recipientIds: row.channel.recipients.map((r: any) => r.user.id),
+    })),
+  )) satisfies APIChannel[];
 
-    const presenceUserIds = new Set<string>();
+  const relationshipsForReady = relationships.map((r) =>
+    perspectiveForUser(r, user.id),
+  );
 
-    for (const row of dmChannels) {
-        for (const r of row.channel.recipients) {
-            if (r.user.id !== user.id) presenceUserIds.add(r.user.id);
-        }
-    }
-
-    for (const r of relationships) {
-        const otherId = r.userId === user.id ? r.otherUserId : r.userId;
-        presenceUserIds.add(otherId);
-    }
-
-    const mergedPresences = await getBulkPresences([...presenceUserIds]);
-
-    const channels: APIChannel[] = (await Promise.all(
-        dmChannels.map(async (row) => ({
-            ...row.channel,
-            recipients: await Promise.all(
-                row.channel.recipients.map(
-                    async (r: any) => await attachPresenceUser(r.user),
-                ),
-            ),
-            recipientIds: row.channel.recipients.map((r: any) => r.user.id),
-        })),
-    )) satisfies APIChannel[];
-
-    const relationshipsForReady = relationships.map((r) =>
-        perspectiveForUser(r, user.id),
-    );
-
-    return {
-        user,
-        themes,
-        spaces,
-        channels,
-        relationships: relationshipsForReady,
-        expressions,
-        settings,
-        readStates,
-        mergedPresences,
-    };
+  return {
+    user,
+    themes,
+    spaces,
+    channels,
+    relationships: relationshipsForReady,
+    expressions,
+    settings,
+    readStates,
+    mergedPresences,
+  };
 };
 
 export async function getReadStates(userId: string): Promise<APIReadState[]> {
-    const rows = await db
-        .select()
-        .from(readStatesTable)
-        .where(eq(readStatesTable.userId, BigInt(userId)));
+  const rows = await db
+    .select()
+    .from(readStatesTable)
+    .where(eq(readStatesTable.userId, BigInt(userId)));
 
-    return rows.map((r) => ({
-        ...r,
-        id: r.channelId.toString(),
-        lastMessageId: r.lastMessageId?.toString() ?? null,
-        notificationsCursor: r.notificationsCursor?.toString() ?? null,
-        lastAckedId: r.lastAckedId?.toString() ?? null,
-    })) satisfies APIReadState[];
+  return rows.map((r) => ({
+    ...r,
+    id: r.channelId.toString(),
+    lastMessageId: r.lastMessageId?.toString() ?? null,
+    notificationsCursor: r.notificationsCursor?.toString() ?? null,
+    lastAckedId: r.lastAckedId?.toString() ?? null,
+  })) satisfies APIReadState[];
 }
 
 export async function incrementMentionCounts(
-    channelId: string,
-    userIds: string[],
-    roleIds?: string[],
+  channelId: string,
+  userIds: string[],
+  roleIds?: string[],
 ) {
-    const mentionedUserIds = Array.from(new Set(userIds));
-    let allUserIds = [...mentionedUserIds];
+  const mentionedUserIds = Array.from(new Set(userIds));
+  let allUserIds = [...mentionedUserIds];
 
-    if (roleIds && roleIds.length > 0) {
-        const uniqueRoleIds = Array.from(new Set(roleIds));
+  if (roleIds && roleIds.length > 0) {
+    const uniqueRoleIds = Array.from(new Set(roleIds));
 
-        const roleMembers = await db
-            .select({ userId: spaceMemberRolesTable.userId })
-            .from(spaceMemberRolesTable)
-            .where(
-                sql`${spaceMemberRolesTable.roleId} = ANY(ARRAY[${sql.raw(uniqueRoleIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
-            );
+    const roleMembers = await db
+      .select({ userId: spaceMemberRolesTable.userId })
+      .from(spaceMemberRolesTable)
+      .where(
+        sql`${spaceMemberRolesTable.roleId} = ANY(ARRAY[${sql.raw(uniqueRoleIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+      );
 
-        const roleMemberIds = roleMembers.map((r) => r.userId.toString());
-        allUserIds = Array.from(new Set([...allUserIds, ...roleMemberIds]));
-    }
+    const roleMemberIds = roleMembers.map((r) => r.userId.toString());
+    allUserIds = Array.from(new Set([...allUserIds, ...roleMemberIds]));
+  }
 
-    if (allUserIds.length === 0) return;
+  if (allUserIds.length === 0) return;
 
-    await db
-        .insert(readStatesTable)
-        .values(
-            allUserIds.map((uid) => ({
-                userId: BigInt(uid),
-                channelId: BigInt(channelId),
-                type: ReadStateType.Messages,
-                mentionCount: 1,
-            })),
-        )
-        .onConflictDoUpdate({
-            target: [
-                readStatesTable.userId,
-                readStatesTable.channelId,
-                readStatesTable.type,
-            ],
-            set: {
-                mentionCount: sql`read_states."mentionCount" + 1`,
-            },
-        });
+  await db
+    .insert(readStatesTable)
+    .values(
+      allUserIds.map((uid) => ({
+        userId: BigInt(uid),
+        channelId: BigInt(channelId),
+        type: ReadStateType.Messages,
+        mentionCount: 1,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [
+        readStatesTable.userId,
+        readStatesTable.channelId,
+        readStatesTable.type,
+      ],
+      set: {
+        mentionCount: sql`read_states."mentionCount" + 1`,
+      },
+    });
 }
 
 export const getChannels = async (ids: string[]) => {
-    const result = new Map<string, APIChannel>();
-    const misses: string[] = [];
+  const result = new Map<string, APIChannel>();
+  const misses: string[] = [];
 
-    // Check cache first for each id
-    await Promise.all(
-        ids.map(async (id) => {
-            const cached = await getCache("channel", id);
-            if (cached) result.set(id, cached);
-            else misses.push(id);
-        }),
-    );
+  // Check cache first for each id
+  await Promise.all(
+    ids.map(async (id) => {
+      const cached = await getCache("channel", id);
+      if (cached) result.set(id, cached);
+      else misses.push(id);
+    }),
+  );
 
-    if (misses.length === 0) return result;
+  if (misses.length === 0) return result;
 
-    const rows = await execNormalizedMany<APIChannel>(
-        db.query.channelsTable.findMany({
-            where: sql`${channelsTable.id} = ANY(ARRAY[${sql.raw(misses.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
-            with: {
-                recipients: {
-                    with: {
-                        user: { columns: publicUserColumns },
-                    },
-                },
-            },
-        }),
-    );
+  const rows = await execNormalizedMany<APIChannel>(
+    db.query.channelsTable.findMany({
+      where: sql`${channelsTable.id} = ANY(ARRAY[${sql.raw(misses.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+      with: {
+        recipients: {
+          with: {
+            user: { columns: publicUserColumns },
+          },
+        },
+      },
+    }),
+  );
 
-    await Promise.all(
-        rows.map(async (row) => {
-            const hydrated: APIChannel = {
-                ...row,
-                recipientIds:
-                    row.recipients?.map((r: any) => r.user.id) ??
-                    row.recipientIds ??
-                    null,
-                recipients: row.recipients
-                    ? await Promise.all(
-                          row.recipients.map((r: any) =>
-                              attachPresenceUser(r.user),
-                          ),
-                      )
-                    : null,
-            };
+  await Promise.all(
+    rows.map(async (row) => {
+      const hydrated: APIChannel = {
+        ...row,
+        recipientIds:
+          row.recipients?.map((r: any) => r.user.id) ??
+          row.recipientIds ??
+          null,
+        recipients: row.recipients
+          ? await Promise.all(
+              row.recipients.map((r: any) => attachPresenceUser(r.user)),
+            )
+          : null,
+      };
 
-            const id = row.id.toString();
-            await setCache("channel", id, hydrated);
-            result.set(id, hydrated);
-        }),
-    );
+      const id = row.id.toString();
+      await setCache("channel", id, hydrated);
+      result.set(id, hydrated);
+    }),
+  );
 
-    return result;
+  return result;
 };
 
 export async function getUser(
-    id: string,
-    privateUser: true,
+  id: string,
+  privateUser: true,
 ): Promise<APIPrivateUser | null>;
 export async function getUser(
-    id: string,
-    privateUser?: false,
+  id: string,
+  privateUser?: false,
 ): Promise<APIUser | null>;
 export async function getUser(
-    id?: string,
-    privateUser = false,
+  id?: string,
+  privateUser = false,
 ): Promise<APIUser | null> {
-    if (!id) return null;
+  if (!id) return null;
 
-    let user: APIUser | APIPrivateUser | null;
-    if (privateUser) user = await getCache("authUser", id);
-    else user = await getCache("user", id);
-    if (user) return user;
+  let user: APIUser | APIPrivateUser | null;
+  if (privateUser) user = await getCache("authUser", id);
+  else user = await getCache("user", id);
+  if (user) return user;
 
-    user = await execNormalized<APIUser | APIPrivateUser>(
-        db.query.usersTable.findFirst({
-            columns: {
-                hash: false,
-            },
-            where: eq(usersTable.id, BigInt(id)),
-        }),
-    );
+  user = await execNormalized<APIUser | APIPrivateUser>(
+    db.query.usersTable.findFirst({
+      columns: {
+        hash: false,
+      },
+      where: eq(usersTable.id, BigInt(id)),
+    }),
+  );
 
-    if (!user) return null;
+  if (!user) return null;
 
-    if (!privateUser) user = toPublicUser(user as APIPrivateUser);
+  if (!privateUser) user = toPublicUser(user as APIPrivateUser);
 
-    if ("hash" in user) delete user.hash;
-    if ("token" in user) delete user.token;
+  if ("hash" in user) delete user.hash;
+  if ("token" in user) delete user.token;
 
-    if (privateUser) await setCache("authUser", id, user as APIPrivateUser);
-    else await setCache("user", id, user);
+  if (privateUser) await setCache("authUser", id, user as APIPrivateUser);
+  else await setCache("user", id, user);
 
-    return user;
+  return user;
 }
 
 export const getSpace = async (id: string) => {
-    let space = await getCache("space", id);
-    if (space) return space;
+  let space = await getCache("space", id);
+  if (space) return space;
 
-    space = await execNormalized<APISpace>(
-        db.query.spacesTable.findFirst({
-            where: eq(spacesTable.id, BigInt(id)),
-        }),
-    );
+  space = await execNormalized<APISpace>(
+    db.query.spacesTable.findFirst({
+      where: eq(spacesTable.id, BigInt(id)),
+    }),
+  );
 
-    if (!space) return null;
+  if (!space) return null;
 
-    await setCache("space", id, space);
-    return space;
+  await setCache("space", id, space);
+  return space;
 };
 
 export const getSpaceHydrated = async (id: string) => {
-    let space = await getCache("spaceHydrated", id);
-    if (space) return space;
+  let space = await getCache("spaceHydrated", id);
+  if (space) return space;
 
-    space = await execNormalized<APISpace>(
-        db.query.spacesTable.findFirst({
-            with: {
-                roles: true,
-                members: {
-                    with: {
-                        user: {
-                            columns: publicUserColumns,
-                        },
-                        roles: {
-                            with: {
-                                role: true,
-                            },
-                        },
-                    },
-                },
-                channels: {
-                    with: {
-                        parent: true,
-                        overwrites: true,
-                    },
-                },
-                owner: { columns: publicUserColumns },
+  space = await execNormalized<APISpace>(
+    db.query.spacesTable.findFirst({
+      with: {
+        roles: true,
+        members: {
+          with: {
+            user: {
+              columns: publicUserColumns,
             },
-            where: eq(spacesTable.id, BigInt(id)),
-        }),
-    );
+            roles: {
+              with: {
+                role: true,
+              },
+            },
+          },
+        },
+        channels: {
+          with: {
+            parent: true,
+            overwrites: true,
+          },
+        },
+        owner: { columns: publicUserColumns },
+      },
+      where: eq(spacesTable.id, BigInt(id)),
+    }),
+  );
 
-    if (!space) return null;
+  if (!space) return null;
 
-    await setCache("spaceHydrated", id, space);
-    return space;
+  await setCache("spaceHydrated", id, space);
+  return space;
 };
 
 export const getChannel = async (id: string) => {
-    const channel = await getCache("channel", id);
-    if (channel) return channel;
+  const channel = await getCache("channel", id);
+  if (channel) return channel;
 
-    const row = await execNormalized<APIChannel>(
-        db.query.channelsTable.findFirst({
-            where: eq(channelsTable.id, BigInt(id)),
-            with: {
-                recipients: {
-                    with: {
-                        user: { columns: publicUserColumns },
-                    },
-                },
-            },
-        }),
-    );
+  const row = await execNormalized<APIChannel>(
+    db.query.channelsTable.findFirst({
+      where: eq(channelsTable.id, BigInt(id)),
+      with: {
+        recipients: {
+          with: {
+            user: { columns: publicUserColumns },
+          },
+        },
+      },
+    }),
+  );
 
-    if (!row) return null;
+  if (!row) return null;
 
-    const hydrated: APIChannel = {
-        ...row,
-        recipientIds:
-            row.recipients?.map((r: any) => r.user.id) ??
-            row.recipientIds ??
-            null,
-        recipients: row.recipients
-            ? await Promise.all(
-                  row.recipients.map((r: any) => attachPresenceUser(r.user)),
-              )
-            : null,
-    };
+  const hydrated: APIChannel = {
+    ...row,
+    recipientIds:
+      row.recipients?.map((r: any) => r.user.id) ?? row.recipientIds ?? null,
+    recipients: row.recipients
+      ? await Promise.all(
+          row.recipients.map((r: any) => attachPresenceUser(r.user)),
+        )
+      : null,
+  };
 
-    await setCache("channel", id, hydrated);
-    return hydrated;
+  await setCache("channel", id, hydrated);
+  return hydrated;
 };
 
 export const getExpression = async (id: string) => {
-    let expression = await getCache("expression", id);
-    if (expression) return expression;
+  let expression = await getCache("expression", id);
+  if (expression) return expression;
 
-    expression = await execNormalized<APIExpression>(
-        db.query.expressionsTable.findFirst({
-            where: eq(expressionsTable.id, BigInt(id)),
-        }),
-    );
+  expression = await execNormalized<APIExpression>(
+    db.query.expressionsTable.findFirst({
+      where: eq(expressionsTable.id, BigInt(id)),
+    }),
+  );
 
-    if (!expression) return null;
+  if (!expression) return null;
 
-    await setCache("expression", id, expression);
-    return expression;
+  await setCache("expression", id, expression);
+  return expression;
 };
 
 export async function getMember(
-    spaceId: Snowflake,
-    userId: Snowflake,
-    justChecking: true,
+  spaceId: Snowflake,
+  userId: Snowflake,
+  justChecking: true,
 ): Promise<boolean>;
 export async function getMember(
-    spaceId: Snowflake,
-    userId: Snowflake,
-    justChecking?: false,
+  spaceId: Snowflake,
+  userId: Snowflake,
+  justChecking?: false,
 ): Promise<APISpaceMember | null>;
 export async function getMember(
-    spaceId: Snowflake,
-    userId: Snowflake,
-    justChecking = false,
+  spaceId: Snowflake,
+  userId: Snowflake,
+  justChecking = false,
 ): Promise<boolean | APISpaceMember | null> {
-    const cacheKey = `${spaceId}:${userId}`;
+  const cacheKey = `${spaceId}:${userId}`;
 
-    // If caller only wants existence, do not return cached object.
-    if (justChecking) {
-        const exists = await execNormalized<APISpaceMember>(
-            db.query.spaceMembersTable.findFirst({
-                columns: { userId: true },
-                where: and(
-                    eq(spaceMembersTable.spaceId, BigInt(spaceId)),
-                    eq(spaceMembersTable.userId, BigInt(userId)),
-                ),
-            }),
-        );
-        return !!exists;
-    }
-
-    const cached = await getCache("spaceMember", cacheKey);
-    if (cached) return cached;
-
-    const member = await execNormalized<APISpaceMember>(
-        db.query.spaceMembersTable.findFirst({
-            with: { space: true },
-            where: and(
-                eq(spaceMembersTable.spaceId, BigInt(spaceId)),
-                eq(spaceMembersTable.userId, BigInt(userId)),
-            ),
-        }),
+  // If caller only wants existence, do not return cached object.
+  if (justChecking) {
+    const exists = await execNormalized<APISpaceMember>(
+      db.query.spaceMembersTable.findFirst({
+        columns: { userId: true },
+        where: and(
+          eq(spaceMembersTable.spaceId, BigInt(spaceId)),
+          eq(spaceMembersTable.userId, BigInt(userId)),
+        ),
+      }),
     );
+    return !!exists;
+  }
 
-    if (!member) return null;
+  const cached = await getCache("spaceMember", cacheKey);
+  if (cached) return cached;
 
-    await setCache("spaceMember", cacheKey, member);
-    return member;
+  const member = await execNormalized<APISpaceMember>(
+    db.query.spaceMembersTable.findFirst({
+      with: { space: true },
+      where: and(
+        eq(spaceMembersTable.spaceId, BigInt(spaceId)),
+        eq(spaceMembersTable.userId, BigInt(userId)),
+      ),
+    }),
+  );
+
+  if (!member) return null;
+
+  await setCache("spaceMember", cacheKey, member);
+  return member;
 }
 
 export async function getEveryoneRole(spaceId: Snowflake) {
-    let role = await getCache("everyoneRole", spaceId);
-    if (role) return role;
+  let role = await getCache("everyoneRole", spaceId);
+  if (role) return role;
 
-    role = await execNormalized(
-        db
-            .select({
-                id: rolesTable.id,
-                allow: rolesTable.allow,
-                deny: rolesTable.deny,
-                flags: rolesTable.flags,
-                position: rolesTable.position,
-            })
-            .from(rolesTable)
-            .where(
-                and(
-                    eq(rolesTable.spaceId, BigInt(spaceId)),
-                    sql`${rolesTable.flags} & ${roleFlags.Everyone} = ${roleFlags.Everyone}`,
-                ),
-            )
-            .limit(1)
-            .then((res) => res[0])
-            .catch(() => null),
-    );
+  role = await execNormalized(
+    db
+      .select({
+        id: rolesTable.id,
+        allow: rolesTable.allow,
+        deny: rolesTable.deny,
+        flags: rolesTable.flags,
+        position: rolesTable.position,
+      })
+      .from(rolesTable)
+      .where(
+        and(
+          eq(rolesTable.spaceId, BigInt(spaceId)),
+          sql`${rolesTable.flags} & ${roleFlags.Everyone} = ${roleFlags.Everyone}`,
+        ),
+      )
+      .limit(1)
+      .then((res) => res[0])
+      .catch(() => null),
+  );
 
-    if (!role) return null;
+  if (!role) return null;
 
-    await setCache("everyoneRole", spaceId, role);
-    return role;
+  await setCache("everyoneRole", spaceId, role);
+  return role;
 }
 
 export async function getMemberRoles(spaceId: Snowflake, userId: Snowflake) {
-    const cacheKey = `${spaceId}:${userId}`;
-    let memberRoles = await getCache("memberRoles", cacheKey);
-    if (memberRoles) return memberRoles;
+  const cacheKey = `${spaceId}:${userId}`;
+  let memberRoles = await getCache("memberRoles", cacheKey);
+  if (memberRoles) return memberRoles;
 
-    const rows = await db
-        .select({
-            id: rolesTable.id,
-            allow: rolesTable.allow,
-            deny: rolesTable.deny,
-            flags: rolesTable.flags,
-            position: rolesTable.position,
-        })
-        .from(spaceMemberRolesTable)
-        .innerJoin(rolesTable, eq(spaceMemberRolesTable.roleId, rolesTable.id))
-        .where(
-            and(
-                eq(spaceMemberRolesTable.spaceId, BigInt(spaceId)),
-                eq(spaceMemberRolesTable.userId, BigInt(userId)),
-            ),
-        );
+  const rows = await db
+    .select({
+      id: rolesTable.id,
+      allow: rolesTable.allow,
+      deny: rolesTable.deny,
+      flags: rolesTable.flags,
+      position: rolesTable.position,
+    })
+    .from(spaceMemberRolesTable)
+    .innerJoin(rolesTable, eq(spaceMemberRolesTable.roleId, rolesTable.id))
+    .where(
+      and(
+        eq(spaceMemberRolesTable.spaceId, BigInt(spaceId)),
+        eq(spaceMemberRolesTable.userId, BigInt(userId)),
+      ),
+    );
 
-    memberRoles = rows.map((r) => ({
-        ...r,
-        id: r.id.toString(),
-    }));
+  memberRoles = rows.map((r) => ({
+    ...r,
+    id: r.id.toString(),
+  }));
 
-    await setCache("memberRoles", cacheKey, memberRoles);
-    return memberRoles;
+  await setCache("memberRoles", cacheKey, memberRoles);
+  return memberRoles;
 }
 
 export async function getChannelOverwrites(
-    spaceId: Snowflake,
-    channelId: Snowflake,
+  spaceId: Snowflake,
+  channelId: Snowflake,
 ) {
-    const cacheKey = `${spaceId}:${channelId}`;
-    let overwrites = await getCache("channelOverwrites", cacheKey);
-    if (overwrites) return overwrites;
+  const cacheKey = `${spaceId}:${channelId}`;
+  let overwrites = await getCache("channelOverwrites", cacheKey);
+  if (overwrites) return overwrites;
 
-    const rows = await db
-        .select({
-            roleId: channelPermissionOverwritesTable.roleId,
-            userId: channelPermissionOverwritesTable.userId,
-            allow: channelPermissionOverwritesTable.allow,
-            deny: channelPermissionOverwritesTable.deny,
-        })
-        .from(channelPermissionOverwritesTable)
-        .where(
-            and(
-                eq(channelPermissionOverwritesTable.spaceId, BigInt(spaceId)),
-                eq(
-                    channelPermissionOverwritesTable.channelId,
-                    BigInt(channelId),
-                ),
-            ),
-        );
+  const rows = await db
+    .select({
+      roleId: channelPermissionOverwritesTable.roleId,
+      userId: channelPermissionOverwritesTable.userId,
+      allow: channelPermissionOverwritesTable.allow,
+      deny: channelPermissionOverwritesTable.deny,
+    })
+    .from(channelPermissionOverwritesTable)
+    .where(
+      and(
+        eq(channelPermissionOverwritesTable.spaceId, BigInt(spaceId)),
+        eq(channelPermissionOverwritesTable.channelId, BigInt(channelId)),
+      ),
+    );
 
-    overwrites = rows.map((row) => ({
-        roleId: row.roleId ? row.roleId.toString() : null,
-        userId: row.userId ? row.userId.toString() : null,
-        allow: row.allow,
-        deny: row.deny,
-    }));
+  overwrites = rows.map((row) => ({
+    roleId: row.roleId ? row.roleId.toString() : null,
+    userId: row.userId ? row.userId.toString() : null,
+    allow: row.allow,
+    deny: row.deny,
+  }));
 
-    await setCache("channelOverwrites", cacheKey, overwrites);
-    return overwrites;
+  await setCache("channelOverwrites", cacheKey, overwrites);
+  return overwrites;
 }

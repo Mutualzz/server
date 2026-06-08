@@ -1,16 +1,5 @@
-import {
-  deleteCache,
-  getCache,
-  invalidateCache,
-  setCache,
-} from "@mutualzz/cache";
-import {
-  channelRecipientsTable,
-  db,
-  messagesTable,
-  relationshipsTable,
-  spaceMembersTable,
-} from "@mutualzz/database";
+import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
+import { channelRecipientsTable, db, messagesTable, relationshipsTable, spaceMembersTable, } from "@mutualzz/database";
 import {
   type APIMessage,
   type APIRelationship,
@@ -48,15 +37,11 @@ import {
 } from "@mutualzz/validators";
 import { and, asc, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import {
-  type BitField,
-  messageFlags,
-  type PermissionFlags,
-} from "@mutualzz/bitfield";
-import { createSystemMessage } from "@mutualzz/util/systemUser.ts";
+import { type BitField, messageFlags, type PermissionFlags, } from "@mutualzz/bitfield";
+import { createSystemMessage } from "@mutualzz/util/systemUser";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
-import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
-import { offlineLike } from "@mutualzz/gateway/util/Calculations.ts";
+import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
+import { offlineLike } from "@mutualzz/gateway/util/Calculations";
 import { z } from "zod";
 
 export default class MessagesController {
@@ -163,10 +148,7 @@ export default class MessagesController {
         ? await sanitizeContent(content, channel, canUseExternalEmojis)
         : null;
 
-      if (
-        channel.type === ChannelType.DM ||
-        channel.type === ChannelType.GroupDM
-      ) {
+      if (channel.type === ChannelType.DM) {
         const recipientRows = await execNormalizedMany(
           db.query.channelRecipientsTable.findMany({
             where: eq(channelRecipientsTable.channelId, BigInt(channel.id)),
