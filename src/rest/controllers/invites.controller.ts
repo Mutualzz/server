@@ -66,7 +66,7 @@ export default class InvitesController {
 
           return invite;
         }),
-      ).then((invs: APIInvite[]) => invs.filter((inv) => !!inv));
+      ).then((invites) => invites.filter((inv) => !!inv));
 
       if (hadExpired) await invalidateCache("invites", spaceId);
       await setCache("invites", spaceId, invites || []);

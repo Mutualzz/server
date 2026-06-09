@@ -283,7 +283,8 @@ export default class ExpressionsController {
           ? [
               {
                 label: "cache:invalidate:spaceHydrated",
-                run: () => invalidateCache("spaceHydrated", expression.spaceId),
+                run: () =>
+                  invalidateCache("spaceHydrated", expression.spaceId!),
               },
             ]
           : []),
@@ -358,7 +359,8 @@ export default class ExpressionsController {
           ? [
               {
                 label: "cache:invalidate:spaceHydrated",
-                run: () => invalidateCache("spaceHydrated", expression.spaceId),
+                run: () =>
+                  invalidateCache("spaceHydrated", expression.spaceId!),
               },
             ]
           : []),

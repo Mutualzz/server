@@ -338,12 +338,12 @@ export default class ChannelsController {
           label: "cache:update:channel",
           run: () => setCache("channel", updatedChannel.id, updatedChannel),
         },
-        ...(updatedChannel.space
+        ...(updatedChannel.spaceId
           ? [
               {
                 label: "cache:invalidate:spaceHydrated",
                 run: () =>
-                  invalidateCache("spaceHydrated", updatedChannel.spaceId),
+                  invalidateCache("spaceHydrated", updatedChannel.spaceId!),
               },
             ]
           : []),
@@ -397,7 +397,7 @@ export default class ChannelsController {
         }
 
         for (let i = 0; i < resolved.length; i++) {
-          const entry = resolved[i] as APIChannel | null;
+          const entry = resolved[i];
           if (!entry)
             throw new HttpException(
               HttpStatusCode.InternalServerError,
@@ -560,7 +560,7 @@ export default class ChannelsController {
             ? [
                 {
                   label: `cache:invalidate:spaceHydrated:${channel.spaceId}`,
-                  run: () => invalidateCache("spaceHydrated", channel.spaceId),
+                  run: () => invalidateCache("spaceHydrated", channel.spaceId!),
                 },
               ]
             : []),
@@ -595,7 +595,7 @@ export default class ChannelsController {
           ? [
               {
                 label: "cache:invalidate:spaceHydrated",
-                run: () => invalidateCache("spaceHydrated", channel.spaceId),
+                run: () => invalidateCache("spaceHydrated", channel.spaceId!),
               },
             ]
           : []),
