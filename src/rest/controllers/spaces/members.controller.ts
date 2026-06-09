@@ -55,7 +55,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { permissionFlags } from "@mutualzz/bitfield";
 import dayjs from "dayjs";
-import { VoiceStateService } from "@mutualzz/gatexxway";
+import { VoiceStateService } from "@mutualzz/gateway";
 import { z } from "zod";
 import {
   assertHierarchyCanAffectRole,
