@@ -48,8 +48,6 @@ export default class MessagesController {
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { channelId } = validateMessageParamsPut.parse(req.params);
 
@@ -144,6 +142,8 @@ export default class MessagesController {
         }
       }
 
+      const effectiveCanEmbed = !channel.spaceId || canEmbed;
+
       const sanitizedContent = content
         ? await sanitizeContent(content, channel, canUseExternalEmojis)
         : null;
@@ -219,7 +219,9 @@ export default class MessagesController {
             channelId: BigInt(channel.id),
             spaceId: channel.spaceId ? BigInt(channel.spaceId) : undefined,
             content: sanitizedContent,
-            embeds: canEmbed ? await buildEmbeds(sanitizedContent || "") : [],
+            embeds: effectiveCanEmbed
+              ? await buildEmbeds(sanitizedContent || "")
+              : [],
             type: MessageType.Default,
           })
           .returning()
@@ -436,8 +438,6 @@ export default class MessagesController {
   static async update(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { channelId, messageId } = validateMessageParamsModify.parse(
         req.params,
@@ -533,6 +533,8 @@ export default class MessagesController {
         }
       }
 
+      const effectiveCanEmbed = !channel.spaceId || canEmbed;
+
       const sanitizedContent = content
         ? await sanitizeContent(content, channel, canUseExternalEmojis)
         : content;
@@ -542,7 +544,9 @@ export default class MessagesController {
           .update(messagesTable)
           .set({
             content: sanitizedContent,
-            embeds: canEmbed ? await buildEmbeds(sanitizedContent || "") : [],
+            embeds: effectiveCanEmbed
+              ? await buildEmbeds(sanitizedContent || "")
+              : [],
             edited: true,
           })
           .where(eq(messagesTable.id, BigInt(message.id)))
@@ -591,8 +595,6 @@ export default class MessagesController {
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { channelId } = validateChannelParamsGet.parse(req.params);
 
@@ -759,8 +761,6 @@ export default class MessagesController {
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { channelId, messageId } = validateMessageParamsModify.parse(
         req.params,
@@ -843,8 +843,6 @@ export default class MessagesController {
   static async ack(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { channelId, messageId } = validateMessageAckParams.parse(
         req.params,
@@ -924,8 +922,6 @@ export default class MessagesController {
   static async ackBulk(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { readStates } = z
         .object({

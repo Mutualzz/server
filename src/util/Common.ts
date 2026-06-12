@@ -16,552 +16,776 @@ import MurmurHash from "imurmurhash";
 import { getExpression } from "@mutualzz/util/Helpers.ts";
 import { klipyFetch } from "@mutualzz/util/Klipy.ts";
 
-type Services = "spotify" | "youtube" | "apple" | "tidal" | "klipy" | "other";
+type Services =
+  | "spotify"
+  | "youtube"
+  | "apple"
+  | "tidal"
+  | "klipy"
+  | "tenor"
+  | "giphy"
+  | "imgur"
+  | "redgifs"
+  | "gif"
+  | "other";
 
 let appleToken = null;
 try {
-    const privateKey = fs.readFileSync(
-        path.resolve(process.cwd(), "KitKey.p8"),
-    );
+  const privateKey = fs.readFileSync(path.resolve(process.cwd(), "KitKey.p8"));
 
-    appleToken = jwt.sign({}, privateKey, {
-        algorithm: "ES256",
-        expiresIn: "180d",
-        issuer: process.env.APPLE_TEAM_ID,
-        header: {
-            alg: "ES256",
-            kid: process.env.APPLE_KEY_ID,
-        },
-    });
+  appleToken = jwt.sign({}, privateKey, {
+    algorithm: "ES256",
+    expiresIn: "180d",
+    issuer: process.env.APPLE_TEAM_ID,
+    header: {
+      alg: "ES256",
+      kid: process.env.APPLE_KEY_ID,
+    },
+  });
 } catch {
-    console.error("Apple embeds wont work");
+  console.error("Apple embeds wont work");
 }
 
 export const spotifySdk = SpotifyApi.withClientCredentials(
-    process.env.SPOTIFY_CLIENT_ID!,
-    process.env.SPOTIFY_CLIENT_SECRET!,
+  process.env.SPOTIFY_CLIENT_ID!,
+  process.env.SPOTIFY_CLIENT_SECRET!,
 );
 
 export const appleMusicSdk = new AppleMusicClient({
-    developerToken: appleToken ?? "",
-    defaultStorefront: "us",
-    defaultLanguageTag: "en-US",
+  developerToken: appleToken ?? "",
+  defaultStorefront: "us",
+  defaultLanguageTag: "en-US",
 });
 
 export const murmur = (input: string): string =>
-    MurmurHash(input).result().toString();
+  MurmurHash(input).result().toString();
 
 export const base64UrlEncode = (input: Buffer | string) =>
-    Buffer.from(input)
-        .toString("base64")
-        .replace(/=/g, "")
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_");
+  Buffer.from(input)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
 
 export const asAcronym = (str: string) =>
-    str
-        .split(" ")
-        .map((str) => str[0])
-        .join("");
+  str
+    .split(" ")
+    .map((str) => str[0])
+    .join("");
 
 export function arrayPartition<T>(
-    array: T[],
-    filter: (elem: T) => boolean,
+  array: T[],
+  filter: (elem: T) => boolean,
 ): [T[], T[]] {
-    const pass: T[] = [],
-        fail: T[] = [];
-    array.forEach((e) => (filter(e) ? pass : fail).push(e));
-    return [pass, fail];
+  const pass: T[] = [],
+    fail: T[] = [];
+  array.forEach((e) => (filter(e) ? pass : fail).push(e));
+  return [pass, fail];
 }
 
 async function replaceAsync(
-    str: string,
-    regex: string | RegExp,
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-    asyncFn: Function,
+  str: string,
+  regex: string | RegExp,
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  asyncFn: Function,
 ) {
-    const promises: any[] = [];
-    str.replace(regex, (full, ...args) => {
-        promises.push(asyncFn(full, ...args));
-        return full;
-    });
-    const data = await Promise.all(promises);
-    return str.replace(regex, () => data.shift());
+  const promises: any[] = [];
+  str.replace(regex, (full, ...args) => {
+    promises.push(asyncFn(full, ...args));
+    return full;
+  });
+  const data = await Promise.all(promises);
+  return str.replace(regex, () => data.shift());
 }
 
 export const sanitizeContent = (
-    content: string,
-    channel?: APIChannel | null,
-    canUseExternalEmojis = false,
+  content: string,
+  channel?: APIChannel | null,
+  canUseExternalEmojis = false,
 ) => {
-    const customEmojiRegex = /<a?:[^:]+:\d+>/g;
+  const customEmojiRegex = /<a?:[^:]+:\d+>/g;
 
-    return replaceAsync(content, customEmojiRegex, async (raw: string) => {
-        const [, , emojiId] = raw.replace(">", "").split(":");
-        const emoji = await getExpression(emojiId);
+  return replaceAsync(content, customEmojiRegex, async (raw: string) => {
+    const [, , emojiId] = raw.replace(">", "").split(":");
+    const emoji = await getExpression(emojiId);
 
-        if (!emoji) return raw;
+    if (!emoji) return raw;
 
-        let allowed = false;
+    let allowed = false;
 
-        if (
-            channel?.spaceId &&
-            emoji.spaceId &&
-            BigInt(emoji.spaceId) === BigInt(channel.spaceId)
-        )
-            allowed = true;
-        else if (canUseExternalEmojis) allowed = true;
+    if (
+      channel?.spaceId &&
+      emoji.spaceId &&
+      BigInt(emoji.spaceId) === BigInt(channel.spaceId)
+    )
+      allowed = true;
+    else if (canUseExternalEmojis) allowed = true;
 
-        if (allowed) return raw;
+    if (allowed) return raw;
 
-        return `:${emoji.name}:`;
-    });
+    return `:${emoji.name}:`;
+  });
 };
 
 export const createRouter = () => express.Router({ mergeParams: true });
 export const createLimiter = (ms: number, limit: number) =>
-    rateLimit({
-        windowMs: ms,
-        limit,
-        standardHeaders: true,
-        legacyHeaders: false,
+  rateLimit({
+    windowMs: ms,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
 
-        skip: (req) =>
-            req.method === "OPTIONS" || process.env.NODE_ENV === "development",
+    skip: (req) =>
+      req.method === "OPTIONS" || process.env.NODE_ENV === "development",
 
-        message: {
-            error: "Too many requests",
-        },
-        store: new RedisStore({
-            prefix: `rl:${ms}:${limit}:`,
+    message: {
+      error: "Too many requests",
+    },
+    store: new RedisStore({
+      prefix: `rl:${ms}:${limit}:`,
 
-            sendCommand: (command: string, ...args: string[]) =>
-                redis.call(command, ...args) as Promise<RedisReply>,
-        }),
+      sendCommand: (command: string, ...args: string[]) =>
+        redis.call(command, ...args) as Promise<RedisReply>,
+    }),
 
-        keyGenerator: (req) => {
-            if (req.user?.id) {
-                const route = req.originalUrl.split("?")[0];
-                return `u:${req.user.id}:${route}`;
-            }
+    keyGenerator: (req) => {
+      if (req.user?.id) {
+        const route = req.originalUrl.split("?")[0];
+        return `u:${req.user.id}:${route}`;
+      }
 
-            const ip = req.ip ?? req.socket.remoteAddress;
+      const ip = req.ip ?? req.socket.remoteAddress;
 
-            if (!ip) return `noip:${req.socket.remotePort ?? "unknown"}`;
+      if (!ip) return `noip:${req.socket.remotePort ?? "unknown"}`;
 
-            const route = req.originalUrl.split("?")[0];
-            return `ip:${ipKeyGenerator(ip, false)}:${route}`;
-        },
-    });
+      const route = req.originalUrl.split("?")[0];
+      return `ip:${ipKeyGenerator(ip, false)}:${route}`;
+    },
+  });
 
 export const genRandColor = () =>
-    "#" +
-    [...Array(6)]
-        .map(() => (crypto.randomBytes(1)[0] % 16).toString(16))
-        .join("");
+  "#" +
+  [...Array(6)]
+    .map(() => (crypto.randomBytes(1)[0] % 16).toString(16))
+    .join("");
 
 export const dominantHex = async (buffer: Uint8Array<ArrayBufferLike>) => {
-    const { dominant } = await sharp(buffer).stats();
+  const { dominant } = await sharp(buffer).stats();
 
-    return Color({
-        r: dominant.r,
-        g: dominant.g,
-        b: dominant.b,
-    }).hex();
+  return Color({
+    r: dominant.r,
+    g: dominant.g,
+    b: dominant.b,
+  }).hex();
 };
 
 export const generateInviteCode = () => {
-    const characters =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let code = "";
-    for (let i = 0; i < 8; i++) {
-        code += characters.charAt(crypto.randomInt(characters.length));
-    }
+  const characters =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += characters.charAt(crypto.randomInt(characters.length));
+  }
 
-    return code;
+  return code;
 };
 
 export const getUrls = (text: string) => {
-    const urlPattern = /([*_|~`]*)(https?:\/\/[^\s<>()]+)([*_|~`]*)/g;
-    const matches: { url: string; spoiler: boolean }[] = [];
-    let match;
-    while ((match = urlPattern.exec(text)) !== null) {
-        const raw = match[0];
-        const spoiler = raw.startsWith("||") && raw.endsWith("||");
-        // Remove markdown and spoiler formatting
-        const url = raw
-            .replace(/^[*_|~`]+|[*_|~`]+$/g, "")
-            .replace(/^(\|\|)|(\|\|)$/g, "");
-        matches.push({ url, spoiler });
-    }
+  const urlPattern = /([*_|~`]*)(https?:\/\/[^\s<>()]+)([*_|~`]*)/g;
+  const matches: { url: string; spoiler: boolean }[] = [];
+  let match;
+  while ((match = urlPattern.exec(text)) !== null) {
+    const raw = match[0];
+    const spoiler = raw.startsWith("||") && raw.endsWith("||");
+    // Remove markdown and spoiler formatting
+    const url = raw
+      .replace(/^[*_|~`]+|[*_|~`]+$/g, "")
+      .replace(/^(\|\|)|(\|\|)$/g, "");
+    matches.push({ url, spoiler });
+  }
 
-    // Remove duplicates using Set
-    return Array.from(new Map(matches.map((m) => [m.url, m])).values());
+  // Remove duplicates using Set
+  return Array.from(new Map(matches.map((m) => [m.url, m])).values());
 };
 
 export const fetchKlipyMetadata = async (
-    url: string,
-    spoiler = false,
+  url: string,
+  spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
-    try {
-        const match = url.match(/klipy\.com\/gifs\/([^/?#]+)/);
-        if (!match) return null;
+  try {
+    const match = url.match(/klipy\.com\/gifs\/([^/?#]+)/);
+    if (!match) return null;
 
-        const slug = match[1];
-        const data = await klipyFetch("/gifs/items", { slugs: slug });
-        const gif = data.data?.data?.[0];
-        if (!gif) return null;
+    const slug = match[1];
+    const data = await klipyFetch("/gifs/items", { slugs: slug });
+    const gif = data.data?.data?.[0];
+    if (!gif) return null;
 
-        const file = gif.file ?? {};
-        const full = file.hd ?? file.md ?? file.sm ?? {};
-        const preview = file.sm ?? file.md ?? file.hd ?? {};
+    const file = gif.file ?? {};
+    const full = file.hd ?? file.md ?? file.sm ?? {};
+    const preview = file.sm ?? file.md ?? file.hd ?? {};
 
-        const mediaUrl = String(full.mp4?.url ?? full.gif?.url ?? "").split(
-            "?",
-        )[0];
-        const previewUrl = String(
-            preview.gif?.url ?? preview.mp4?.url ?? "",
-        ).split("?")[0];
+    const mediaUrl = String(full.mp4?.url ?? full.gif?.url ?? "").split("?")[0];
+    const previewUrl = String(preview.gif?.url ?? preview.mp4?.url ?? "").split(
+      "?",
+    )[0];
 
-        if (!mediaUrl) return null;
+    if (!mediaUrl) return null;
 
-        return {
-            type: "gifv",
-            url,
-            spoiler,
-            media: mediaUrl,
-            image: previewUrl || null,
-            title: gif.title ?? null,
-        };
-    } catch {
-        return null;
+    return {
+      type: "gifv",
+      url,
+      spoiler,
+      media: mediaUrl,
+      image: previewUrl || null,
+      title: gif.title ?? null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const fetchTenorMetadata = async (
+  url: string,
+  spoiler = false,
+): Promise<APIMessageEmbed | null> => {
+  try {
+    if (/c\.tenor\.com|media\.tenor\.com/.test(url)) {
+      return {
+        type: "gifv",
+        url,
+        spoiler,
+        media: url,
+        image: url,
+        title: null,
+      };
     }
+
+    const metadata = await urlMetadata(url).catch(() => null);
+    if (!metadata) return null;
+
+    const media =
+      metadata["og:video:secure_url"] ??
+      metadata["og:video:url"] ??
+      metadata["og:video"] ??
+      null;
+
+    const image = metadata["og:image"] ?? null;
+    if (!media && !image) return null;
+
+    return {
+      type: "gifv",
+      url,
+      spoiler,
+      media: media ?? image,
+      image: image ?? media,
+      title: metadata["og:title"] ?? null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Giphy share links (giphy.com/gifs/...) and CDN URLs (media.giphy.com, i.giphy.com).
+ * Same pattern as Tenor — og:video is MP4, which is what we want.
+ */
+export const fetchGiphyMetadata = async (
+  url: string,
+  spoiler = false,
+): Promise<APIMessageEmbed | null> => {
+  try {
+    if (/media\.giphy\.com|i\.giphy\.com/.test(url)) {
+      return {
+        type: "gifv",
+        url,
+        spoiler,
+        media: url,
+        image: url,
+        title: null,
+      };
+    }
+
+    const metadata = await urlMetadata(url).catch(() => null);
+    if (!metadata) return null;
+
+    const media =
+      metadata["og:video:secure_url"] ??
+      metadata["og:video:url"] ??
+      metadata["og:video"] ??
+      null;
+
+    const image = metadata["og:image"] ?? null;
+    if (!media && !image) return null;
+
+    return {
+      type: "gifv",
+      url,
+      spoiler,
+      media: media ?? image,
+      image: image ?? media,
+      title: metadata["og:title"] ?? null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Imgur — two distinct cases:
+ *   - i.imgur.com/abc.gif  → direct file, HEAD check
+ *   - imgur.com/abc        → HTML page, parse OG tags
+ */
+export const fetchImgurMetadata = async (
+  url: string,
+  spoiler = false,
+): Promise<APIMessageEmbed | null> => {
+  try {
+    if (/i\.imgur\.com/.test(url)) {
+      const res = await fetch(url, { method: "HEAD" });
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("image/gif") && !ct.includes("video/mp4")) return null;
+
+      return {
+        type: "gifv",
+        url,
+        spoiler,
+        media: url,
+        image: url,
+        title: null,
+      };
+    }
+
+    const metadata = await urlMetadata(url).catch(() => null);
+    if (!metadata) return null;
+
+    const media =
+      metadata["og:video:secure_url"] ??
+      metadata["og:video:url"] ??
+      metadata["og:video"] ??
+      null;
+
+    const image = metadata["og:image"] ?? null;
+
+    if (!media) return null;
+
+    return {
+      type: "gifv",
+      url,
+      spoiler,
+      media,
+      image: image ?? media,
+      title: metadata["og:title"] ?? null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Redgifs — serves og:video as MP4.
+ */
+export const fetchRedgifsMetadata = async (
+  url: string,
+  spoiler = false,
+): Promise<APIMessageEmbed | null> => {
+  try {
+    const metadata = await urlMetadata(url).catch(() => null);
+    if (!metadata) return null;
+
+    const media =
+      metadata["og:video:secure_url"] ??
+      metadata["og:video:url"] ??
+      metadata["og:video"] ??
+      null;
+
+    const image = metadata["og:image"] ?? null;
+    if (!media && !image) return null;
+
+    return {
+      type: "gifv",
+      url,
+      spoiler,
+      media: media ?? image,
+      image: image ?? media,
+      title: metadata["og:title"] ?? null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Arbitrary direct .gif URLs on any host.
+ * Does a HEAD request to confirm Content-Type before embedding.
+ */
+export const fetchDirectGifMetadata = async (
+  url: string,
+  spoiler = false,
+): Promise<APIMessageEmbed | null> => {
+  try {
+    const res = await fetch(url, { method: "HEAD" });
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("image/gif")) return null;
+
+    return {
+      type: "gifv",
+      url,
+      spoiler,
+      media: url,
+      image: url,
+      title: null,
+    };
+  } catch {
+    return null;
+  }
 };
 
 export const fetchSpotifyMetadata = async (
-    url: string,
+  url: string,
 ): Promise<APIMessageEmbed | null> => {
-    const match = url.match(
-        /spotify\.com\/(track|album|artist|playlist)\/([a-zA-Z0-9]+)/,
-    );
+  const match = url.match(
+    /spotify\.com\/(track|album|artist|playlist)\/([a-zA-Z0-9]+)/,
+  );
 
-    if (!match) return null;
-    const [, type, id] = match;
+  if (!match) return null;
+  const [, type, id] = match;
 
-    try {
-        let data: any;
+  try {
+    let data: any;
 
-        switch (type) {
-            case "track":
-                data = await spotifySdk.tracks.get(id);
-                break;
-            case "album":
-                data = await spotifySdk.albums.get(id);
-                break;
-            case "artist":
-                data = await spotifySdk.artists.get(id);
-                break;
-            case "playlist":
-                data = await spotifySdk.playlists
-                    .getPlaylist(id)
-                    .catch(() => null);
-                break;
-            default:
-                return null;
-        }
-
-        if (!data) return null;
-
-        return {
-            title: data.name,
-            url,
-            description: type.charAt(0).toUpperCase() + type.slice(1),
-            image:
-                data.album?.images?.[0]?.url ||
-                data.images?.[0]?.url ||
-                undefined,
-            author: {
-                name: data.artists
-                    ? data.artists.map((a: any) => a.name).join(", ")
-                    : data.name,
-                iconUrl:
-                    "https://cdn-icons-png.flaticon.com/512/174/174872.png", // Spotify logo
-            },
-            color: "#1DB954",
-            spotify: {
-                type,
-                id,
-                embedUrl: `https://open.spotify.com/embed/${type}/${id}`,
-            },
-            type: "rich",
-        };
-    } catch {
+    switch (type) {
+      case "track":
+        data = await spotifySdk.tracks.get(id);
+        break;
+      case "album":
+        data = await spotifySdk.albums.get(id);
+        break;
+      case "artist":
+        data = await spotifySdk.artists.get(id);
+        break;
+      case "playlist":
+        data = await spotifySdk.playlists.getPlaylist(id).catch(() => null);
+        break;
+      default:
         return null;
     }
+
+    if (!data) return null;
+
+    return {
+      title: data.name,
+      url,
+      description: type.charAt(0).toUpperCase() + type.slice(1),
+      image: data.album?.images?.[0]?.url || data.images?.[0]?.url || undefined,
+      author: {
+        name: data.artists
+          ? data.artists.map((a: any) => a.name).join(", ")
+          : data.name,
+        iconUrl: "https://cdn-icons-png.flaticon.com/512/174/174872.png", // Spotify logo
+      },
+      color: "#1DB954",
+      spotify: {
+        type,
+        id,
+        embedUrl: `https://open.spotify.com/embed/${type}/${id}`,
+      },
+      type: "rich",
+    };
+  } catch {
+    return null;
+  }
 };
 
 export const fetchYoutubeMetadata = async (
-    url: string,
+  url: string,
 ): Promise<APIMessageEmbed | null> => {
-    const match = url.match(
-        /(?:youtube\.com\/.*v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-    );
-    if (!match) return null;
-    const videoId = match[1];
+  const match = url.match(
+    /(?:youtube\.com\/.*v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+  );
+  if (!match) return null;
+  const videoId = match[1];
 
-    const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`;
+  const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`;
 
-    try {
-        const res = await fetch(apiUrl);
-        if (!res.ok) return null;
-        const data = await res.json();
-        const video = data.items?.[0];
-        if (!video) return null;
+  try {
+    const res = await fetch(apiUrl);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const video = data.items?.[0];
+    if (!video) return null;
 
-        return {
-            title: video.snippet.title,
-            url,
-            description: video.snippet.description,
-            image: video.snippet.thumbnails.high.url,
-            author: {
-                name: video.snippet.channelTitle,
-            },
-            color: "#FF0000",
-            youtube: {
-                videoId,
-                embedUrl: `https://www.youtube.com/embed/${videoId}`,
-            },
-            type: "rich",
-        };
-    } catch {
-        return null;
-    }
+    return {
+      title: video.snippet.title,
+      url,
+      description: video.snippet.description,
+      image: video.snippet.thumbnails.high.url,
+      author: {
+        name: video.snippet.channelTitle,
+      },
+      color: "#FF0000",
+      youtube: {
+        videoId,
+        embedUrl: `https://www.youtube.com/embed/${videoId}`,
+      },
+      type: "rich",
+    };
+  } catch {
+    return null;
+  }
 };
 
 export const fetchAppleMusicMetadata = async (
-    url: string,
+  url: string,
 ): Promise<APIMessageEmbed | null> => {
-    const match = url.match(
-        /music\.apple\.com\/[a-z]{2}\/(album|playlist|artist|song)\/[^/]+\/([^/?#]+)/,
-    );
-    if (!match) return null;
-    const [, type, id] = match;
+  const match = url.match(
+    /music\.apple\.com\/[a-z]{2}\/(album|playlist|artist|song)\/[^/]+\/([^/?#]+)/,
+  );
+  if (!match) return null;
+  const [, type, id] = match;
 
-    try {
-        switch (type) {
-            case "album": {
-                const album = await appleMusicSdk.albums
-                    .get(id)
-                    .then((res) => res.data[0]);
+  try {
+    switch (type) {
+      case "album": {
+        const album = await appleMusicSdk.albums
+          .get(id)
+          .then((res) => res.data[0]);
 
-                const artist = album.relationships?.artists?.data[0];
+        const artist = album.relationships?.artists?.data[0];
 
-                return {
-                    title: album.attributes?.name,
-                    url,
-                    author: {
-                        name: artist?.attributes?.name || "Unknown Artist",
-                        url: album.attributes?.url,
-                    },
-                    description: album.attributes?.genreNames.join(", "),
-                    image:
-                        album.attributes && "artwork" in album.attributes
-                            ? (album.attributes.artwork as any).url
-                                  .replace("{w}", "2000")
-                                  .replace("{h}", "2000")
-                            : undefined,
-                    apple: {
-                        id: album.id,
-                        type: "album",
-                        embedUrl: `https://embed.music.apple.com/us/album/${album.id}`,
-                    },
-                    type: "rich",
-                };
-            }
-            case "artist": {
-                const artist = await appleMusicSdk.artists
-                    .get(id)
-                    .then((res) => res.data[0]);
+        return {
+          title: album.attributes?.name,
+          url,
+          author: {
+            name: artist?.attributes?.name || "Unknown Artist",
+            url: album.attributes?.url,
+          },
+          description: album.attributes?.genreNames.join(", "),
+          image:
+            album.attributes && "artwork" in album.attributes
+              ? (album.attributes.artwork as any).url
+                  .replace("{w}", "2000")
+                  .replace("{h}", "2000")
+              : undefined,
+          apple: {
+            id: album.id,
+            type: "album",
+            embedUrl: `https://embed.music.apple.com/us/album/${album.id}`,
+          },
+          type: "rich",
+        };
+      }
+      case "artist": {
+        const artist = await appleMusicSdk.artists
+          .get(id)
+          .then((res) => res.data[0]);
 
-                const artwork =
-                    artist.attributes && "artwork" in artist.attributes
-                        ? (artist.attributes.artwork as any).url
-                              .replace("{w}", "2000")
-                              .replace("{h}", "2000")
-                        : undefined;
+        const artwork =
+          artist.attributes && "artwork" in artist.attributes
+            ? (artist.attributes.artwork as any).url
+                .replace("{w}", "2000")
+                .replace("{h}", "2000")
+            : undefined;
 
-                return {
-                    url,
-                    author: {
-                        name: artist.attributes?.name || "Unknown Artist",
-                        url: artist.attributes?.url,
-                        iconUrl: artwork,
-                    },
-                    description: artist.attributes?.genreNames.join(", "),
-                    image: artwork,
-                    apple: {
-                        id: artist.id,
-                        type: "artist",
-                        embedUrl: `https://music.apple.com/us/artist/${artist.id}`,
-                    },
-                    type: "rich",
-                };
-            }
-            case "playlist": {
-                const playlist = await appleMusicSdk.playlists
-                    .get(id)
-                    .then((res) => res.data[0]);
+        return {
+          url,
+          author: {
+            name: artist.attributes?.name || "Unknown Artist",
+            url: artist.attributes?.url,
+            iconUrl: artwork,
+          },
+          description: artist.attributes?.genreNames.join(", "),
+          image: artwork,
+          apple: {
+            id: artist.id,
+            type: "artist",
+            embedUrl: `https://music.apple.com/us/artist/${artist.id}`,
+          },
+          type: "rich",
+        };
+      }
+      case "playlist": {
+        const playlist = await appleMusicSdk.playlists
+          .get(id)
+          .then((res) => res.data[0]);
 
-                return {
-                    title: playlist.attributes?.name,
-                    url,
-                    author: {
-                        name:
-                            playlist.attributes?.curatorName ||
-                            "Unknown Curator",
-                        url: playlist.attributes?.url,
-                    },
-                    description: playlist.attributes?.description?.standard,
-                    image:
-                        playlist.attributes && "artwork" in playlist.attributes
-                            ? (playlist.attributes.artwork as any).url
-                                  .replace("{w}", "2000")
-                                  .replace("{h}", "2000")
-                            : undefined,
-                    apple: {
-                        id: playlist.id,
-                        type: "playlist",
-                        embedUrl: `https://embed.music.apple.com/us/playlist/${playlist.id}`,
-                    },
-                    type: "rich",
-                };
-            }
-            case "song": {
-                const song = await appleMusicSdk.songs
-                    .get(id)
-                    .then((res) => res.data[0]);
+        return {
+          title: playlist.attributes?.name,
+          url,
+          author: {
+            name: playlist.attributes?.curatorName || "Unknown Curator",
+            url: playlist.attributes?.url,
+          },
+          description: playlist.attributes?.description?.standard,
+          image:
+            playlist.attributes && "artwork" in playlist.attributes
+              ? (playlist.attributes.artwork as any).url
+                  .replace("{w}", "2000")
+                  .replace("{h}", "2000")
+              : undefined,
+          apple: {
+            id: playlist.id,
+            type: "playlist",
+            embedUrl: `https://embed.music.apple.com/us/playlist/${playlist.id}`,
+          },
+          type: "rich",
+        };
+      }
+      case "song": {
+        const song = await appleMusicSdk.songs
+          .get(id)
+          .then((res) => res.data[0]);
 
-                const artist = song.relationships?.artists?.data[0];
+        const artist = song.relationships?.artists?.data[0];
 
-                return {
-                    title: song.attributes?.name,
-                    url,
-                    author: {
-                        name: artist?.attributes?.name || "Unknown Artist",
-                        url: song.attributes?.url,
-                    },
-                    description: song.attributes?.genreNames.join(", "),
-                    image:
-                        song.attributes && "artwork" in song.attributes
-                            ? (song.attributes.artwork as any).url
-                                  .replace("{w}", "2000")
-                                  .replace("{h}", "2000")
-                            : undefined,
-                    apple: {
-                        id: song.id,
-                        type: "song",
-                        embedUrl: `https://embed.music.apple.com/us/song/${song.id}`,
-                    },
-                    type: "rich",
-                };
-            }
-            default:
-                return null;
-        }
-    } catch {
+        return {
+          title: song.attributes?.name,
+          url,
+          author: {
+            name: artist?.attributes?.name || "Unknown Artist",
+            url: song.attributes?.url,
+          },
+          description: song.attributes?.genreNames.join(", "),
+          image:
+            song.attributes && "artwork" in song.attributes
+              ? (song.attributes.artwork as any).url
+                  .replace("{w}", "2000")
+                  .replace("{h}", "2000")
+              : undefined,
+          apple: {
+            id: song.id,
+            type: "song",
+            embedUrl: `https://embed.music.apple.com/us/song/${song.id}`,
+          },
+          type: "rich",
+        };
+      }
+      default:
         return null;
     }
+  } catch {
+    return null;
+  }
 };
 
 export const detectService = (url: string): Services => {
-    if (/open\.spotify\.com/.test(url)) return "spotify";
-    if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
-    if (/music\.apple\.com/.test(url)) return "apple";
-    if (/tidal\.com/.test(url)) return "tidal";
-    if (/klipy\.com\/gifs\//.test(url)) return "klipy";
-    return "other";
+  if (/open\.spotify\.com/.test(url)) return "spotify";
+  if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
+  if (/music\.apple\.com/.test(url)) return "apple";
+  if (/tidal\.com/.test(url)) return "tidal";
+  if (/klipy\.com\/gifs\//.test(url)) return "klipy";
+  // GIF platforms / check subdomains before root domains
+  if (/tenor\.com|c\.tenor\.com|media\.tenor\.com/.test(url)) return "tenor";
+  if (/giphy\.com|media\.giphy\.com|i\.giphy\.com/.test(url)) return "giphy";
+  if (/imgur\.com|i\.imgur\.com/.test(url)) return "imgur";
+  if (/redgifs\.com/.test(url)) return "redgifs";
+  if (/\.gif(\?[^#]*)?$/i.test(url)) return "gif";
+  return "other";
 };
 
 export const buildEmbed = async (
-    url: string,
-    spoiler = false,
+  url: string,
+  spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
-    const service = detectService(url);
-    let embed: APIMessageEmbed;
+  const service = detectService(url);
+  let embed: APIMessageEmbed;
 
-    if (service === "spotify") {
-        embed = { ...(await fetchSpotifyMetadata(url)), spoiler, type: "rich" };
-    } else if (service === "youtube") {
-        embed = { ...(await fetchYoutubeMetadata(url)), spoiler, type: "rich" };
-    } else if (service === "apple") {
-        embed = {
-            ...(await fetchAppleMusicMetadata(url)),
-            spoiler,
-            type: "rich",
-        };
-    } else if (service === "klipy") {
-        embed = { ...(await fetchKlipyMetadata(url)), spoiler, type: "gifv" };
-    } else {
-        // TODO: Create a proper regex for this and apply to the links detection as well
-        const normalizedUrl = url
-            .replaceAll("||", "")
-            .replaceAll("**", "")
-            .replaceAll("__", "")
-            .replaceAll("~~", "");
+  if (service === "spotify") {
+    embed = { ...(await fetchSpotifyMetadata(url)), spoiler, type: "rich" };
+  } else if (service === "youtube") {
+    embed = { ...(await fetchYoutubeMetadata(url)), spoiler, type: "rich" };
+  } else if (service === "apple") {
+    embed = {
+      ...(await fetchAppleMusicMetadata(url)),
+      spoiler,
+      type: "rich",
+    };
+  } else if (service === "klipy") {
+    embed = {
+      ...(await fetchKlipyMetadata(url, spoiler)),
+      spoiler,
+      type: "gifv",
+    };
+  } else if (service === "tenor") {
+    return fetchTenorMetadata(url, spoiler);
+  } else if (service === "giphy") {
+    return fetchGiphyMetadata(url, spoiler);
+  } else if (service === "imgur") {
+    return fetchImgurMetadata(url, spoiler);
+  } else if (service === "redgifs") {
+    return fetchRedgifsMetadata(url, spoiler);
+  } else if (service === "gif") {
+    return fetchDirectGifMetadata(url, spoiler);
+  } else {
+    const normalizedUrl = url
+      .replaceAll("||", "")
+      .replaceAll("**", "")
+      .replaceAll("__", "")
+      .replaceAll("~~", "");
 
-        // Fallback to Open Graph
-        const metadata = await urlMetadata(normalizedUrl).catch(() => null);
-        if (!metadata) return null;
+    const metadata = await urlMetadata(normalizedUrl).catch(() => null);
+    if (!metadata) return null;
 
-        const limit = 500;
-        let description: string = (metadata["og:description"] ?? "")
-            .replace(/\s+/g, " ")
-            .trim(); // Collapse multiple spaces/newlines;
+    const limit = 500;
+    let description: string = (metadata["og:description"] ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-        if (description.length > limit)
-            description = description.slice(0, limit) + "..."; // Limit to 100 chars
+    if (description.length > limit)
+      description = description.slice(0, limit) + "...";
 
-        embed = {
-            type: "rich",
-            title: metadata["og:title"],
-            description,
+    const ogVideo =
+      metadata["og:video:secure_url"] ?? metadata["og:video:url"] ?? null;
+
+    const ogImage = metadata["og:image"] ?? null;
+
+    // Coerce to gifv if the OG tags indicate GIF-like content on an unknown host
+    const isGifLike =
+      (ogVideo && /\.(gif|mp4)(\?|$)/i.test(ogVideo)) ||
+      (ogImage && /\.gif(\?|$)/i.test(ogImage)) ||
+      metadata["og:type"] === "video.other";
+
+    embed = {
+      type: isGifLike ? "gifv" : "rich",
+      title: isGifLike ? (metadata["og:title"] ?? null) : metadata["og:title"],
+      description: isGifLike ? undefined : description,
+      url: metadata["og:url"] ?? url,
+      image: ogImage,
+      spoiler,
+      media: isGifLike ? (ogVideo ?? ogImage) : ogVideo,
+      author: isGifLike
+        ? undefined
+        : {
+            name: metadata["og:site_name"]?.split(",")[0] ?? "",
             url: metadata["og:url"] ?? url,
-            image: metadata["og:image"] ?? null,
-            spoiler,
-            media:
-                metadata["og:video:secure_url"] ??
-                metadata["og:video:url"] ??
-                null,
-            author: {
-                name: metadata["og:site_name"]?.split(",")[0] ?? "",
-                url: metadata["og:url"] ?? url,
-                iconUrl:
-                    metadata.favicons?.[0]?.href &&
-                    !metadata.favicons[0].href.startsWith("/")
-                        ? metadata.favicons[0].href
-                        : null,
-            },
-            color:
-                metadata["theme-color"] && metadata["theme-color"].length > 0
-                    ? metadata["theme-color"]
-                    : undefined,
-        };
-    }
+            iconUrl:
+              metadata.favicons?.[0]?.href &&
+              !metadata.favicons[0].href.startsWith("/")
+                ? metadata.favicons[0].href
+                : null,
+          },
+      color: isGifLike
+        ? undefined
+        : metadata["theme-color"] && metadata["theme-color"].length > 0
+          ? metadata["theme-color"]
+          : undefined,
+    };
+  }
 
-    return embed;
+  return embed;
 };
 
 export const buildEmbeds = async (content: string) => {
-    const urls = getUrls(content).slice(0, 5); // Limit to first 5 URLs
+  const urls = getUrls(content).slice(0, 5); // Limit to first 5 URLs
 
-    const embeds: APIMessageEmbed[] = [];
-    for (const { url, spoiler } of urls) {
-        const embed = await buildEmbed(url, spoiler);
-        if (embed) embeds.push(embed);
-    }
-    return embeds;
+  const embeds: APIMessageEmbed[] = [];
+  for (const { url, spoiler } of urls) {
+    const embed = await buildEmbed(url, spoiler);
+    if (embed) embeds.push(embed);
+  }
+  return embeds;
 };
 
 export const generateHash = (buffer: Uint8Array, animated = false) => {
-    return `${animated ? "a_" : ""}${crypto.createHash("sha256").update(buffer).digest("hex")}`;
+  return `${animated ? "a_" : ""}${crypto.createHash("sha256").update(buffer).digest("hex")}`;
 };

@@ -1,9 +1,4 @@
-import {
-  deleteCache,
-  getCache,
-  invalidateCache,
-  setCache,
-} from "@mutualzz/cache";
+import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
 import { db, invitesTable, spaceMembersTable } from "@mutualzz/database";
 import type { APIInvite } from "@mutualzz/types";
 import { HttpException, HttpStatusCode, InviteType } from "@mutualzz/types";
@@ -52,24 +47,26 @@ export default class InvitesController {
 
       let hadExpired = false;
 
-      invites = await Promise.all(
-        invites.map(async (invite) => {
-          if (invite.expiresAt && dayjs().isAfter(dayjs(invite.expiresAt))) {
-            hadExpired = true;
-            await db
-              .delete(invitesTable)
-              .where(eq(invitesTable.code, invite.code));
+      const filtered: typeof invites = [];
 
-            await deleteCache("invite", invite.code);
-            return null;
-          }
+      for (const invite of invites) {
+        if (invite.expiresAt && dayjs().isAfter(dayjs(invite.expiresAt))) {
+          hadExpired = true;
+          await db
+            .delete(invitesTable)
+            .where(eq(invitesTable.code, invite.code));
 
-          return invite;
-        }),
-      ).then((invites) => invites.filter((inv) => !!inv));
+          await deleteCache("invite", invite.code);
+          continue;
+        }
+
+        filtered.push(invite);
+      }
+
+      invites = filtered;
 
       if (hadExpired) await invalidateCache("invites", spaceId);
-      await setCache("invites", spaceId, invites || []);
+      await setCache("invites", spaceId, invites);
 
       return res.status(HttpStatusCode.Success).json(invites);
     } catch (err) {
@@ -126,10 +123,7 @@ export default class InvitesController {
             space: {
               with: {
                 members: {
-                  where: eq(
-                    spaceMembersTable.userId,
-                    BigInt(req.user?.id ?? 0),
-                  ),
+                  where: eq(spaceMembersTable.userId, BigInt(req.user.id)),
                 },
               },
             },
@@ -567,8 +561,6 @@ export default class InvitesController {
           meta: { code },
         },
       ]);
-
-      return;
     } catch (err) {
       next(err);
     }
