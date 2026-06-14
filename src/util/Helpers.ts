@@ -52,6 +52,22 @@ function normalizeOverwrite(ow: any, extra: Record<string, any> = {}) {
   };
 }
 
+export const resolveExpressions = async (
+  content: string | null,
+): Promise<APIExpression[]> => {
+  if (!content) return [];
+
+  const ids = (content.match(/<a?:[^:]+:(\d+)>/g) ?? [])
+    .map((raw) => raw.match(/<a?:[^:]+:(\d+)>/)?.[1])
+    .filter(Boolean) as string[];
+
+  const unique = [...new Set(ids)];
+
+  return (await Promise.all(unique.map((id) => getExpression(id)))).filter(
+    (exp) => !!exp,
+  );
+};
+
 export const publicUserColumns = {
   hash: false,
   dateOfBirth: false,

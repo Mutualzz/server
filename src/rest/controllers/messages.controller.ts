@@ -1,5 +1,16 @@
-import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
-import { channelRecipientsTable, db, messagesTable, relationshipsTable, spaceMembersTable, } from "@mutualzz/database";
+import {
+  deleteCache,
+  getCache,
+  invalidateCache,
+  setCache,
+} from "@mutualzz/cache";
+import {
+  channelRecipientsTable,
+  db,
+  messagesTable,
+  relationshipsTable,
+  spaceMembersTable,
+} from "@mutualzz/database";
 import {
   type APIMessage,
   type APIRelationship,
@@ -24,7 +35,9 @@ import {
   getUser,
   incrementMentionCounts,
   isChannelRecipient,
+  publicUserColumns,
   requireChannelPermissions,
+  resolveExpressions,
   sanitizeContent,
   Snowflake,
 } from "@mutualzz/util";
@@ -37,7 +50,11 @@ import {
 } from "@mutualzz/validators";
 import { and, asc, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
-import { type BitField, messageFlags, type PermissionFlags, } from "@mutualzz/bitfield";
+import {
+  type BitField,
+  messageFlags,
+  type PermissionFlags,
+} from "@mutualzz/bitfield";
 import { createSystemMessage } from "@mutualzz/util/systemUser";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
@@ -278,6 +295,7 @@ export default class MessagesController {
         channel: channel,
         author: user,
         space: channel.spaceId ? await getSpace(channel.spaceId) : null,
+        expressions: await resolveExpressions(newMessage.content ?? ""),
       };
 
       res.status(HttpStatusCode.Created).json(message);
@@ -564,6 +582,7 @@ export default class MessagesController {
         ...result,
         channel,
         author: await getUser(message.authorId),
+        expressions: await resolveExpressions(result.content ?? ""),
       };
 
       res.status(HttpStatusCode.Success).json(newMessage);
@@ -673,7 +692,9 @@ export default class MessagesController {
           db.query.messagesTable.findMany({
             with: {
               channel: true,
-              author: true,
+              author: {
+                columns: publicUserColumns,
+              },
               space: true,
             },
             where: and(
@@ -688,7 +709,9 @@ export default class MessagesController {
           db.query.messagesTable.findMany({
             with: {
               channel: true,
-              author: true,
+              author: {
+                columns: publicUserColumns,
+              },
               space: true,
             },
             where: and(
@@ -708,7 +731,9 @@ export default class MessagesController {
           db.query.messagesTable.findMany({
             with: {
               channel: true,
-              author: true,
+              author: {
+                columns: publicUserColumns,
+              },
               space: true,
             },
             where: and(
@@ -724,7 +749,9 @@ export default class MessagesController {
           db.query.messagesTable.findMany({
             with: {
               channel: true,
-              author: true,
+              author: {
+                columns: publicUserColumns,
+              },
               space: true,
             },
             where: and(
@@ -740,7 +767,9 @@ export default class MessagesController {
           db.query.messagesTable.findMany({
             with: {
               channel: true,
-              author: true,
+              author: {
+                columns: publicUserColumns,
+              },
               space: true,
             },
             where: eq(messagesTable.channelId, BigInt(channelId)),
@@ -750,9 +779,16 @@ export default class MessagesController {
         );
       }
 
-      res.status(HttpStatusCode.Success).json(messages);
+      const messagesWithExpressions = await Promise.all(
+        messages.map(async (msg) => ({
+          ...msg,
+          expressions: await resolveExpressions(msg.content ?? ""),
+        })),
+      );
 
-      void setCache("messages", cacheKey, messages);
+      res.status(HttpStatusCode.Success).json(messagesWithExpressions);
+
+      void setCache("messages", cacheKey, messagesWithExpressions);
     } catch (err) {
       next(err);
     }
