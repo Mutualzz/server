@@ -1,4 +1,6 @@
 import ChannelsController from "@mutualzz/rest/controllers/channels/channels.controller.ts";
+import ChannelPermissionOverwritesController
+  from "@mutualzz/rest/controllers/channels/channelPermissionOverwrites.controller.ts";
 import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 import { upload } from "@mutualzz/rest";
@@ -57,6 +59,18 @@ router.delete(
   "/:channelId",
   createLimiter(60_000, 15),
   ChannelsController.delete,
+);
+
+// Permission overwrites
+router.put(
+  "/:channelId/permissions/:targetId",
+  createLimiter(60_000, 30),
+  ChannelPermissionOverwritesController.add,
+);
+router.delete(
+  "/:channelId/permissions/:targetId",
+  createLimiter(60_000, 30),
+  ChannelPermissionOverwritesController.remove,
 );
 
 // Message management

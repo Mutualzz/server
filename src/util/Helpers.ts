@@ -1,7 +1,8 @@
 import { getCache, setCache } from "@mutualzz/cache";
 import {
-  channelPermissionOverwritesTable,
+  channelMemberOverwritesTable,
   channelRecipientsTable,
+  channelRoleOverwritesTable,
   channelsTable,
   db,
   expressionsTable,
@@ -37,6 +38,19 @@ import { perspectiveForUser } from "@mutualzz/rest/util";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
+
+function normalizeOverwrite(ow: any, extra: Record<string, any> = {}) {
+  return {
+    ...ow,
+    channelId: ow.channelId != null ? String(ow.channelId) : null,
+    spaceId: ow.spaceId != null ? String(ow.spaceId) : null,
+    roleId: ow.roleId != null ? String(ow.roleId) : null,
+    userId: ow.userId != null ? String(ow.userId) : null,
+    allow: ow.allow != null ? String(ow.allow) : "0",
+    deny: ow.deny != null ? String(ow.deny) : "0",
+    ...extra,
+  };
+}
 
 export const publicUserColumns = {
   hash: false,
@@ -103,9 +117,8 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
       }),
     ),
 
-    // Get all spaces that the user is part of or is owner of.
-    execNormalizedMany<APISpace>(
-      db.query.spacesTable.findMany({
+    await db.query.spacesTable
+      .findMany({
         with: {
           members: {
             with: {
@@ -116,12 +129,15 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
           channels: {
             with: {
               parent: true,
-              overwrites: true,
+              roleOverwrites: true,
+              memberOverwrites: true,
               space: true,
             },
           },
           roles: true,
-          owner: true,
+          owner: {
+            columns: publicUserColumns,
+          },
         },
         where: or(
           eq(spacesTable.ownerId, BigInt(user.id)),
@@ -131,8 +147,29 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
                     and sm."userId" = ${BigInt(user.id)}
                 )`,
         ),
-      }),
-    ),
+      })
+      .then((rawSpaces) =>
+        execNormalizedMany<APISpace>(
+          Promise.resolve(
+            rawSpaces.map((space) => ({
+              ...space,
+              channels: space.channels.map((ch) => ({
+                ...ch,
+                overwrites: [
+                  ...ch.roleOverwrites.map((ow) =>
+                    normalizeOverwrite(ow, { userId: null }),
+                  ),
+                  ...ch.memberOverwrites.map((ow) =>
+                    normalizeOverwrite(ow, { roleId: null }),
+                  ),
+                ],
+                roleOverwrites: undefined,
+                memberOverwrites: undefined,
+              })),
+            })),
+          ),
+        ),
+      ),
 
     // Get all the DM Channels
     execNormalizedMany(
@@ -316,6 +353,8 @@ export const getChannels = async (ids: string[]) => {
             user: { columns: publicUserColumns },
           },
         },
+        roleOverwrites: true,
+        memberOverwrites: true,
       },
     }),
   );
@@ -324,10 +363,14 @@ export const getChannels = async (ids: string[]) => {
     rows.map(async (row) => {
       const hydrated: APIChannel = {
         ...row,
-        recipientIds:
-          row.recipients?.map((r: any) => r.user.id) ??
-          row.recipientIds ??
-          null,
+        overwrites: [
+          ...((row as any).roleOverwrites ?? []).map((ow: any) =>
+            normalizeOverwrite(ow, { userId: null }),
+          ),
+          ...((row as any).memberOverwrites ?? []).map((ow: any) =>
+            normalizeOverwrite(ow, { roleId: null }),
+          ),
+        ],
         recipients: row.recipients
           ? await Promise.all(
               row.recipients.map((r: any) => attachPresenceUser(r.user)),
@@ -405,31 +448,51 @@ export const getSpaceHydrated = async (id: string) => {
   let space = await getCache("spaceHydrated", id);
   if (space) return space;
 
-  space = await execNormalized<APISpace>(
-    db.query.spacesTable.findFirst({
-      with: {
-        roles: true,
-        members: {
-          with: {
-            user: {
-              columns: publicUserColumns,
-            },
-            roles: {
-              with: {
-                role: true,
-              },
+  const raw = await db.query.spacesTable.findFirst({
+    with: {
+      roles: true,
+      members: {
+        with: {
+          user: {
+            columns: publicUserColumns,
+          },
+          roles: {
+            with: {
+              role: true,
             },
           },
         },
-        channels: {
-          with: {
-            parent: true,
-            overwrites: true,
-          },
-        },
-        owner: { columns: publicUserColumns },
       },
-      where: eq(spacesTable.id, BigInt(id)),
+      channels: {
+        with: {
+          parent: true,
+          roleOverwrites: true,
+          memberOverwrites: true,
+        },
+      },
+      owner: { columns: publicUserColumns },
+    },
+    where: eq(spacesTable.id, BigInt(id)),
+  });
+
+  if (!raw) return null;
+
+  space = await execNormalized<APISpace>(
+    Promise.resolve({
+      ...raw,
+      channels: raw.channels.map((ch) => ({
+        ...ch,
+        overwrites: [
+          ...ch.roleOverwrites.map((ow) =>
+            normalizeOverwrite(ow, { userId: null }),
+          ),
+          ...ch.memberOverwrites.map((ow) =>
+            normalizeOverwrite(ow, { roleId: null }),
+          ),
+        ],
+        roleOverwrites: undefined,
+        memberOverwrites: undefined,
+      })),
     }),
   );
 
@@ -452,6 +515,8 @@ export const getChannel = async (id: string) => {
             user: { columns: publicUserColumns },
           },
         },
+        roleOverwrites: true,
+        memberOverwrites: true,
       },
     }),
   );
@@ -460,6 +525,14 @@ export const getChannel = async (id: string) => {
 
   const hydrated: APIChannel = {
     ...row,
+    overwrites: [
+      ...((row as any).roleOverwrites ?? []).map((ow: any) =>
+        normalizeOverwrite(ow, { userId: null }),
+      ),
+      ...((row as any).memberOverwrites ?? []).map((ow: any) =>
+        normalizeOverwrite(ow, { roleId: null }),
+      ),
+    ],
     recipientIds:
       row.recipients?.map((r: any) => r.user.id) ?? row.recipientIds ?? null,
     recipients: row.recipients
@@ -609,27 +682,49 @@ export async function getChannelOverwrites(
   let overwrites = await getCache("channelOverwrites", cacheKey);
   if (overwrites) return overwrites;
 
-  const rows = await db
-    .select({
-      roleId: channelPermissionOverwritesTable.roleId,
-      userId: channelPermissionOverwritesTable.userId,
-      allow: channelPermissionOverwritesTable.allow,
-      deny: channelPermissionOverwritesTable.deny,
-    })
-    .from(channelPermissionOverwritesTable)
-    .where(
-      and(
-        eq(channelPermissionOverwritesTable.spaceId, BigInt(spaceId)),
-        eq(channelPermissionOverwritesTable.channelId, BigInt(channelId)),
+  const [roleRows, memberRows] = await Promise.all([
+    db
+      .select({
+        roleId: channelRoleOverwritesTable.roleId,
+        allow: channelRoleOverwritesTable.allow,
+        deny: channelRoleOverwritesTable.deny,
+      })
+      .from(channelRoleOverwritesTable)
+      .where(
+        and(
+          eq(channelRoleOverwritesTable.spaceId, BigInt(spaceId)),
+          eq(channelRoleOverwritesTable.channelId, BigInt(channelId)),
+        ),
       ),
-    );
+    db
+      .select({
+        userId: channelMemberOverwritesTable.userId,
+        allow: channelMemberOverwritesTable.allow,
+        deny: channelMemberOverwritesTable.deny,
+      })
+      .from(channelMemberOverwritesTable)
+      .where(
+        and(
+          eq(channelMemberOverwritesTable.spaceId, BigInt(spaceId)),
+          eq(channelMemberOverwritesTable.channelId, BigInt(channelId)),
+        ),
+      ),
+  ]);
 
-  overwrites = rows.map((row) => ({
-    roleId: row.roleId ? row.roleId.toString() : null,
-    userId: row.userId ? row.userId.toString() : null,
-    allow: row.allow,
-    deny: row.deny,
-  }));
+  overwrites = [
+    ...roleRows.map((row) => ({
+      roleId: row.roleId.toString(),
+      userId: null,
+      allow: row.allow,
+      deny: row.deny,
+    })),
+    ...memberRows.map((row) => ({
+      roleId: null,
+      userId: row.userId.toString(),
+      allow: row.allow,
+      deny: row.deny,
+    })),
+  ];
 
   await setCache("channelOverwrites", cacheKey, overwrites);
   return overwrites;

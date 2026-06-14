@@ -1,582 +1,591 @@
 import type { MemberListRange, WebSocket } from "../util/WebSocket.ts";
 import { Send } from "../util/Send.ts";
 import {
-    channelPermissionOverwritesTable,
-    channelsTable,
-    db,
-    rolesTable,
-    spaceMembersTable,
+  channelMemberOverwritesTable,
+  channelRoleOverwritesTable,
+  channelsTable,
+  db,
+  rolesTable,
+  spaceMembersTable,
 } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
-import {
-    hasAny,
-    permissionFlags,
-    resolveEffectiveChannelBits,
-} from "@mutualzz/bitfield";
-import {
-    arrayPartition,
-    execNormalizedMany,
-    listenEvent,
-    murmur,
-} from "@mutualzz/util";
-import type {
-    APIMemberRole,
-    APISpaceMember,
-    APIUser,
-    PresencePayload,
-    Snowflake,
-} from "@mutualzz/types";
+import { hasAny, permissionFlags, resolveEffectiveChannelBits, } from "@mutualzz/bitfield";
+import { arrayPartition, execNormalizedMany, listenEvent, murmur, } from "@mutualzz/util";
+import type { APIMemberRole, APISpaceMember, APIUser, PresencePayload, Snowflake, } from "@mutualzz/types";
 import { PresenceService } from "../presence/Presence.service.ts";
 
 interface OverwriteLike {
-    roleId?: string | null;
-    userId?: string | null;
-    allow: bigint;
-    deny: bigint;
+  roleId?: string | null;
+  userId?: string | null;
+  allow: bigint;
+  deny: bigint;
 }
 
 export function normalizeRange(range: MemberListRange): {
-    start: number;
-    end: number;
-    limit: number;
+  start: number;
+  end: number;
+  limit: number;
 } {
-    if (!Array.isArray(range) || range.length !== 2)
-        throw new Error("range is not a valid array");
+  if (!Array.isArray(range) || range.length !== 2)
+    throw new Error("range is not a valid array");
 
-    const start = Math.max(0, Number(range[0]) || 0);
-    const end = Math.max(start, Number(range[1]) || start);
-    const limit = end - start + 1;
+  const start = Math.max(0, Number(range[0]) || 0);
+  const end = Math.max(start, Number(range[1]) || start);
+  const limit = end - start + 1;
 
-    return { start, end, limit };
+  return { start, end, limit };
 }
 
 export async function getEveryonePermissions(spaceId: Snowflake) {
-    const row = await db
-        .select({
-            allow: rolesTable.allow,
-            deny: rolesTable.deny,
-        })
-        .from(rolesTable)
-        .where(eq(rolesTable.id, BigInt(spaceId)))
-        .limit(1)
-        .then((res) => res[0]);
+  const row = await db
+    .select({
+      allow: rolesTable.allow,
+      deny: rolesTable.deny,
+    })
+    .from(rolesTable)
+    .where(eq(rolesTable.id, BigInt(spaceId)))
+    .limit(1)
+    .then((res) => res[0]);
 
-    if (row == null) return { allow: 0n, deny: 0n };
-    return {
-        allow: row.allow ?? 0n,
-        deny: row.deny ?? 0n,
-    };
+  if (row == null) return { allow: 0n, deny: 0n };
+  return {
+    allow: row.allow ?? 0n,
+    deny: row.deny ?? 0n,
+  };
 }
 
 export async function getChannelOverwrites(
-    spaceId: Snowflake,
-    channelId: Snowflake,
+  spaceId: Snowflake,
+  channelId: Snowflake,
 ): Promise<OverwriteLike[]> {
-    const rows = await db
-        .select({
-            roleId: channelPermissionOverwritesTable.roleId,
-            userId: channelPermissionOverwritesTable.userId,
-            allow: channelPermissionOverwritesTable.allow,
-            deny: channelPermissionOverwritesTable.deny,
-        })
-        .from(channelPermissionOverwritesTable)
-        .where(
-            and(
-                eq(channelPermissionOverwritesTable.spaceId, BigInt(spaceId)),
-                eq(
-                    channelPermissionOverwritesTable.channelId,
-                    BigInt(channelId),
-                ),
-            ),
-        );
+  const [roleRows, memberRows] = await Promise.all([
+    db
+      .select({
+        roleId: channelRoleOverwritesTable.roleId,
+        allow: channelRoleOverwritesTable.allow,
+        deny: channelRoleOverwritesTable.deny,
+      })
+      .from(channelRoleOverwritesTable)
+      .where(
+        and(
+          eq(channelRoleOverwritesTable.spaceId, BigInt(spaceId)),
+          eq(channelRoleOverwritesTable.channelId, BigInt(channelId)),
+        ),
+      ),
+    db
+      .select({
+        userId: channelMemberOverwritesTable.userId,
+        allow: channelMemberOverwritesTable.allow,
+        deny: channelMemberOverwritesTable.deny,
+      })
+      .from(channelMemberOverwritesTable)
+      .where(
+        and(
+          eq(channelMemberOverwritesTable.spaceId, BigInt(spaceId)),
+          eq(channelMemberOverwritesTable.channelId, BigInt(channelId)),
+        ),
+      ),
+  ]);
 
-    return rows.map((r) => ({
-        roleId: r.roleId != null ? r.roleId.toString() : null,
-        userId: r.userId != null ? r.userId.toString() : null,
-        allow: r.allow ?? 0n,
-        deny: r.deny ?? 0n,
-    }));
+  return [
+    ...roleRows.map((r) => ({
+      roleId: r.roleId.toString(),
+      userId: null,
+      allow: r.allow ?? 0n,
+      deny: r.deny ?? 0n,
+    })),
+    ...memberRows.map((r) => ({
+      roleId: null,
+      userId: r.userId.toString(),
+      allow: r.allow ?? 0n,
+      deny: r.deny ?? 0n,
+    })),
+  ];
 }
 
 export async function getParentOverwrites(
-    spaceId: Snowflake,
-    channelId: Snowflake,
+  spaceId: Snowflake,
+  channelId: Snowflake,
 ): Promise<OverwriteLike[] | null> {
-    const parent = await db
-        .select({ parentId: channelsTable.parentId })
-        .from(channelsTable)
-        .where(
-            and(
-                eq(channelsTable.spaceId, BigInt(spaceId)),
-                eq(channelsTable.id, BigInt(channelId)),
-            ),
-        )
-        .limit(1)
-        .then((res) => res[0])
-        .catch(() => null);
+  const parent = await db
+    .select({ parentId: channelsTable.parentId })
+    .from(channelsTable)
+    .where(
+      and(
+        eq(channelsTable.spaceId, BigInt(spaceId)),
+        eq(channelsTable.id, BigInt(channelId)),
+      ),
+    )
+    .limit(1)
+    .then((res) => res[0])
+    .catch(() => null);
 
-    if (!parent) return null;
+  if (!parent) return null;
 
-    const { parentId } = parent;
-    if (parentId == null) return null;
+  const { parentId } = parent;
+  if (parentId == null) return null;
 
-    return getChannelOverwrites(spaceId, parentId.toString());
+  return getChannelOverwrites(spaceId, parentId.toString());
 }
 
 export function computeListIdFromOverwrites(opts: {
-    parentOverwrites?: OverwriteLike[] | null;
-    channelOverwrites?: OverwriteLike[] | null;
+  parentOverwrites?: OverwriteLike[] | null;
+  channelOverwrites?: OverwriteLike[] | null;
 }): string {
-    const { parentOverwrites, channelOverwrites } = opts;
+  const { parentOverwrites, channelOverwrites } = opts;
 
-    const view = permissionFlags.ViewChannel;
-    const parts: string[] = [];
+  const view = permissionFlags.ViewChannel;
+  const parts: string[] = [];
 
-    const add = (
-        prefix: "p" | "c",
-        overwrites: OverwriteLike[] | null | undefined,
-    ) => {
-        if (!overwrites?.length) return;
+  const add = (
+    prefix: "p" | "c",
+    overwrites: OverwriteLike[] | null | undefined,
+  ) => {
+    if (!overwrites?.length) return;
 
-        for (const ow of overwrites) {
-            const { allow, deny, roleId, userId } = ow;
+    for (const ow of overwrites) {
+      const { roleId, userId } = ow;
+      const allow = BigInt(ow.allow);
+      const deny = BigInt(ow.deny);
 
-            const key =
-                roleId != null
-                    ? `r:${roleId}`
-                    : userId != null
-                      ? `u:${userId}`
-                      : "x";
+      const key =
+        roleId != null ? `r:${roleId}` : userId != null ? `u:${userId}` : "x";
 
-            if ((allow & view) !== 0n) parts.push(`${prefix}:a:${key}`);
-            if ((deny & view) !== 0n) parts.push(`${prefix}:d:${key}`);
-        }
-    };
+      if ((allow & view) !== 0n) parts.push(`${prefix}:a:${key}`);
+      if ((deny & view) !== 0n) parts.push(`${prefix}:d:${key}`);
+    }
+  };
 
-    add("p", parentOverwrites);
-    add("c", channelOverwrites);
+  add("p", parentOverwrites);
+  add("c", channelOverwrites);
 
-    if (!parts.length) return "everyone";
+  if (!parts.length) return "everyone";
 
-    return murmur(parts.sort().join(","));
+  return murmur(parts.sort().join(","));
 }
 
 export function computeMemberBaseBits(
-    member: APISpaceMember,
-    everyoneAllow: bigint,
-    everyoneDeny: bigint,
-    spaceId: Snowflake,
+  member: APISpaceMember,
+  everyoneAllow: bigint,
+  everyoneDeny: bigint,
+  spaceId: Snowflake,
 ): bigint {
-    // Start with @everyone allow
-    let bits = 0n;
-    bits |= everyoneAllow;
+  // Start with @everyone allow
+  let bits = 0n;
+  bits |= everyoneAllow;
 
-    // Add all role allows
-    const roles = member.roles ?? [];
-    for (const mr of roles) {
-        const { roleId } = mr;
-        if (!roleId || roleId === spaceId) continue;
-        bits |= BigInt(mr.role?.allow ?? 0n);
-    }
+  // Add all role allows
+  const roles = member.roles ?? [];
+  for (const mr of roles) {
+    const { roleId } = mr;
+    if (!roleId || roleId === spaceId) continue;
+    bits |= BigInt(mr.role?.allow ?? 0n);
+  }
 
-    // Apply @everyone deny
-    bits &= ~everyoneDeny;
+  // Apply @everyone deny
+  bits &= ~everyoneDeny;
 
-    // Apply role denies
-    for (const mr of roles) {
-        const { roleId } = mr;
-        if (!roleId || roleId === spaceId) continue;
-        bits &= ~BigInt(mr.role?.deny ?? 0n);
-    }
+  // Apply role denies
+  for (const mr of roles) {
+    const { roleId } = mr;
+    if (!roleId || roleId === spaceId) continue;
+    bits &= ~BigInt(mr.role?.deny ?? 0n);
+  }
 
-    return bits;
+  return bits;
 }
 
 export function computeMemberRoleIds(
-    member: APISpaceMember,
-    spaceId: Snowflake,
+  member: APISpaceMember,
+  spaceId: Snowflake,
 ): string[] {
-    const roles = member.roles ?? [];
-    return roles.map((r) => r.roleId).filter((id) => id !== spaceId);
+  const roles = member.roles ?? [];
+  return roles.map((r) => r.roleId).filter((id) => id !== spaceId);
 }
 
 export function canViewChannel(opts: {
-    member: APISpaceMember;
-    spaceId: Snowflake;
-    channelOverwrites: OverwriteLike[];
-    parentOverwrites: OverwriteLike[] | null;
-    everyoneAllow: bigint;
-    everyoneDeny: bigint;
+  member: APISpaceMember;
+  spaceId: Snowflake;
+  channelOverwrites: OverwriteLike[];
+  parentOverwrites: OverwriteLike[] | null;
+  everyoneAllow: bigint;
+  everyoneDeny: bigint;
 }): boolean {
-    const {
-        member,
-        spaceId,
-        channelOverwrites,
-        parentOverwrites,
-        everyoneAllow,
-        everyoneDeny,
-    } = opts;
+  const {
+    member,
+    spaceId,
+    channelOverwrites,
+    parentOverwrites,
+    everyoneAllow,
+    everyoneDeny,
+  } = opts;
 
-    const memberRoleIds = computeMemberRoleIds(member, spaceId);
-    const baseBits = computeMemberBaseBits(
-        member,
-        everyoneAllow,
-        everyoneDeny,
-        spaceId,
-    );
+  const memberRoleIds = computeMemberRoleIds(member, spaceId);
+  const baseBits = computeMemberBaseBits(
+    member,
+    everyoneAllow,
+    everyoneDeny,
+    spaceId,
+  );
 
-    const bits = resolveEffectiveChannelBits({
-        baseBits,
-        userId: member.userId,
-        everyoneRoleId: spaceId,
-        memberRoleIds,
-        parentOverwrites,
-        channelOverwrites,
-    });
+  const bits = resolveEffectiveChannelBits({
+    baseBits,
+    userId: member.userId,
+    everyoneRoleId: spaceId,
+    memberRoleIds,
+    parentOverwrites,
+    channelOverwrites,
+  });
 
-    return hasAny(bits, permissionFlags.ViewChannel);
+  return hasAny(bits, permissionFlags.ViewChannel);
 }
 
 export function offlineLike(presence: PresencePayload | null): boolean {
-    const status = presence?.status ?? "offline";
-    return status === "offline" || status === "invisible";
+  const status = presence?.status ?? "offline";
+  return status === "offline" || status === "invisible";
 }
 
 export async function attachPresenceMember(member: APISpaceMember): Promise<
-    APISpaceMember & {
-        presence?: PresencePayload;
-    }
+  APISpaceMember & {
+    presence?: PresencePayload;
+  }
 > {
-    const presence = await PresenceService.get(member.userId);
+  const presence = await PresenceService.get(member.userId);
 
-    return {
-        ...member,
-        presence:
-            presence ??
-            ({
-                status: "offline",
-                activities: [],
-                device: "web",
-                updatedAt: 0,
-            } satisfies PresencePayload),
-    };
+  return {
+    ...member,
+    presence:
+      presence ??
+      ({
+        status: "offline",
+        activities: [],
+        device: "web",
+        updatedAt: 0,
+      } satisfies PresencePayload),
+  };
 }
 
 export async function attachPresenceUser(user: APIUser): Promise<APIUser> {
-    const presence = await PresenceService.get(user.id);
+  const presence = await PresenceService.get(user.id);
 
-    return {
-        ...user,
-        presence:
-            presence ??
-            ({
-                status: "offline",
-                activities: [],
-                device: "web",
-                updatedAt: 0,
-            } satisfies PresencePayload),
-    };
+  return {
+    ...user,
+    presence:
+      presence ??
+      ({
+        status: "offline",
+        activities: [],
+        device: "web",
+        updatedAt: 0,
+      } satisfies PresencePayload),
+  };
 }
 
 export async function getMembers(
-    spaceId: Snowflake,
-    range: MemberListRange,
-    channelOverwrites: OverwriteLike[],
-    parentOverwrites: OverwriteLike[] | null,
-    everyoneAllow: bigint,
-    everyoneDeny: bigint,
+  spaceId: Snowflake,
+  range: MemberListRange,
+  channelOverwrites: OverwriteLike[],
+  parentOverwrites: OverwriteLike[] | null,
+  everyoneAllow: bigint,
+  everyoneDeny: bigint,
 ) {
-    const { start, end, limit } = normalizeRange(range);
+  const { start, end, limit } = normalizeRange(range);
 
-    let members = await execNormalizedMany<APISpaceMember>(
-        db.query.spaceMembersTable.findMany({
-            where: eq(spaceMembersTable.spaceId, BigInt(spaceId)),
-            with: {
-                user: {
-                    columns: {
-                        hash: false,
-                        dateOfBirth: false,
-                        previousAvatars: false,
-                        email: false,
-                    },
-                },
-                roles: {
-                    with: {
-                        role: true,
-                    },
-                },
-            },
-            offset: start,
-            limit,
-        }),
-    );
+  let members = await execNormalizedMany<APISpaceMember>(
+    db.query.spaceMembersTable.findMany({
+      where: eq(spaceMembersTable.spaceId, BigInt(spaceId)),
+      with: {
+        user: {
+          columns: {
+            hash: false,
+            dateOfBirth: false,
+            previousAvatars: false,
+            email: false,
+          },
+        },
+        roles: {
+          with: {
+            role: true,
+          },
+        },
+      },
+      offset: start,
+      limit,
+    }),
+  );
 
-    if (!members?.length) {
-        return {
-            items: [],
-            groups: [],
-            range: [start, end],
-            members: [],
-        };
-    }
-
-    // Filter members by ViewChannel
-    members = members.filter((m) =>
-        canViewChannel({
-            member: m,
-            spaceId,
-            channelOverwrites,
-            parentOverwrites,
-            everyoneAllow,
-            everyoneDeny,
-        }),
-    );
-
-    if (!members.length) {
-        return {
-            items: [],
-            groups: [],
-            range: [start, end],
-            members: [],
-        };
-    }
-
-    const groups: any[] = [];
-    const items: any[] = [];
-
-    const membersWithPresence = await Promise.all(
-        members.map(attachPresenceMember),
-    );
-
-    let onlineMembers = membersWithPresence.filter(
-        (m) => !offlineLike(m.presence ?? null),
-    );
-
-    const offlineMembers = membersWithPresence.filter((m) =>
-        offlineLike(m.presence ?? null),
-    );
-
-    const memberRoles = [
-        ...new Map(
-            onlineMembers
-                .flatMap((m) => m.roles ?? [])
-                .map(
-                    (role) =>
-                        [role.roleId, role] as unknown as [
-                            string,
-                            APIMemberRole,
-                        ],
-                ),
-        ).values(),
-    ] as APIMemberRole[];
-
-    const hoistedRoles = memberRoles
-        .filter((r) => r.roleId !== spaceId && !!r.role?.hoist)
-        .sort((a, b) => (b.role?.position ?? 0) - (a.role?.position ?? 0));
-
-    const emitRoleGroup = (roleId: string, groupName: string) => {
-        const [roleMembers, remaining] = arrayPartition(
-            onlineMembers,
-            (m) => !!m.roles?.find((r) => r.roleId === roleId),
-        );
-
-        if (!roleMembers.length) return;
-
-        const group = {
-            count: roleMembers.length,
-            id: roleId,
-            name: groupName,
-        };
-
-        items.push({ group });
-        groups.push(group);
-
-        for (const member of roleMembers) {
-            const roles =
-                member.roles?.filter((x) => x.roleId !== spaceId) ?? [];
-
-            items.push({
-                member: {
-                    ...member,
-                    roles,
-                    user: member.user,
-                },
-            });
-        }
-
-        onlineMembers = remaining;
-    };
-
-    for (const r of hoistedRoles)
-        emitRoleGroup(r.roleId, r.role?.name ?? r.roleId ?? "unknown");
-
-    if (onlineMembers.length) {
-        const group = {
-            count: onlineMembers.length,
-            id: "online",
-            name: "Online",
-        };
-        items.push({ group });
-        groups.push(group);
-
-        for (const member of onlineMembers) {
-            const roles =
-                member.roles?.filter((x) => x.roleId !== spaceId) ?? [];
-
-            items.push({
-                member: {
-                    ...member,
-                    roles,
-                    user: member.user,
-                },
-            });
-        }
-    }
-
-    if (offlineMembers.length) {
-        const group = {
-            count: offlineMembers.length,
-            id: "offline",
-            name: "Offline",
-        };
-        items.push({ group });
-        groups.push(group);
-
-        for (const member of offlineMembers) {
-            const roles =
-                member.roles?.filter((x) => x.roleId !== spaceId) ?? [];
-
-            items.push({
-                member: {
-                    ...member,
-                    roles,
-                    user: member.user,
-                },
-            });
-        }
-    }
-
+  if (!members?.length) {
     return {
-        items,
-        groups,
-        range: [start, end],
-        members: items
-            .map((x) => ("member" in x ? x.member : undefined))
-            .filter(Boolean),
+      items: [],
+      groups: [],
+      range: [start, end],
+      members: [],
     };
+  }
+
+  // Filter members by ViewChannel
+  members = members.filter((m) =>
+    canViewChannel({
+      member: m,
+      spaceId,
+      channelOverwrites,
+      parentOverwrites,
+      everyoneAllow,
+      everyoneDeny,
+    }),
+  );
+
+  if (!members.length) {
+    return {
+      items: [],
+      groups: [],
+      range: [start, end],
+      members: [],
+    };
+  }
+
+  const groups: any[] = [];
+  const items: any[] = [];
+
+  const membersWithPresence = await Promise.all(
+    members.map(attachPresenceMember),
+  );
+
+  let onlineMembers = membersWithPresence.filter(
+    (m) => !offlineLike(m.presence ?? null),
+  );
+
+  const offlineMembers = membersWithPresence.filter((m) =>
+    offlineLike(m.presence ?? null),
+  );
+
+  const memberRoles = [
+    ...new Map(
+      onlineMembers
+        .flatMap((m) => m.roles ?? [])
+        .map(
+          (role) => [role.roleId, role] as unknown as [string, APIMemberRole],
+        ),
+    ).values(),
+  ] as APIMemberRole[];
+
+  const hoistedRoles = memberRoles
+    .filter((r) => r.roleId !== spaceId && !!r.role?.hoist)
+    .sort((a, b) => (b.role?.position ?? 0) - (a.role?.position ?? 0));
+
+  const emitRoleGroup = (roleId: string, groupName: string) => {
+    const [roleMembers, remaining] = arrayPartition(
+      onlineMembers,
+      (m) => !!m.roles?.find((r) => r.roleId === roleId),
+    );
+
+    if (!roleMembers.length) return;
+
+    const group = {
+      count: roleMembers.length,
+      id: roleId,
+      name: groupName,
+    };
+
+    items.push({ group });
+    groups.push(group);
+
+    for (const member of roleMembers) {
+      const roles = member.roles?.filter((x) => x.roleId !== spaceId) ?? [];
+
+      items.push({
+        member: {
+          ...member,
+          roles,
+          user: member.user,
+        },
+      });
+    }
+
+    onlineMembers = remaining;
+  };
+
+  for (const r of hoistedRoles)
+    emitRoleGroup(r.roleId, r.role?.name ?? r.roleId ?? "unknown");
+
+  if (onlineMembers.length) {
+    const group = {
+      count: onlineMembers.length,
+      id: "online",
+      name: "Online",
+    };
+    items.push({ group });
+    groups.push(group);
+
+    for (const member of onlineMembers) {
+      const roles = member.roles?.filter((x) => x.roleId !== spaceId) ?? [];
+
+      items.push({
+        member: {
+          ...member,
+          roles,
+          user: member.user,
+        },
+      });
+    }
+  }
+
+  if (offlineMembers.length) {
+    const group = {
+      count: offlineMembers.length,
+      id: "offline",
+      name: "Offline",
+    };
+    items.push({ group });
+    groups.push(group);
+
+    for (const member of offlineMembers) {
+      const roles = member.roles?.filter((x) => x.roleId !== spaceId) ?? [];
+
+      items.push({
+        member: {
+          ...member,
+          roles,
+          user: member.user,
+        },
+      });
+    }
+  }
+
+  return {
+    items,
+    groups,
+    range: [start, end],
+    members: items
+      .map((x) => ("member" in x ? x.member : undefined))
+      .filter(Boolean),
+  };
 }
 
 export async function subscribeToMemberEvents(
-    this: WebSocket,
-    userId: Snowflake,
+  this: WebSocket,
+  userId: Snowflake,
 ) {
-    if (this.events[userId]) return false;
-    if (this.memberEvents[userId]) return false;
+  if (this.events[userId]) return false;
+  if (this.memberEvents[userId]) return false;
 
-    this.memberEvents[userId] = await listenEvent(
-        userId,
-        (opts) => opts?.acknowledge?.(),
-        this.listenOptions,
-    );
+  this.memberEvents[userId] = await listenEvent(
+    userId,
+    (opts) => opts?.acknowledge?.(),
+    this.listenOptions,
+  );
 
-    return true;
+  return true;
 }
 
 export async function getMemberCount(spaceId: Snowflake): Promise<number> {
-    return db.query.spaceMembersTable
-        .findMany({
-            where: eq(spaceMembersTable.spaceId, BigInt(spaceId)),
-            columns: { userId: true },
-        })
-        .then((rows) => rows.length)
-        .catch(() => 0);
+  return db.query.spaceMembersTable
+    .findMany({
+      where: eq(spaceMembersTable.spaceId, BigInt(spaceId)),
+      columns: { userId: true },
+    })
+    .then((rows) => rows.length)
+    .catch(() => 0);
 }
 
 export function computeVisibleUserIds(ops: { members: any[] }[]): Set<string> {
-    const out = new Set<string>();
-    for (const op of ops) {
-        for (const m of op.members ?? []) {
-            const uid = m?.user?.id ?? m?.userId;
-            if (uid != null) out.add(String(uid));
-        }
+  const out = new Set<string>();
+  for (const op of ops) {
+    for (const m of op.members ?? []) {
+      const uid = m?.user?.id ?? m?.userId;
+      if (uid != null) out.add(String(uid));
     }
-    return out;
+  }
+  return out;
 }
 
 export async function resyncMemberListWindows(
-    this: WebSocket,
-    spaceIdOrSubKey: Snowflake,
+  this: WebSocket,
+  spaceIdOrSubKey: Snowflake,
 ) {
-    if (!this.memberListSubs || this.memberListSubs.size === 0) return;
+  if (!this.memberListSubs || this.memberListSubs.size === 0) return;
 
-    let spaceId: string;
-    let channelId: string | null = null;
-    let listId: string | null = null;
+  let spaceId: string;
+  let channelId: string | null = null;
+  let listId: string | null = null;
 
-    const parts = spaceIdOrSubKey.split(":");
-    if (parts.length === 3) [spaceId, channelId, listId] = parts;
-    else spaceId = spaceIdOrSubKey;
+  const parts = spaceIdOrSubKey.split(":");
+  if (parts.length === 3) [spaceId, channelId, listId] = parts;
+  else spaceId = spaceIdOrSubKey;
 
-    const subs = [...this.memberListSubs.values()].filter((sub) => {
-        if (sub.spaceId !== spaceId) return false;
-        if (channelId && sub.channelId !== channelId) return false;
-        return !(listId && sub.listId !== listId);
+  const subs = [...this.memberListSubs.values()].filter((sub) => {
+    if (sub.spaceId !== spaceId) return false;
+    if (channelId && sub.channelId !== channelId) return false;
+    return !(listId && sub.listId !== listId);
+  });
+
+  if (!subs.length) return;
+
+  const everyonePerms = await getEveryonePermissions(spaceId);
+
+  for (const sub of subs) {
+    const channelOverwrites = await getChannelOverwrites(
+      spaceId,
+      sub.channelId,
+    );
+    const parentOverwrites = await getParentOverwrites(spaceId, sub.channelId);
+
+    // Recompute the listId from current overwrites — it may have changed since
+    // the subscription was created (e.g. after an overwrite upsert/delete).
+    // The client keys its memberLists store by channel.listId, so sending the
+    // fresh listId ensures updateMemberList sets the store under the right key.
+    const currentListId = computeListIdFromOverwrites({
+      parentOverwrites,
+      channelOverwrites,
     });
 
-    if (!subs.length) return;
+    const ops = await Promise.all(
+      sub.ranges.map((range) =>
+        getMembers(
+          spaceId,
+          range,
+          channelOverwrites,
+          parentOverwrites,
+          everyonePerms.allow,
+          everyonePerms.deny,
+        ),
+      ),
+    );
 
-    const memberCount = await getMemberCount(spaceId);
-    const everyonePerms = await getEveryonePermissions(spaceId);
+    const groupsMap = new Map<string, any>();
+    for (const group of ops.flatMap((x) => x.groups))
+      groupsMap.set(group.id, group);
+    const groups = [...groupsMap.values()];
 
-    for (const sub of subs) {
-        const channelOverwrites = await getChannelOverwrites(
-            spaceId,
-            sub.channelId,
-        );
-        const parentOverwrites = await getParentOverwrites(
-            spaceId,
-            sub.channelId,
-        );
+    // Use the visible member count from the ops result rather than the total
+    // space member count — overwrites can filter members out entirely, and
+    // the client uses memberCount to determine hasMore.
+    const visibleMemberCount = ops.reduce(
+      (acc, x) => acc + (x.members?.length ?? 0),
+      0,
+    );
 
-        const ops = await Promise.all(
-            sub.ranges.map((range) =>
-                getMembers(
-                    spaceId,
-                    range,
-                    channelOverwrites,
-                    parentOverwrites,
-                    everyonePerms.allow,
-                    everyonePerms.deny,
-                ),
-            ),
-        );
+    const computedSubKey = `${sub.spaceId}:${sub.channelId}:${currentListId}`;
+    const visibleUserIds = computeVisibleUserIds(ops);
 
-        const groupsMap = new Map<string, any>();
-        for (const group of ops.flatMap((x) => x.groups))
-            groupsMap.set(group.id, group);
-        const groups = [...groupsMap.values()];
+    this.presences = this.presences ?? new Map();
+    this.presences.set(computedSubKey, visibleUserIds);
 
-        const computedSubKey = `${sub.spaceId}:${sub.channelId}:${sub.listId}`;
-        const visibleUserIds = computeVisibleUserIds(ops);
-
-        this.presences = this.presences ?? new Map();
-        this.presences.set(computedSubKey, visibleUserIds);
-
-        await Send(this, {
-            op: "Dispatch",
-            s: this.sequence++,
-            t: "SpaceMemberListUpdate",
-            d: {
-                ops: ops.map((x) => ({
-                    items: x.items,
-                    op: "SYNC",
-                    range: x.range,
-                })),
-                memberCount,
-                id: sub.listId,
-                spaceId,
-                groups,
-            },
-        });
-    }
+    await Send(this, {
+      op: "Dispatch",
+      s: this.sequence++,
+      t: "SpaceMemberListUpdate",
+      d: {
+        ops: ops.map((x) => ({
+          items: x.items,
+          op: "SYNC",
+          range: x.range,
+        })),
+        memberCount: visibleMemberCount,
+        id: currentListId,
+        spaceId,
+        groups,
+      },
+    });
+  }
 }

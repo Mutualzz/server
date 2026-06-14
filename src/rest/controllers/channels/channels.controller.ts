@@ -388,8 +388,8 @@ export default class ChannelsController {
       }
 
       if (channel.spaceId)
-        await requireSpacePermissions({
-          spaceId: channel.spaceId,
+        await requireChannelPermissions({
+          channelId: channel.id,
           userId: user.id,
           needed: ["ManageChannels"],
         });
@@ -596,8 +596,8 @@ export default class ChannelsController {
         throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
 
       if (channel.spaceId) {
-        await requireSpacePermissions({
-          spaceId: channel.spaceId,
+        await requireChannelPermissions({
+          channelId: channel.id,
           userId: user.id,
           needed: ["ManageChannels"],
         });

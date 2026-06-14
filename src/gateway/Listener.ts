@@ -1,5 +1,16 @@
-import { channelRecipientsTable, channelsTable, db, spaceMembersTable, spacesTable, } from "@mutualzz/database";
-import { type EventOpts, listenEvent, type ListenEventOpts, RabbitMQ, } from "@mutualzz/util";
+import {
+  channelRecipientsTable,
+  channelsTable,
+  db,
+  spaceMembersTable,
+  spacesTable,
+} from "@mutualzz/database";
+import {
+  type EventOpts,
+  listenEvent,
+  type ListenEventOpts,
+  RabbitMQ,
+} from "@mutualzz/util";
 import type { Channel } from "amqplib";
 import { and, eq } from "drizzle-orm";
 import { logger } from "./Logger";
@@ -241,8 +252,16 @@ async function consume(this: WebSocket, opts: EventOpts) {
         delete this.events[id];
       }
 
-      // recreate listener (works for both previously tracked and new channels)
       this.events[id] = await listenEvent(id, consumer, listenOpts);
+
+      const channelSpaceId = String(data?.spaceId ?? data?.space_id);
+      if (channelSpaceId) {
+        try {
+          await resyncMemberListWindows.call(this, channelSpaceId);
+        } catch (err) {
+          logger.error("[MemberList] resync failed (ChannelUpdate):", err);
+        }
+      }
       break;
     }
     case "ChannelDeleteBulk": {
