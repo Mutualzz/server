@@ -31,6 +31,7 @@ export const userSettingsTable = pgTable("user_settings", {
 
     favoriteEmojis: text().array().default([]).notNull(),
     favoriteGifs: text().array().default([]).notNull(),
+    favoriteStickers: text().array().default([]).notNull(),
 
     updatedAt: timestamp()
         .notNull()

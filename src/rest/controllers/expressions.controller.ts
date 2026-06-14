@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import type { APIExpression } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { imageFileValidator, validateExpressionParams, validateExpressionPutBody, } from "@mutualzz/validators";
+import { imageFileValidator, validateExpressionParams, validateExpressionPatchBody, validateExpressionPutBody, } from "@mutualzz/validators";
 import { db, expressionsTable } from "@mutualzz/database";
 import {
   bucketName,
@@ -201,7 +201,6 @@ export default class ExpressionsController {
       const { user } = req;
 
       const { expressionId } = validateExpressionParams.parse(req.params);
-      const { name } = validateExpressionPutBody.partial().parse(req.body);
 
       let expression = await getCache("expression", expressionId);
       if (!expression)
@@ -216,6 +215,10 @@ export default class ExpressionsController {
           HttpStatusCode.NotFound,
           "Expression not found",
         );
+
+      const { name } = validateExpressionPatchBody(expression.type).parse(
+        req.body,
+      );
 
       if (expression.spaceId)
         await requireSpacePermissions({

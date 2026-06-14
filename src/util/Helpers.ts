@@ -27,6 +27,9 @@ import {
   type APITheme,
   type APIUser,
   type APIUserSettings,
+  ExpressionType,
+  HttpException,
+  HttpStatusCode,
   type PresencePayload,
   ReadStateType,
   type Snowflake,
@@ -54,18 +57,86 @@ function normalizeOverwrite(ow: any, extra: Record<string, any> = {}) {
 
 export const resolveExpressions = async (
   content: string | null,
+  expressionIds?: (string | bigint)[] | null,
 ): Promise<APIExpression[]> => {
-  if (!content) return [];
-
-  const ids = (content.match(/<a?:[^:]+:(\d+)>/g) ?? [])
+  const fromContent = (content?.match(/<a?:[^:]+:(\d+)>/g) ?? [])
     .map((raw) => raw.match(/<a?:[^:]+:(\d+)>/)?.[1])
     .filter(Boolean) as string[];
 
-  const unique = [...new Set(ids)];
+  const fromIds = (expressionIds ?? []).map((id) => id.toString());
+  const unique = [...new Set([...fromContent, ...fromIds])];
+
+  if (!unique.length) return [];
 
   return (await Promise.all(unique.map((id) => getExpression(id)))).filter(
-    (exp) => !!exp,
+    (exp): exp is APIExpression => !!exp,
   );
+};
+
+const MAX_MESSAGE_STICKERS = 3;
+
+export const validateMessageStickers = async ({
+  expressionIds,
+  channel,
+  userId,
+  canUseExternalStickers,
+}: {
+  expressionIds: string[];
+  channel: APIChannel;
+  userId: string;
+  canUseExternalStickers: boolean;
+}): Promise<bigint[]> => {
+  if (!expressionIds.length) return [];
+
+  if (expressionIds.length > MAX_MESSAGE_STICKERS) {
+    throw new HttpException(
+      HttpStatusCode.BadRequest,
+      `You can only attach up to ${MAX_MESSAGE_STICKERS} stickers`,
+    );
+  }
+
+  const unique = [...new Set(expressionIds)];
+  const validated: bigint[] = [];
+
+  for (const id of unique) {
+    const expression = await getExpression(id);
+
+    if (!expression)
+      throw new HttpException(
+        HttpStatusCode.BadRequest,
+        "One or more stickers could not be found",
+      );
+
+    if (expression.type !== ExpressionType.Sticker)
+      throw new HttpException(
+        HttpStatusCode.BadRequest,
+        "Only stickers can be attached to messages",
+      );
+
+    let allowed = false;
+
+    if (!expression.spaceId && expression.authorId === userId) {
+      allowed = true;
+    } else if (
+      channel.spaceId &&
+      expression.spaceId &&
+      expression.spaceId === channel.spaceId
+    ) {
+      allowed = true;
+    } else if (canUseExternalStickers) {
+      allowed = true;
+    }
+
+    if (!allowed)
+      throw new HttpException(
+        HttpStatusCode.Forbidden,
+        `You cannot use the sticker :${expression.name}:`,
+      );
+
+    validated.push(BigInt(id));
+  }
+
+  return validated;
 };
 
 export const publicUserColumns = {

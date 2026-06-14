@@ -1,7 +1,16 @@
 import { usersTable } from "./users/User";
 import type { APIMessageEmbed, APIMessageMention } from "@mutualzz/types";
 import { relations, sql } from "drizzle-orm";
-import { bigint, boolean, index, jsonb, pgTable, smallint, text, timestamp, } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  boolean,
+  index,
+  jsonb,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { channelsTable } from "./channel/Channel.ts";
 import { spacesTable } from "./spaces";
 
@@ -33,6 +42,7 @@ export const messagesTable = pgTable(
       .default(sql`0`),
 
     embeds: jsonb().$type<APIMessageEmbed[]>().notNull().default([]),
+    expressionIds: bigint({ mode: "bigint" }).array().default([]).notNull(),
 
     nonce: bigint({ mode: "bigint" }),
 
@@ -57,7 +67,7 @@ export const messagesTable = pgTable(
   ],
 );
 
-export const messageRelations = relations(messagesTable, ({ one, many }) => ({
+export const messageRelations = relations(messagesTable, ({ one }) => ({
   space: one(spacesTable, {
     fields: [messagesTable.spaceId],
     references: [spacesTable.id],

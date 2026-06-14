@@ -40,10 +40,12 @@ import {
   resolveExpressions,
   sanitizeContent,
   Snowflake,
+  validateMessageStickers,
 } from "@mutualzz/util";
 import {
   validateChannelParamsGet,
   validateMessageAckParams,
+  validateMessageBodyPatch,
   validateMessageBodyPut,
   validateMessageParamsModify,
   validateMessageParamsPut,
@@ -85,7 +87,11 @@ export default class MessagesController {
           "Message cannot be sent in this channel",
         );
 
-      const { content, nonce } = validateMessageBodyPut.parse(req.body);
+      const {
+        content,
+        nonce,
+        expressionIds = [],
+      } = validateMessageBodyPut.parse(req.body);
 
       switch (channel.type) {
         case ChannelType.DM:
@@ -134,13 +140,45 @@ export default class MessagesController {
         );
 
         if (existingMessage) {
-          await setCache("message", nonce, existingMessage);
-          return res.status(HttpStatusCode.Success).json(existingMessage);
+          const hydrated = {
+            ...existingMessage,
+            expressions: await resolveExpressions(
+              existingMessage.content ?? "",
+              existingMessage.expressionIds,
+            ),
+            expressionIds: (existingMessage.expressionIds ?? []).map((id) =>
+              id.toString(),
+            ),
+          };
+          await setCache("message", nonce, hydrated);
+          return res.status(HttpStatusCode.Success).json(hydrated);
         }
       }
 
       let canUseExternalEmojis = false;
       let canEmbed = false;
+      let canUseExternalStickers = false;
+
+      if (channel.spaceId) {
+        try {
+          const { permissions } = await requireChannelPermissions({
+            channelId: channel.id,
+            userId: user.id,
+            needed: ["UseExternalStickers"],
+            mode: "Any",
+          });
+          canUseExternalStickers = permissions.has("UseExternalStickers");
+        } catch {
+          canUseExternalStickers = false;
+        }
+      } else canUseExternalStickers = true;
+
+      const validatedStickerIds = await validateMessageStickers({
+        expressionIds,
+        channel,
+        userId: user.id,
+        canUseExternalStickers,
+      });
 
       if (channel.spaceId) {
         try {
@@ -162,7 +200,7 @@ export default class MessagesController {
       const effectiveCanEmbed = !channel.spaceId || canEmbed;
 
       const sanitizedContent = content
-        ? await sanitizeContent(content, channel, canUseExternalEmojis)
+        ? await sanitizeContent(content, channel, user.id, canUseExternalEmojis)
         : null;
 
       if (channel.type === ChannelType.DM) {
@@ -239,6 +277,7 @@ export default class MessagesController {
             embeds: effectiveCanEmbed
               ? await buildEmbeds(sanitizedContent || "")
               : [],
+            expressionIds: validatedStickerIds,
             type: MessageType.Default,
           })
           .returning()
@@ -295,7 +334,13 @@ export default class MessagesController {
         channel: channel,
         author: user,
         space: channel.spaceId ? await getSpace(channel.spaceId) : null,
-        expressions: await resolveExpressions(newMessage.content ?? ""),
+        expressions: await resolveExpressions(
+          newMessage.content ?? "",
+          newMessage.expressionIds,
+        ),
+        expressionIds: (newMessage.expressionIds ?? []).map((id) =>
+          id.toString(),
+        ),
       };
 
       res.status(HttpStatusCode.Created).json(message);
@@ -496,7 +541,7 @@ export default class MessagesController {
           "You can only edit your own messages",
         );
 
-      const { content } = validateMessageBodyPut.parse(req.body);
+      const { content } = validateMessageBodyPatch.parse(req.body);
 
       if (!content || content.length === 0) {
         await db
@@ -554,7 +599,7 @@ export default class MessagesController {
       const effectiveCanEmbed = !channel.spaceId || canEmbed;
 
       const sanitizedContent = content
-        ? await sanitizeContent(content, channel, canUseExternalEmojis)
+        ? await sanitizeContent(content, channel, user.id, canUseExternalEmojis)
         : content;
 
       const result = await execNormalized<APIMessage>(
@@ -582,7 +627,11 @@ export default class MessagesController {
         ...result,
         channel,
         author: await getUser(message.authorId),
-        expressions: await resolveExpressions(result.content ?? ""),
+        expressions: await resolveExpressions(
+          result.content ?? "",
+          result.expressionIds,
+        ),
+        expressionIds: (result.expressionIds ?? []).map((id) => id.toString()),
       };
 
       res.status(HttpStatusCode.Success).json(newMessage);
@@ -782,7 +831,11 @@ export default class MessagesController {
       const messagesWithExpressions = await Promise.all(
         messages.map(async (msg) => ({
           ...msg,
-          expressions: await resolveExpressions(msg.content ?? ""),
+          expressions: await resolveExpressions(
+            msg.content ?? "",
+            msg.expressionIds,
+          ),
+          expressionIds: (msg.expressionIds ?? []).map((id) => id.toString()),
         })),
       );
 

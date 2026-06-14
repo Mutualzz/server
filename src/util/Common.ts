@@ -1,4 +1,9 @@
-import type { APIChannel, APIMessageEmbed } from "@mutualzz/types";
+import type {
+  APIChannel,
+  APIMessageEmbed,
+  APIExpression,
+} from "@mutualzz/types";
+import { ExpressionType } from "@mutualzz/types";
 import { SpotifyApi } from "@spotify/web-api-ts-sdk";
 import Color from "color";
 import crypto from "crypto";
@@ -15,6 +20,7 @@ import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
 import { getExpression } from "@mutualzz/util/Helpers.ts";
 import { klipyFetch } from "@mutualzz/util/Klipy.ts";
+import { isSafeFetchUrl } from "./urlSafety";
 
 type Services =
   | "spotify"
@@ -98,9 +104,33 @@ async function replaceAsync(
   return str.replace(regex, () => data.shift());
 }
 
+export const canUseCustomEmoji = (
+  userId: string,
+  emoji: APIExpression,
+  channel?: APIChannel | null,
+  canUseExternalEmojis = false,
+) => {
+  if (emoji.type !== ExpressionType.Emoji) return false;
+
+  if (!emoji.spaceId && emoji.authorId !== userId) return false;
+
+  const inSpace = !!channel?.spaceId;
+
+  if (!inSpace) {
+    return !emoji.spaceId && emoji.authorId === userId;
+  }
+
+  if (emoji.spaceId && BigInt(emoji.spaceId) === BigInt(channel.spaceId!)) {
+    return true;
+  }
+
+  return canUseExternalEmojis;
+};
+
 export const sanitizeContent = (
   content: string,
-  channel?: APIChannel | null,
+  channel: APIChannel | null | undefined,
+  userId: string,
   canUseExternalEmojis = false,
 ) => {
   const customEmojiRegex = /<a?:[^:]+:\d+>/g;
@@ -111,15 +141,12 @@ export const sanitizeContent = (
 
     if (!emoji) return raw;
 
-    let allowed = false;
-
-    if (
-      channel?.spaceId &&
-      emoji.spaceId &&
-      BigInt(emoji.spaceId) === BigInt(channel.spaceId)
-    )
-      allowed = true;
-    else if (canUseExternalEmojis) allowed = true;
+    const allowed = canUseCustomEmoji(
+      userId,
+      emoji,
+      channel,
+      canUseExternalEmojis,
+    );
 
     if (allowed) return raw;
 
@@ -149,7 +176,7 @@ export const createLimiter = (ms: number, limit: number) =>
     }),
 
     keyGenerator: (req) => {
-      if (req.user?.id) {
+      if (req.user.id) {
         const route = req.originalUrl.split("?")[0];
         return `u:${req.user.id}:${route}`;
       }
@@ -169,7 +196,7 @@ export const genRandColor = () =>
     .map(() => (crypto.randomBytes(1)[0] % 16).toString(16))
     .join("");
 
-export const dominantHex = async (buffer: Uint8Array<ArrayBufferLike>) => {
+export const dominantHex = async (buffer: Uint8Array) => {
   const { dominant } = await sharp(buffer).stats();
 
   return Color({
@@ -201,6 +228,7 @@ export const getUrls = (text: string) => {
     const url = raw
       .replace(/^[*_|~`]+|[*_|~`]+$/g, "")
       .replace(/^(\|\|)|(\|\|)$/g, "");
+    if (!isSafeFetchUrl(url)) continue;
     matches.push({ url, spoiler });
   }
 
@@ -687,6 +715,8 @@ export const buildEmbed = async (
   url: string,
   spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
+  if (!isSafeFetchUrl(url)) return null;
+
   const service = detectService(url);
   let embed: APIMessageEmbed;
 

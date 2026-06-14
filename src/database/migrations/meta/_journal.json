@@ -218,6 +218,20 @@
       "when": 1781451523839,
       "tag": "0030_condemned_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781471130318,
+      "tag": "0031_easy_mattie_franklin",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781472739466,
+      "tag": "0032_neat_madame_masque",
+      "breakpoints": true
     }
   ]
 }
