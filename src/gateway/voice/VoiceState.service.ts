@@ -41,6 +41,33 @@ export class VoiceStateService {
         const previous = await VoiceStateRedis.getState(userId);
         if (!requestedChannelId) {
             if (previous) {
+                try {
+                    const payload = JSON.stringify({
+                        userId: String(userId),
+                        spaceId: previous.spaceId,
+                        reason: "left",
+                        instanceId: this.instanceId,
+                    });
+                    await redis.publish("voice:control:kick", payload);
+                } catch (err) {
+                    logger.error(
+                        "Failed to publish voice leave control event",
+                        err,
+                    );
+                }
+
+                const active = await VoiceStateRedis.getActiveSession(userId);
+                if (active) {
+                    try {
+                        await VoiceStateRedis.clearActiveSession(
+                            userId,
+                            active.tokenId,
+                        );
+                    } catch {
+                        /* empty */
+                    }
+                }
+
                 await VoiceStateRedis.removeState({
                     userId,
                     spaceId: previous.spaceId ?? null,
@@ -78,6 +105,12 @@ export class VoiceStateService {
             if (!hasConnect) {
                 logger.debug(
                     `User ${userId} attempted to join voice channel ${requestedChannelId} in space ${spaceId} without permission`,
+                );
+                await this.rejectVoiceJoin(
+                    socket,
+                    userId,
+                    spaceId,
+                    "Missing permission to connect to this voice channel",
                 );
                 return;
             }
@@ -132,6 +165,12 @@ export class VoiceStateService {
                 logger.warn(
                     "Failed to clear active voice session before supersede",
                     err,
+                );
+                await this.rejectVoiceJoin(
+                    socket,
+                    userId,
+                    spaceId,
+                    "Unable to join voice channel",
                 );
                 return;
             }
@@ -245,6 +284,108 @@ export class VoiceStateService {
         });
 
         void VoiceStateService.emitStatesAsUpdates(spaceId, existing.channelId);
+
+        return true;
+    }
+
+    static async moveMemberToVoiceChannel(
+        spaceId: Snowflake,
+        targetUserId: Snowflake,
+        channelId: Snowflake,
+        reason = "Moved to another voice channel",
+    ) {
+        const existing = await VoiceStateRedis.getState(targetUserId);
+        if (!existing?.channelId) return false;
+        if (existing.spaceId !== spaceId) return false;
+        if (String(existing.channelId) === String(channelId)) return true;
+
+        const hasConnect = await canVoiceConnect({
+            spaceId,
+            channelId,
+            userId: targetUserId,
+        });
+        if (!hasConnect) return false;
+
+        const oldChannelId = existing.channelId;
+
+        try {
+            const payload = JSON.stringify({
+                userId: String(targetUserId),
+                spaceId,
+                reason,
+                instanceId: this.instanceId,
+            });
+
+            await redis.publish("voice:control:kick", payload);
+        } catch (err) {
+            logger.error("Failed to publish voice kick for member move", err);
+        }
+
+        const moderation = await this.getMemberVoiceModeration(
+            spaceId,
+            targetUserId,
+        );
+
+        const hasSpeak = await canVoiceSpeak({
+            spaceId,
+            channelId,
+            userId: targetUserId,
+        });
+
+        const active = await VoiceStateRedis.getActiveSession(targetUserId);
+        const sessionId = active?.sessionId ?? existing.sessionId;
+
+        const next: VoiceState = {
+            ...existing,
+            channelId,
+            spaceMute: moderation.spaceMute || !hasSpeak,
+            spaceDeaf: moderation.spaceDeaf,
+            sessionId,
+            updatedAt: Date.now(),
+        };
+
+        await VoiceStateRedis.upsertState(next);
+
+        await emitEvent({
+            event: "VoiceStateUpdate",
+            space_id: spaceId,
+            data: next,
+        });
+
+        const roomId = voiceScopeKey(spaceId, channelId);
+        const tokenId = crypto.randomUUID();
+        const voiceToken = generateVoiceToken(
+            targetUserId.toString(),
+            sessionId,
+            roomId,
+            tokenId,
+        );
+
+        await VoiceStateRedis.setActiveSession({
+            userId: targetUserId,
+            sessionId,
+            roomId,
+            tokenId,
+            updatedAt: Date.now(),
+        });
+
+        await createVoiceSession(voiceToken, targetUserId, sessionId, roomId);
+
+        await emitEvent({
+            event: "VoiceServerUpdate",
+            user_id: targetUserId,
+            data: {
+                roomId,
+                spaceId,
+                channelId,
+                voiceEndpoint: process.env.VOICE_ENDPOINT,
+                voiceToken,
+                sessionId,
+            },
+        });
+
+        void VoiceStateService.emitStatesAsUpdates(spaceId, oldChannelId);
+        void VoiceStateService.emitStatesAsUpdates(spaceId, channelId);
 
         return true;
     }
@@ -393,6 +534,24 @@ export class VoiceStateService {
             event: "VoiceStateUpdate",
             space_id: spaceId,
             data: existing,
+        });
+    }
+
+    private static async rejectVoiceJoin(
+        socket: WebSocket,
+        userId: Snowflake,
+        spaceId: Snowflake | null,
+        _reason: string,
+    ) {
+        await Send(socket, {
+            op: "Dispatch",
+            t: "VoiceStateUpdate",
+            s: socket.sequence++,
+            d: {
+                userId,
+                spaceId,
+                channelId: null,
+            },
         });
     }
 

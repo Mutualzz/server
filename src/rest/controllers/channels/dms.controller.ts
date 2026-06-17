@@ -48,6 +48,15 @@ export default class DMsController {
         .then((res) => (res.length ? res[0] : null));
 
       if (existing) {
+        const recipient = await db.query.channelRecipientsTable.findFirst({
+          where: and(
+            eq(channelRecipientsTable.channelId, existing.channelId),
+            eq(channelRecipientsTable.userId, BigInt(user.id)),
+          ),
+        });
+
+        const wasClosed = recipient?.closed ?? false;
+
         // Reopen it for the current user if closed
         await db
           .update(channelRecipientsTable)
@@ -66,7 +75,23 @@ export default class DMsController {
             "Failed to retrieve DM channel",
           );
 
-        return res.status(HttpStatusCode.Success).json(channel);
+        res.status(HttpStatusCode.Success).json(channel);
+
+        if (wasClosed) {
+          fireAndForgetAll([
+            {
+              label: "event:ChannelCreate:reopen",
+              run: () =>
+                emitEvent({
+                  event: "ChannelCreate",
+                  user_id: user.id,
+                  data: channel,
+                }),
+            },
+          ]);
+        }
+
+        return;
       }
 
       const channelId = BigInt(Snowflake.generate());
@@ -112,6 +137,18 @@ export default class DMsController {
         {
           label: "cache:set:channel",
           run: () => setCache("channel", hydrated.id, hydrated),
+        },
+      ]);
+
+      fireAndForgetAll([
+        {
+          label: `event:ChannelCreate:${recipientId}`,
+          run: () =>
+            emitEvent({
+              event: "ChannelCreate",
+              user_id: recipientId,
+              data: hydrated,
+            }),
         },
       ]);
     } catch (err) {

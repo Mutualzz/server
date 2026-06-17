@@ -89,6 +89,7 @@ export async function setupListener(this: WebSocket) {
         opts.channel?.ch,
       );
       opts.channel = await RabbitMQ.connection.createChannel();
+      RabbitMQ.attachChannelHandlers(opts.channel, `gateway:${this.userId}`);
       opts.channel.queues = {};
       logger.debug(
         "[RabbitMQ] channel created:",
@@ -146,6 +147,7 @@ export async function setupListener(this: WebSocket) {
         else {
           Object.values(this.events).forEach((x) => x?.());
           Object.values(this.memberEvents).forEach((x) => x?.());
+          Object.values(this.userSubscriptions ?? {}).forEach((x) => x?.());
         }
 
         this.memberListSubs.clear();
@@ -163,7 +165,7 @@ export async function setupListener(this: WebSocket) {
   }
 }
 
-async function consume(this: WebSocket, opts: EventOpts) {
+export async function consume(this: WebSocket, opts: EventOpts) {
   const { data, event } = opts;
   const id = String(data?.id);
 
@@ -246,9 +248,9 @@ async function consume(this: WebSocket, opts: EventOpts) {
       break;
     }
     case "ChannelUpdate": {
-      const exists = this.events[id];
-      if (exists) {
-        opts.cancel?.(id);
+      const cancelListener = this.events[id];
+      if (cancelListener) {
+        await cancelListener();
         delete this.events[id];
       }
 
@@ -276,12 +278,12 @@ async function consume(this: WebSocket, opts: EventOpts) {
     case "ChannelUpdateBulk": {
       for (const channel of data) {
         const cid = String(channel.id);
-        const exists = this.events[cid];
-        if (!exists) continue;
-        opts.cancel?.(cid);
+        const cancelListener = this.events[cid];
+        if (!cancelListener) continue;
+
+        await cancelListener();
         delete this.events[cid];
 
-        // recreate listener so consumers stay healthy after updates
         this.events[cid] = await listenEvent(cid, consumer, listenOpts);
       }
 

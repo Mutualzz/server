@@ -474,6 +474,64 @@ export const getChannels = async (ids: string[]) => {
   return result;
 };
 
+export const isSnowflakeIdentifier = (value: string) => /^\d{15,}$/.test(value);
+
+export async function getUserByUsername(
+  username: string,
+  privateUser = false,
+): Promise<APIUser | APIPrivateUser | null> {
+  const normalized = username.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const user = await execNormalized<APIUser | APIPrivateUser | null>(
+    db.query.usersTable.findFirst({
+      columns: {
+        hash: false,
+      },
+      where: eq(usersTable.username, normalized),
+    }),
+  );
+
+  if (!user) return null;
+
+  const resolved = !privateUser ? toPublicUser(user as APIPrivateUser) : user;
+
+  if ("hash" in resolved) delete resolved.hash;
+  if ("token" in resolved) delete resolved.token;
+
+  if (resolved.id) {
+    if (privateUser)
+      await setCache("authUser", resolved.id, resolved as APIPrivateUser);
+    else await setCache("user", resolved.id, resolved);
+  }
+
+  return resolved;
+}
+
+export async function resolveUserIdentifier(
+  identifier: string,
+  privateUser = false,
+): Promise<APIUser | APIPrivateUser | null> {
+  const normalized = identifier.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (isSnowflakeIdentifier(normalized)) {
+    const byId = privateUser
+      ? await getUser(normalized, true)
+      : await getUser(normalized);
+    if (byId) return byId;
+  }
+
+  const byUsername = await getUserByUsername(normalized, privateUser);
+  if (byUsername) return byUsername;
+
+  if (/^\d+$/.test(normalized)) {
+    return privateUser ? getUser(normalized, true) : getUser(normalized);
+  }
+
+  return null;
+}
+
 export async function getUser(
   id: string,
   privateUser: true,

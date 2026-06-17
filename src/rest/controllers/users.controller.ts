@@ -1,14 +1,14 @@
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { getUser } from "@mutualzz/util";
+import { resolveUserIdentifier } from "@mutualzz/util";
 import { validateUserGet } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 
 export default class UsersController {
     static async get(req: Request, res: Response, next: NextFunction) {
         try {
-            const { userId } = validateUserGet.parse(req.params);
+            const { identifier } = validateUserGet.parse(req.params);
 
-            const user = await getUser(userId);
+            const user = await resolveUserIdentifier(identifier);
 
             if (!user)
                 throw new HttpException(

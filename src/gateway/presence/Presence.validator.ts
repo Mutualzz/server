@@ -1,4 +1,4 @@
-import type { PresenceActivity, PresencePayload } from "@mutualzz/types";
+import type { PresenceActivity, PresenceActivityEmoji, PresencePayload } from "@mutualzz/types";
 
 export const MAX_ACTIVITIES = 5;
 export const MAX_STR = 128;
@@ -10,17 +10,33 @@ export function clampStr(str: unknown, max = MAX_STR): string | undefined {
     return text.length > max ? text.slice(0, max) : text;
 }
 
+export function sanitizeActivityEmoji(
+    raw: unknown,
+): PresenceActivityEmoji | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+
+    const assumed = raw as PresenceActivityEmoji;
+    const name = clampStr(assumed.name, 64);
+    const id = clampStr(assumed.id, 32);
+
+    if (!name && !id) return undefined;
+
+    return {
+        ...(id ? { id } : {}),
+        name: name ?? "",
+        ...(assumed.animated === true ? { animated: true } : {}),
+    };
+}
+
 export function sanitizeActivity(
     activityAssumed: any,
 ): PresenceActivity | null {
-    const name = clampStr(activityAssumed?.name);
-    if (!name) return null;
-
     const allowedTypes = new Set(["playing", "listening", "custom"]);
     const type = allowedTypes.has(activityAssumed?.type)
         ? activityAssumed.type
         : "playing";
 
+    const name = clampStr(activityAssumed?.name);
     const details = clampStr(activityAssumed?.details);
     const state = clampStr(activityAssumed?.state);
 
@@ -38,6 +54,22 @@ export function sanitizeActivity(
                           : undefined,
               }
             : undefined;
+
+    if (type === "custom") {
+        const emoji = sanitizeActivityEmoji(activityAssumed?.emoji);
+        if (!state && !name && !emoji) return null;
+
+        return {
+            type,
+            name: name ?? "",
+            details,
+            state,
+            ...(emoji ? { emoji } : {}),
+            timestamps,
+        };
+    }
+
+    if (!name) return null;
 
     return { type, name, details, state, timestamps };
 }

@@ -1,3 +1,5 @@
+export * from "./itunesMusic";
+export * from "./deezerMusic";
 export * from "./Common";
 export * from "./Constants";
 export * from "./dbHelpers";

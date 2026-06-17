@@ -40,4 +40,5 @@ export interface WebSocket extends WS {
     rateLimits: Map<string, RateLimitBucket>;
     memberListSubs: Map<string, MemberListSubscription>;
     presences: Map<string, Set<string>>;
+    userSubscriptions?: Record<string, () => unknown>;
 }

@@ -6,14 +6,22 @@ import * as schema from "./schemas";
 
 const JSONBig = JSONbig({ useNativeBigInt: true });
 
+const parseJsonColumn = (val: string) => {
+    try {
+        return JSONBig.parse(val);
+    } catch {
+        return JSON.parse(val);
+    }
+};
+
 // BIGINT (int8) columns → BigInt
 types.setTypeParser(20, (val: string) => BigInt(val));
 
 // JSON (oid 114) → parse with JSONBig
-types.setTypeParser(114, (val: string) => JSONBig.parse(val));
+types.setTypeParser(114, (val: string) => parseJsonColumn(val));
 
 // JSONB (oid 3802) → parse with JSONBig
-types.setTypeParser(3802, (val: string) => JSONBig.parse(val));
+types.setTypeParser(3802, (val: string) => parseJsonColumn(val));
 
 declare global {
     // for dev/hot-reload safety

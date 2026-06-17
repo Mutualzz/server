@@ -7,7 +7,13 @@ import { onResume } from "./Resume";
 import { onPresenceUpdate } from "./PresenceUpdate.ts";
 import { onPresenceScheduleSet } from "./PresenceScheduleSet.ts";
 import { onPresenceScheduleClear } from "./PresenceScheduleClear.ts";
+import { onCustomStatusScheduleSet } from "./CustomStatusScheduleSet.ts";
+import { onCustomStatusScheduleClear } from "./CustomStatusScheduleClear.ts";
 import { onVoiceStateUpdate } from "@mutualzz/gateway/opcodes/VoiceStateUpdate.ts";
+import {
+    onSubscribeUser,
+    onUnsubscribeUser,
+} from "@mutualzz/gateway/opcodes/SubscribeUser.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -19,5 +25,9 @@ export default {
     [GatewayOpcodes.PresenceUpdate]: onPresenceUpdate,
     [GatewayOpcodes.PresenceScheduleSet]: onPresenceScheduleSet,
     [GatewayOpcodes.PresenceScheduleClear]: onPresenceScheduleClear,
+    [GatewayOpcodes.CustomStatusScheduleSet]: onCustomStatusScheduleSet,
+    [GatewayOpcodes.CustomStatusScheduleClear]: onCustomStatusScheduleClear,
     [GatewayOpcodes.VoiceStateUpdate]: onVoiceStateUpdate,
+    [GatewayOpcodes.SubscribeUser]: onSubscribeUser,
+    [GatewayOpcodes.UnsubscribeUser]: onUnsubscribeUser,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

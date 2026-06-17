@@ -5,6 +5,7 @@ import { logger } from "./Logger";
 import Connection from "./events/Connection";
 import { DEFAULT_PORT } from "./util/Constants";
 import { initVoiceState } from "@mutualzz/gateway/voice/init.ts";
+import { PresenceService } from "./presence/Presence.service.ts";
 
 export class Server {
     private readonly ws: WebSocketServer;
@@ -38,6 +39,7 @@ export class Server {
 
     async start() {
         if (!this.server.listening) {
+            PresenceService.startBackgroundWorkers();
             this.server.listen(this.port, () => {
                 initVoiceState();
             });

@@ -3,11 +3,20 @@ import { PresenceStore } from "./Presence.store.ts";
 import { Send } from "../util/Send";
 import {
     GatewayCloseCodes,
+    type CustomStatusSchedule,
+    type CustomStatusSnapshot,
+    type PresenceActivity,
+    type PresenceActivityEmoji,
     type PresencePayload,
     type PresenceSchedule,
     type PresenceStatus,
 } from "@mutualzz/types";
-import { sanitizePresence } from "./Presence.validator.ts";
+import {
+    sanitizePresence,
+    sanitizeActivityEmoji,
+    MAX_ACTIVITIES,
+    MAX_STR,
+} from "./Presence.validator.ts";
 import { logger } from "../Logger";
 import { PresenceBucket } from "./Presence.bucket.ts";
 import { resyncMemberListWindows } from "../util/Calculations";
@@ -21,6 +30,94 @@ const MANUAL_KEY = (userId: string) => `presence:manual:${userId}`;
 const SCHEDULE_ZSET = `presence:schedules`; // member=userId score=until(ms)
 const SCHEDULE_LOCK = `presence:schedule:worker-lock`;
 
+const CUSTOM_STATUS_SCHEDULE_KEY = (userId: string) =>
+    `presence:custom-status:${userId}`;
+const CUSTOM_STATUS_SCHEDULE_ZSET = `presence:custom-status-schedules`;
+
+function buildCustomActivity(
+    text: string,
+    emoji?: PresenceActivityEmoji | null,
+): PresenceActivity {
+    const trimmed = text.trim();
+
+    return {
+        type: "custom",
+        name: "",
+        state: trimmed,
+        ...(emoji ? { emoji } : {}),
+    };
+}
+
+function normalizeCustomStatusSnapshot(
+    raw: unknown,
+): CustomStatusSnapshot | null {
+    if (!raw) return null;
+    if (typeof raw === "string") {
+        const text = raw.trim();
+        return text ? { text, emoji: null } : null;
+    }
+
+    if (typeof raw !== "object") return null;
+
+    const assumed = raw as CustomStatusSnapshot;
+    const text =
+        typeof assumed.text === "string" ? assumed.text.trim() || null : null;
+    const emoji = sanitizeActivityEmoji(assumed.emoji) ?? null;
+
+    if (!text && !emoji) return null;
+
+    return { text, emoji };
+}
+
+function getCustomStatusSnapshot(
+    activities: PresenceActivity[] | undefined,
+): CustomStatusSnapshot | null {
+    const custom = activities?.find((activity) => activity.type === "custom");
+    if (!custom) return null;
+
+    const text = custom.state?.trim() || custom.name?.trim() || null;
+    const emoji = sanitizeActivityEmoji(custom.emoji) ?? null;
+
+    if (!text && !emoji) return null;
+
+    return { text, emoji };
+}
+
+function applyCustomStatus(
+    activities: PresenceActivity[],
+    text: string,
+    emoji?: PresenceActivityEmoji | null,
+): PresenceActivity[] {
+    const withoutCustom = activities.filter(
+        (activity) => activity.type !== "custom",
+    );
+    const trimmed = text.trim();
+
+    if (!trimmed && !emoji) return withoutCustom;
+
+    return [buildCustomActivity(trimmed, emoji), ...withoutCustom].slice(
+        0,
+        MAX_ACTIVITIES,
+    );
+}
+
+function applyCustomStatusSnapshot(
+    activities: PresenceActivity[],
+    snapshot: CustomStatusSnapshot | null,
+): PresenceActivity[] {
+    if (!snapshot) return removeCustomStatus(activities);
+
+    return applyCustomStatus(
+        activities,
+        snapshot.text ?? "",
+        snapshot.emoji ?? null,
+    );
+}
+
+function removeCustomStatus(activities: PresenceActivity[]): PresenceActivity[] {
+    return activities.filter((activity) => activity.type !== "custom");
+}
+
 export class PresenceService {
     private static store = new PresenceStore();
     private static started = false;
@@ -29,9 +126,13 @@ export class PresenceService {
 
     private static scheduleLoopStarted = false;
 
-    static async onSocketAuthenticated(ws: WebSocket) {
+    static startBackgroundWorkers() {
         this.ensureGcLoop();
         this.ensureScheduleLoop();
+    }
+
+    static async onSocketAuthenticated(ws: WebSocket) {
+        this.startBackgroundWorkers();
 
         PresenceBucket.add(ws);
 
@@ -43,6 +144,9 @@ export class PresenceService {
         await this.store.warmFromRedis(ws.userId).catch(() => null);
 
         const scheduled = await this.getSchedule(ws.userId).catch(() => null);
+        const customScheduled = await this.getCustomStatusSchedule(
+            ws.userId,
+        ).catch(() => null);
         const manual = await this.getManualStatus(ws.userId).catch(() => null);
 
         let existing = await this.store.get(ws.userId);
@@ -61,13 +165,28 @@ export class PresenceService {
                 ...(presence ?? { activities: [], device: "web" }),
                 status: scheduled.status,
             });
+        else if (scheduled)
+            presence = await this.expireSchedule(ws.userId, scheduled);
         else if (manual)
             presence = this.store.upsert(ws.userId, {
                 ...(presence ?? { activities: [], device: "web" }),
                 status: manual,
             });
-        else if (scheduled)
-            await this.clearSchedule(ws.userId).catch(() => null);
+
+        if (customScheduled && customScheduled.until > Date.now())
+            presence = this.store.upsert(ws.userId, {
+                ...(presence ?? { activities: [], device: "web" }),
+                activities: applyCustomStatus(
+                    presence?.activities ?? [],
+                    customScheduled.text,
+                    customScheduled.emoji,
+                ),
+            });
+        else if (customScheduled)
+            presence = await this.expireCustomStatusSchedule(
+                ws.userId,
+                customScheduled,
+            );
 
         this.store.touch(ws.userId);
 
@@ -82,6 +201,12 @@ export class PresenceService {
         await this.notifyScheduleChanged(
             ws.userId,
             scheduled && scheduled.until > Date.now() ? scheduled : null,
+        );
+        await this.notifyCustomStatusScheduleChanged(
+            ws.userId,
+            customScheduled && customScheduled.until > Date.now()
+                ? customScheduled
+                : null,
         );
     }
 
@@ -124,6 +249,16 @@ export class PresenceService {
                 () => null,
             );
 
+        const customScheduled = await this.getCustomStatusSchedule(
+            ws.userId,
+        ).catch(() => null);
+        if (customScheduled && customScheduled.until > Date.now())
+            clean.activities = applyCustomStatus(
+                clean.activities,
+                customScheduled.text,
+                customScheduled.emoji,
+            );
+
         const presence = this.store.upsert(ws.userId, clean);
         await this.broadcast(ws.userId, presence);
     }
@@ -150,12 +285,22 @@ export class PresenceService {
         const now = Date.now();
 
         await this.store.warmFromRedis(userId).catch(() => null);
+        const scheduled = await this.getSchedule(userId).catch(() => null);
+        const manual = await this.getManualStatus(userId).catch(() => null);
         const current = await this.store.get(userId);
-        const currentStatus = current?.status ?? "online";
+
+        const revertTo: PresenceStatus =
+            manual ??
+            (scheduled && scheduled.until > Date.now()
+                ? scheduled.revertTo
+                : null) ??
+            (current?.status && current.status !== "offline"
+                ? current.status
+                : "online");
 
         const schedule: PresenceSchedule = {
             status: opts.status,
-            revertTo: currentStatus,
+            revertTo,
             until: now + Math.max(0, opts.durationMs),
         };
 
@@ -189,6 +334,82 @@ export class PresenceService {
         }
 
         await this.notifyScheduleChanged(userId, null);
+    }
+
+    static async setScheduledCustomStatus(
+        userId: string,
+        opts: {
+            text: string;
+            emoji?: PresenceActivityEmoji | null;
+            durationMs: number;
+        },
+    ) {
+        this.ensureScheduleLoop();
+
+        const now = Date.now();
+        const text = opts.text.trim().slice(0, MAX_STR);
+        const emoji = sanitizeActivityEmoji(opts.emoji) ?? null;
+
+        if (!text && !emoji) return;
+
+        await this.store.warmFromRedis(userId).catch(() => null);
+        const current = await this.store.get(userId);
+        const existingCustomSchedule = await this.getCustomStatusSchedule(
+            userId,
+        ).catch(() => null);
+
+        const revertTo =
+            existingCustomSchedule && existingCustomSchedule.until > Date.now()
+                ? normalizeCustomStatusSnapshot(existingCustomSchedule.revertTo)
+                : getCustomStatusSnapshot(current?.activities);
+
+        const schedule: CustomStatusSchedule = {
+            text,
+            emoji,
+            revertTo,
+            until: now + Math.max(0, opts.durationMs),
+        };
+
+        await this.setCustomStatusSchedule(userId, schedule);
+
+        const applied = this.store.upsert(userId, {
+            ...(current ?? { activities: [], device: "web", status: "online" }),
+            activities: applyCustomStatus(
+                current?.activities ?? [],
+                text,
+                emoji,
+            ),
+        });
+
+        await this.broadcast(userId, applied);
+        await this.notifyCustomStatusScheduleChanged(userId, schedule);
+    }
+
+    static async clearScheduledCustomStatus(userId: string) {
+        this.ensureScheduleLoop();
+
+        const existing = await this.getCustomStatusSchedule(userId).catch(
+            () => null,
+        );
+        await this.clearCustomStatusSchedule(userId);
+
+        if (existing) {
+            await this.store.warmFromRedis(userId).catch(() => null);
+            const current = await this.store.get(userId);
+            const activities = applyCustomStatusSnapshot(
+                current?.activities ?? [],
+                normalizeCustomStatusSnapshot(existing.revertTo),
+            );
+
+            const reverted = this.store.upsert(userId, {
+                ...(current ?? { activities: [], device: "web", status: "online" }),
+                activities,
+            });
+
+            await this.broadcast(userId, reverted);
+        }
+
+        await this.notifyCustomStatusScheduleChanged(userId, null);
     }
 
     private static async getManualStatus(
@@ -303,6 +524,32 @@ export class PresenceService {
         );
     }
 
+    private static async notifyCustomStatusScheduleChanged(
+        userId: string,
+        schedule: CustomStatusSchedule | null,
+    ) {
+        const seenBy = PresenceBucket.socketsSeeingUser(userId);
+        const selfSockets = PresenceBucket.socketsByUserId(userId);
+
+        const allTargets = new Set<WebSocket>([...seenBy, ...selfSockets]);
+        if (allTargets.size === 0) return;
+
+        const payload = { userId, schedule };
+
+        await Promise.allSettled(
+            [...allTargets].map((socket) =>
+                Send(socket, {
+                    op: "Dispatch",
+                    t: "CustomStatusScheduleUpdate",
+                    d: payload,
+                    s: socket.sequence++,
+                }).catch((error) => {
+                    logger.debug("[CustomStatusSchedule] send fail:", error);
+                }),
+            ),
+        );
+    }
+
     private static async getSchedule(
         userId: string,
     ): Promise<PresenceSchedule | null> {
@@ -322,24 +569,106 @@ export class PresenceService {
         userId: string,
         schedule: PresenceSchedule,
     ) {
-        const ttlMs = Math.max(0, schedule.until - Date.now());
-        if (ttlMs <= 0) {
+        if (schedule.until <= Date.now()) {
             await this.clearSchedule(userId);
             return;
         }
 
-        await redis.set(
-            SCHEDULE_KEY(userId),
-            JSON.stringify(schedule),
-            "PX",
-            ttlMs,
-        );
+        await redis.set(SCHEDULE_KEY(userId), JSON.stringify(schedule));
         await redis.zadd(SCHEDULE_ZSET, String(schedule.until), userId);
+    }
+
+    private static async expireSchedule(
+        userId: string,
+        schedule: PresenceSchedule,
+    ) {
+        await this.store.warmFromRedis(userId).catch(() => null);
+        const current = await this.store.get(userId);
+
+        const reverted = this.store.upsert(userId, {
+            ...(current ?? { activities: [], device: "web" }),
+            status: schedule.revertTo ?? "online",
+        });
+
+        await this.clearSchedule(userId);
+        await this.notifyScheduleChanged(userId, null);
+
+        return reverted;
     }
 
     private static async clearSchedule(userId: string) {
         await redis.del(SCHEDULE_KEY(userId));
         await redis.zrem(SCHEDULE_ZSET, userId);
+    }
+
+    private static async getCustomStatusSchedule(
+        userId: string,
+    ): Promise<CustomStatusSchedule | null> {
+        const raw = await redis.get(CUSTOM_STATUS_SCHEDULE_KEY(userId));
+        if (!raw) return null;
+
+        try {
+            const parsed = JSON.parse(raw) as CustomStatusSchedule;
+            if (!parsed) return null;
+            if (!parsed.text?.trim() && !sanitizeActivityEmoji(parsed.emoji))
+                return null;
+
+            return {
+                ...parsed,
+                text: parsed.text?.trim() ?? "",
+                emoji: sanitizeActivityEmoji(parsed.emoji) ?? null,
+                revertTo: normalizeCustomStatusSnapshot(parsed.revertTo),
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    private static async setCustomStatusSchedule(
+        userId: string,
+        schedule: CustomStatusSchedule,
+    ) {
+        if (schedule.until <= Date.now()) {
+            await this.clearCustomStatusSchedule(userId);
+            return;
+        }
+
+        await redis.set(
+            CUSTOM_STATUS_SCHEDULE_KEY(userId),
+            JSON.stringify(schedule),
+        );
+        await redis.zadd(
+            CUSTOM_STATUS_SCHEDULE_ZSET,
+            String(schedule.until),
+            userId,
+        );
+    }
+
+    private static async expireCustomStatusSchedule(
+        userId: string,
+        schedule: CustomStatusSchedule,
+    ) {
+        await this.store.warmFromRedis(userId).catch(() => null);
+        const current = await this.store.get(userId);
+        const activities = applyCustomStatusSnapshot(
+            current?.activities ?? [],
+            normalizeCustomStatusSnapshot(schedule.revertTo),
+        );
+
+        const reverted = this.store.upsert(userId, {
+            ...(current ?? { activities: [], device: "web", status: "online" }),
+            activities,
+        });
+
+        await this.clearCustomStatusSchedule(userId);
+        await this.notifyCustomStatusScheduleChanged(userId, null);
+
+        return reverted;
+    }
+
+    private static async clearCustomStatusSchedule(userId: string) {
+        await redis.del(CUSTOM_STATUS_SCHEDULE_KEY(userId));
+        await redis.zrem(CUSTOM_STATUS_SCHEDULE_ZSET, userId);
     }
 
     private static ensureScheduleLoop() {
@@ -352,10 +681,34 @@ export class PresenceService {
 
             try {
                 await this.processDueSchedules();
+                await this.processDueCustomStatusSchedules();
             } catch (error) {
                 logger.debug("[PresenceSchedule] worker error:", error);
             }
         }, 1000).unref?.();
+    }
+
+    private static async revertScheduledStatus(
+        userId: string,
+        schedule: PresenceSchedule,
+    ) {
+        const reverted = await this.expireSchedule(userId, schedule);
+        await this.broadcast(userId, reverted);
+    }
+
+    private static async revertOrphanedSchedule(userId: string) {
+        await this.store.warmFromRedis(userId).catch(() => null);
+        const current = await this.store.get(userId);
+        if (!current || current.status === "offline") return;
+
+        const manual = await this.getManualStatus(userId).catch(() => null);
+        const reverted = this.store.upsert(userId, {
+            ...(current ?? { activities: [], device: "web" }),
+            status: manual ?? "online",
+        });
+
+        await this.broadcast(userId, reverted);
+        await this.notifyScheduleChanged(userId, null);
     }
 
     private static async processDueSchedules() {
@@ -377,22 +730,64 @@ export class PresenceService {
 
             if (!schedule) {
                 await redis.zrem(SCHEDULE_ZSET, userId);
+                await this.revertOrphanedSchedule(userId);
                 continue;
             }
 
             if (schedule.until > now) continue;
 
-            await this.store.warmFromRedis(userId).catch(() => null);
-            const current = await this.store.get(userId);
+            await this.revertScheduledStatus(userId, schedule);
+        }
+    }
 
-            const reverted = this.store.upsert(userId, {
-                ...(current ?? { activities: [], device: "web" }),
-                status: schedule.revertTo ?? "online",
-            });
+    private static async revertScheduledCustomStatus(
+        userId: string,
+        schedule: CustomStatusSchedule,
+    ) {
+        const reverted = await this.expireCustomStatusSchedule(userId, schedule);
+        await this.broadcast(userId, reverted);
+    }
 
-            await this.broadcast(userId, reverted);
-            await this.clearSchedule(userId);
-            await this.notifyScheduleChanged(userId, null);
+    private static async revertOrphanedCustomStatusSchedule(userId: string) {
+        await this.store.warmFromRedis(userId).catch(() => null);
+        const current = await this.store.get(userId);
+        if (!current || current.status === "offline") return;
+
+        const reverted = this.store.upsert(userId, {
+            ...current,
+            activities: removeCustomStatus(current.activities ?? []),
+        });
+
+        await this.broadcast(userId, reverted);
+        await this.notifyCustomStatusScheduleChanged(userId, null);
+    }
+
+    private static async processDueCustomStatusSchedules() {
+        const now = Date.now();
+
+        const dueUserIds = await redis.zrangebyscore(
+            CUSTOM_STATUS_SCHEDULE_ZSET,
+            "-inf",
+            String(now),
+            "LIMIT",
+            0,
+            200,
+        );
+
+        if (!dueUserIds.length) return;
+
+        for (const userId of dueUserIds) {
+            const schedule = await this.getCustomStatusSchedule(userId);
+
+            if (!schedule) {
+                await redis.zrem(CUSTOM_STATUS_SCHEDULE_ZSET, userId);
+                await this.revertOrphanedCustomStatusSchedule(userId);
+                continue;
+            }
+
+            if (schedule.until > now) continue;
+
+            await this.revertScheduledCustomStatus(userId, schedule);
         }
     }
 }

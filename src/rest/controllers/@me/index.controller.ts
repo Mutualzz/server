@@ -48,10 +48,12 @@ export default class MeController {
       const { user } = req;
 
       const { avatar, defaultAvatar, globalName } = validateMeUpdate.parse(
-        req.body,
+        req.body ?? {},
       );
 
-      const avatarFile = imageFileValidator.parse(req.file);
+      const avatarFile = req.file
+        ? imageFileValidator.parse(req.file)
+        : undefined;
 
       if (avatarFile && avatar)
         throw new HttpException(
@@ -229,7 +231,7 @@ export default class MeController {
                 Buffer.from(await avatarObject.transformToByteArray()),
               );
             }
-          } catch (error) {
+          } catch {
             logger.warn(
               `Avatar ${avatar} not found in S3 for user ${user.id}, using random color`,
             );

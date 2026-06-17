@@ -21,6 +21,7 @@ import {
   type APIMessage,
   type APISpaceMember,
   type APIUserSettings,
+  ChannelType,
   HttpException,
   HttpStatusCode,
   InviteType,
@@ -34,6 +35,7 @@ import {
   fireAndForgetAll,
   getMember,
   getMemberRoles,
+  getChannel,
   getSpaceHydrated,
   getUser,
   publicUserColumns,
@@ -1253,8 +1255,89 @@ export default class MembersController {
       if (!member)
         throw new HttpException(HttpStatusCode.NotFound, "Member not found");
 
-      const { spaceMute, spaceDeaf, disconnect } =
+      const { spaceMute, spaceDeaf, disconnect, channelId } =
         validateMemberVoiceModerationBody.parse(req.body);
+
+      if (channelId) {
+        if (
+          BigInt(member.userId) === BigInt(space.ownerId) &&
+          BigInt(user.id) !== BigInt(space.ownerId)
+        )
+          throw new HttpException(
+            HttpStatusCode.BadRequest,
+            "Cannot move the space owner",
+          );
+
+        const { permissions } = await requireSpacePermissions({
+          spaceId,
+          userId: user.id,
+          needed: ["MoveMembers"],
+        });
+
+        const isAdmin =
+          (permissions.bits & permissionFlags.Administrator) ===
+          permissionFlags.Administrator;
+
+        if (!isAdmin) {
+          const actorRoles = await getMemberRoles(space.id, user.id);
+          const targetRoles = await getMemberRoles(space.id, member.userId);
+
+          const actorTop = topPos(actorRoles);
+          const targetTop = topPos(targetRoles);
+
+          if (actorTop <= targetTop)
+            throw new HttpException(
+              HttpStatusCode.Forbidden,
+              "Role hierarchy prevents moving this member",
+            );
+        }
+
+        const channel = await getChannel(channelId);
+        if (
+          !channel ||
+          String(channel.spaceId) !== String(space.id) ||
+          channel.type !== ChannelType.Voice
+        )
+          throw new HttpException(
+            HttpStatusCode.BadRequest,
+            "Invalid voice channel",
+          );
+
+        const moved = await VoiceStateService.moveMemberToVoiceChannel(
+          space.id,
+          userId,
+          channelId,
+        );
+
+        if (!moved)
+          throw new HttpException(
+            HttpStatusCode.BadRequest,
+            "Unable to move member to that voice channel",
+          );
+
+        res.status(HttpStatusCode.Success).json({
+          ...member,
+          moved: true,
+          channelId,
+        });
+
+        fireAndForgetAll([
+          {
+            label: "cache:delete:spaceMember",
+            run: () => deleteCache("spaceMember", `${space.id}:${userId}`),
+          },
+          {
+            label: "cache:invalidate:spaceMembers",
+            run: () => invalidateCache("spaceMembers", space.id),
+          },
+          {
+            label: "cache:invalidate:spaceHydrated",
+            run: () => invalidateCache("spaceHydrated", spaceId),
+          },
+        ]);
+
+        return;
+      }
 
       if (disconnect) {
         const kicked = await VoiceStateService.kickMemberFromVoice(
