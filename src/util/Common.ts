@@ -176,7 +176,8 @@ export const createLimiter = (ms: number, limit: number) =>
     }),
 
     keyGenerator: (req) => {
-      if (req.user.id) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (req.user?.id) {
         const route = req.originalUrl.split("?")[0];
         return `u:${req.user.id}:${route}`;
       }
