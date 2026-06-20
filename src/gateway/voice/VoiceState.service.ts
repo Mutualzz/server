@@ -292,7 +292,6 @@ export class VoiceStateService {
         spaceId: Snowflake,
         targetUserId: Snowflake,
         channelId: Snowflake,
-        reason = "Moved to another voice channel",
     ) {
         const existing = await VoiceStateRedis.getState(targetUserId);
         if (!existing?.channelId) return false;
@@ -307,19 +306,6 @@ export class VoiceStateService {
         if (!hasConnect) return false;
 
         const oldChannelId = existing.channelId;
-
-        try {
-            const payload = JSON.stringify({
-                userId: String(targetUserId),
-                spaceId,
-                reason,
-                instanceId: this.instanceId,
-            });
-
-            await redis.publish("voice:control:kick", payload);
-        } catch (err) {
-            logger.error("Failed to publish voice kick for member move", err);
-        }
 
         const moderation = await this.getMemberVoiceModeration(
             spaceId,

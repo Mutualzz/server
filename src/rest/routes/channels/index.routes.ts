@@ -2,6 +2,7 @@ import ChannelsController from "@mutualzz/rest/controllers/channels/channels.con
 import ChannelPermissionOverwritesController
   from "@mutualzz/rest/controllers/channels/channelPermissionOverwrites.controller.ts";
 import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
+import ReactionsController from "@mutualzz/rest/controllers/reactions.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 import { upload } from "@mutualzz/rest";
 import DMsController from "@mutualzz/rest/controllers/channels/dms.controller.ts";
@@ -93,6 +94,38 @@ router.delete(
   "/:channelId/messages/:messageId",
   createLimiter(60_000, 20),
   MessagesController.delete,
+);
+
+// Message reactions
+router.put(
+  "/:channelId/messages/:messageId/reactions/@me",
+  createLimiter(5_000, 20),
+  ReactionsController.add,
+);
+router.delete(
+  "/:channelId/messages/:messageId/reactions/@me",
+  createLimiter(5_000, 20),
+  ReactionsController.removeOwn,
+);
+router.delete(
+  "/:channelId/messages/:messageId/reactions/emoji",
+  createLimiter(60_000, 10),
+  ReactionsController.removeEmoji,
+);
+router.get(
+  "/:channelId/messages/:messageId/reactions",
+  createLimiter(60_000, 60),
+  ReactionsController.getUsers,
+);
+router.delete(
+  "/:channelId/messages/:messageId/reactions",
+  createLimiter(60_000, 10),
+  ReactionsController.removeAll,
+);
+router.delete(
+  "/:channelId/messages/:messageId/reactions/:userId",
+  createLimiter(5_000, 20),
+  ReactionsController.removeUser,
 );
 
 // Read State Management

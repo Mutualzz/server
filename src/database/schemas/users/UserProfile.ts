@@ -24,6 +24,7 @@ export const userProfilesTable = pgTable("user_profiles", {
     backgroundImage: text(),
     banner: text(),
     bio: text(),
+    pageFontFamily: text(),
 
     introMusic: jsonb().$type<APIProfileIntroMusic | null>(),
 

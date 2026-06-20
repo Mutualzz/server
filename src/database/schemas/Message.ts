@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { channelsTable } from "./channel/Channel.ts";
 import { spacesTable } from "./spaces";
+import { messageReactionsTable } from "./MessageReaction";
 
 export const messagesTable = pgTable(
   "messages",
@@ -67,7 +68,7 @@ export const messagesTable = pgTable(
   ],
 );
 
-export const messageRelations = relations(messagesTable, ({ one }) => ({
+export const messageRelations = relations(messagesTable, ({ one, many }) => ({
   space: one(spacesTable, {
     fields: [messagesTable.spaceId],
     references: [spacesTable.id],
@@ -80,4 +81,5 @@ export const messageRelations = relations(messagesTable, ({ one }) => ({
     fields: [messagesTable.authorId],
     references: [usersTable.id],
   }),
+  reactions: many(messageReactionsTable),
 }));

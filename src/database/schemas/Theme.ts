@@ -30,6 +30,7 @@ interface ThemeColors {
 }
 
 interface ThemeTypography {
+    fontFamily?: string | null;
     colors: {
         primary: string;
         secondary: string;

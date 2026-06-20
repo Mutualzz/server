@@ -38,6 +38,8 @@ import {
   publicUserColumns,
   requireChannelPermissions,
   resolveExpressions,
+  attachReactionsToMessages,
+  hydrateMessagesForResponse,
   sanitizeContent,
   Snowflake,
   validateMessageStickers,
@@ -140,16 +142,22 @@ export default class MessagesController {
         );
 
         if (existingMessage) {
-          const hydrated = {
-            ...existingMessage,
-            expressions: await resolveExpressions(
-              existingMessage.content ?? "",
-              existingMessage.expressionIds,
-            ),
-            expressionIds: (existingMessage.expressionIds ?? []).map((id) =>
-              id.toString(),
-            ),
-          };
+          const [hydrated] = await hydrateMessagesForResponse(
+            [
+              {
+                ...existingMessage,
+                expressions: await resolveExpressions(
+                  existingMessage.content ?? "",
+                  existingMessage.expressionIds,
+                ),
+                expressionIds: (existingMessage.expressionIds ?? []).map((id) =>
+                  id.toString(),
+                ),
+              },
+            ],
+            user.id,
+            false,
+          );
           await setCache("message", nonce, hydrated);
           return res.status(HttpStatusCode.Success).json(hydrated);
         }
@@ -341,6 +349,7 @@ export default class MessagesController {
         expressionIds: (newMessage.expressionIds ?? []).map((id) =>
           id.toString(),
         ),
+        reactions: [],
       };
 
       res.status(HttpStatusCode.Created).json(message);
@@ -623,16 +632,24 @@ export default class MessagesController {
           "Failed to update message",
         );
 
-      const newMessage = {
-        ...result,
-        channel,
-        author: await getUser(message.authorId),
-        expressions: await resolveExpressions(
-          result.content ?? "",
-          result.expressionIds,
-        ),
-        expressionIds: (result.expressionIds ?? []).map((id) => id.toString()),
-      };
+      const [newMessage] = await hydrateMessagesForResponse(
+        [
+          {
+            ...result,
+            channel,
+            author: await getUser(message.authorId),
+            expressions: await resolveExpressions(
+              result.content ?? "",
+              result.expressionIds,
+            ),
+            expressionIds: (result.expressionIds ?? []).map((id) =>
+              id.toString(),
+            ),
+          },
+        ],
+        user.id,
+        false,
+      );
 
       res.status(HttpStatusCode.Success).json(newMessage);
 
@@ -734,7 +751,11 @@ export default class MessagesController {
       cacheKey += `-limit-${limit}`;
       let messages = await getCache("messages", cacheKey);
 
-      if (messages) return res.status(HttpStatusCode.Success).json(messages);
+      if (messages) {
+        return res
+          .status(HttpStatusCode.Success)
+          .json(await attachReactionsToMessages(messages, user.id));
+      }
 
       if (around) {
         const right = await execNormalizedMany<APIMessage>(
@@ -828,15 +849,9 @@ export default class MessagesController {
         );
       }
 
-      const messagesWithExpressions = await Promise.all(
-        messages.map(async (msg) => ({
-          ...msg,
-          expressions: await resolveExpressions(
-            msg.content ?? "",
-            msg.expressionIds,
-          ),
-          expressionIds: (msg.expressionIds ?? []).map((id) => id.toString()),
-        })),
+      const messagesWithExpressions = await hydrateMessagesForResponse(
+        messages,
+        user.id,
       );
 
       res.status(HttpStatusCode.Success).json(messagesWithExpressions);

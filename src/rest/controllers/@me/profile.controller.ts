@@ -21,6 +21,7 @@ import {
   toMusicSearchTrack,
 } from "@mutualzz/util";
 import {
+  fontFileValidator,
   imageFileValidator,
   profileMusicFileValidator,
   validateProfileAssetUpload,
@@ -41,6 +42,7 @@ const toAPIUserProfile = (
   backgroundImage: row.backgroundImage,
   banner: row.banner,
   bio: row.bio,
+  pageFontFamily: row.pageFontFamily,
   introMusic: row.introMusic,
   blocks: row.blocks,
   updatedAt: row.updatedAt,
@@ -53,6 +55,7 @@ const emptyProfile = (userId: string): APIUserProfile => ({
   backgroundImage: null,
   banner: null,
   bio: null,
+  pageFontFamily: null,
   introMusic: null,
   blocks: [],
   updatedAt: new Date(),
@@ -184,6 +187,7 @@ export default class ProfileController {
         backgroundImage: body.backgroundImage ?? null,
         banner: body.banner ?? null,
         bio: body.bio ?? null,
+        pageFontFamily: body.pageFontFamily ?? null,
         introMusic,
         blocks: body.blocks,
         configured: isConfigured({
@@ -273,71 +277,110 @@ export default class ProfileController {
 
       const { type } = validateProfileAssetUpload.parse(req.query);
 
-      if (type === "music") {
-        const file = profileMusicFileValidator.parse(req.file);
-        const hash = generateHash(file.buffer, false);
-        const key = `profiles/${user.id}/music/${hash}.mp3`;
+      switch (type) {
+        case "music": {
+          const file = profileMusicFileValidator.parse(req.file);
+          const hash = generateHash(file.buffer, false);
+          const key = `profiles/${user.id}/music/${hash}.mp3`;
 
-        try {
-          await s3Client.send(
-            new GetObjectCommand({
-              Bucket: bucketName,
-              Key: key,
-            }),
-          );
-        } catch {
-          await s3Client.send(
-            new PutObjectCommand({
-              Bucket: bucketName,
-              Body: file.buffer,
-              Key: key,
-              ContentType: "audio/mpeg",
-            }),
-          );
+          try {
+            await s3Client.send(
+              new GetObjectCommand({
+                Bucket: bucketName,
+                Key: key,
+              }),
+            );
+          } catch {
+            await s3Client.send(
+              new PutObjectCommand({
+                Bucket: bucketName,
+                Body: file.buffer,
+                Key: key,
+                ContentType: "audio/mpeg",
+              }),
+            );
+          }
+
+          return res.status(HttpStatusCode.Success).json({ hash });
         }
 
-        return res.status(HttpStatusCode.Success).json({ hash });
+        case "font": {
+          const file = fontFileValidator.parse(req.file);
+          const hash = generateHash(file.buffer, false);
+          const key = `profiles/${user.id}/fonts/${hash}.woff2`;
+
+          try {
+            await s3Client.send(
+              new GetObjectCommand({
+                Bucket: bucketName,
+                Key: key,
+              }),
+            );
+          } catch {
+            await s3Client.send(
+              new PutObjectCommand({
+                Bucket: bucketName,
+                Body: file.buffer,
+                Key: key,
+                ContentType: "font/woff2",
+              }),
+            );
+          }
+
+          const displayName = file.originalname.replace(/\.woff2$/i, "").trim();
+
+          return res.status(HttpStatusCode.Success).json({
+            hash,
+            fontFamily: `font:${hash}`,
+            displayName: displayName || "Custom font",
+          });
+        }
+
+        case "banner":
+        case "background": {
+          const file = imageFileValidator.parse({
+            ...req.file,
+            mimetype:
+              req.file.mimetype === "image/jpg"
+                ? "image/jpeg"
+                : req.file.mimetype,
+          });
+
+          const isGif = file.mimetype === "image/gif";
+          let buffer: Buffer | Uint8Array = file.buffer;
+
+          if (!isGif) {
+            buffer = await sharp(buffer).png().toBuffer();
+          }
+
+          const hash = generateHash(buffer, isGif);
+          const storedExt = isGif ? "gif" : "png";
+          const key =
+            type === "banner"
+              ? `profiles/${user.id}/banner/${hash}.${storedExt}`
+              : `profiles/${user.id}/background/${hash}.${storedExt}`;
+
+          try {
+            await s3Client.send(
+              new GetObjectCommand({
+                Bucket: bucketName,
+                Key: key,
+              }),
+            );
+          } catch {
+            await s3Client.send(
+              new PutObjectCommand({
+                Bucket: bucketName,
+                Body: buffer,
+                Key: key,
+                ContentType: isGif ? "image/gif" : "image/png",
+              }),
+            );
+          }
+
+          return res.status(HttpStatusCode.Success).json({ hash });
+        }
       }
-
-      const file = imageFileValidator.parse({
-        ...req.file,
-        mimetype:
-          req.file.mimetype === "image/jpg" ? "image/jpeg" : req.file.mimetype,
-      });
-
-      const isGif = file.mimetype === "image/gif";
-      let buffer: Buffer | Uint8Array = file.buffer;
-
-      if (!isGif) {
-        buffer = await sharp(buffer).png().toBuffer();
-      }
-
-      const hash = generateHash(buffer, isGif);
-      const storedExt = isGif ? "gif" : "png";
-      const key =
-        type === "banner"
-          ? `profiles/${user.id}/banner/${hash}.${storedExt}`
-          : `profiles/${user.id}/background/${hash}.${storedExt}`;
-
-      try {
-        await s3Client.send(
-          new GetObjectCommand({
-            Bucket: bucketName,
-            Key: key,
-          }),
-        );
-      } catch {
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: bucketName,
-            Body: buffer,
-            Key: key,
-            ContentType: isGif ? "image/gif" : "image/png",
-          }),
-        );
-      }
-
-      return res.status(HttpStatusCode.Success).json({ hash });
     } catch (err) {
       next(err);
     }

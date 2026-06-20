@@ -6,5 +6,6 @@ export * from "./discord";
 export * from "./Theme";
 export * from "./Invite";
 export * from "./Message";
+export * from "./MessageReaction";
 export * from "./Expression";
 export * from "./ReadState";

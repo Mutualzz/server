@@ -3,157 +3,83 @@ import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
 import path from "path";
-import sharp from "sharp";
-import { MIME_TYPES } from "../Constants";
-import { contentEtag, normalizeFormat } from "../utils";
+
+const FONT_HASH_RE = /^[a-f0-9]{64}$/i;
+const MUSIC_HASH_RE = /^[a-f0-9]{64}$/i;
+
+async function streamObject(
+    key: string,
+    res: Response,
+    contentType: string,
+    cacheControl = "public, max-age=31536000, immutable",
+) {
+    const { Body, ContentLength } = await s3Client.send(
+        new GetObjectCommand({
+            Bucket: bucketName,
+            Key: key,
+        }),
+    );
+
+    if (!Body) {
+        throw new HttpException(HttpStatusCode.NotFound, "Asset not found");
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", cacheControl);
+    if (ContentLength) {
+        res.setHeader("Content-Length", ContentLength.toString());
+    }
+
+    const buffer = await Body.transformToByteArray();
+    res.status(HttpStatusCode.Success).send(Buffer.from(buffer));
+}
 
 export default class ProfilesController {
-    static async getBanner(req: Request, res: Response, next: NextFunction) {
-        return ProfilesController.getAsset(req, res, next, "banner");
-    }
-
-    static async getBackground(req: Request, res: Response, next: NextFunction) {
-        return ProfilesController.getAsset(req, res, next, "background");
-    }
-
-    static async getMusic(req: Request, res: Response, next: NextFunction) {
+    static async getFont(req: Request, res: Response, next: NextFunction) {
         try {
-            const { userId, asset } = req.params as {
+            const { userId, font } = req.params as {
                 userId: string;
-                asset: string;
+                font: string;
             };
 
-            const baseName = path.basename(asset, path.extname(asset));
-            const sourceKey = `profiles/${userId}/music/${baseName}.mp3`;
-
-            let sourceBody: Uint8Array;
-            try {
-                const { Body } = await s3Client.send(
-                    new GetObjectCommand({
-                        Bucket: bucketName,
-                        Key: sourceKey,
-                    }),
-                );
-                if (!Body) throw new Error("Empty body");
-                sourceBody = await Body.transformToByteArray();
-            } catch {
+            const hash = path.basename(font, path.extname(font));
+            if (!FONT_HASH_RE.test(hash)) {
                 throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Profile music not found",
+                    HttpStatusCode.BadRequest,
+                    "Invalid font hash",
                 );
             }
 
-            const etag = contentEtag(sourceBody);
-            if (req.headers["if-none-match"] === etag) {
-                res.status(304).end();
-                return;
-            }
-
-            res.setHeader("Cache-Control", "public, max-age=86400, immutable");
-            res.setHeader("ETag", etag);
-            res.setHeader("Content-Type", "audio/mpeg");
-            res.send(Buffer.from(sourceBody));
+            await streamObject(
+                `profiles/${userId}/fonts/${hash}.woff2`,
+                res,
+                "font/woff2",
+            );
         } catch (err) {
             next(err);
         }
     }
 
-    private static async getAsset(
-        req: Request,
-        res: Response,
-        next: NextFunction,
-        assetType: "banner" | "background",
-    ) {
+    static async getMusic(req: Request, res: Response, next: NextFunction) {
         try {
-            const { userId, asset } = req.params as {
+            const { userId, music } = req.params as {
                 userId: string;
-                asset: string;
+                music: string;
             };
 
-            const {
-                format: formatQuery,
-                size: sizeQuery,
-                animated: animatedQueryRaw,
-            } = req.query as {
-                format?: string;
-                size?: string;
-                animated?: string;
-            };
-
-            const baseName = path.basename(asset, path.extname(asset));
-            const urlExt = path.extname(asset).replace(".", "").toLowerCase();
-            const isAnimatedHash = baseName.startsWith("a_");
-
-            let targetFormat =
-                normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
-
-            const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
-            const explicitAnimated = ["true", "1", "on", "yes"].includes(
-                animatedQuery,
-            );
-
-            if (!targetFormat) {
-                targetFormat =
-                    isAnimatedHash && explicitAnimated ? "webp" : "png";
-            }
-
-            const willAnimate =
-                isAnimatedHash &&
-                (targetFormat === "gif" ||
-                    (targetFormat === "webp" && explicitAnimated));
-
-            const boundedSize = sizeQuery ? Number(sizeQuery) : undefined;
-            const sourceExt = isAnimatedHash ? "gif" : "png";
-            const sourceKey = `profiles/${userId}/${assetType}/${baseName}.${sourceExt}`;
-
-            let sourceBody: Uint8Array;
-            try {
-                const { Body } = await s3Client.send(
-                    new GetObjectCommand({
-                        Bucket: bucketName,
-                        Key: sourceKey,
-                    }),
-                );
-                if (!Body) throw new Error("Empty body");
-                sourceBody = await Body.transformToByteArray();
-            } catch {
+            const hash = path.basename(music, path.extname(music));
+            if (!MUSIC_HASH_RE.test(hash)) {
                 throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Profile asset not found",
+                    HttpStatusCode.BadRequest,
+                    "Invalid music hash",
                 );
             }
 
-            let image: sharp.Sharp = willAnimate
-                ? sharp(sourceBody, { animated: true })
-                : sharp(sourceBody);
-
-            if (typeof image.toColourspace === "function") {
-                image = image.toColourspace("srgb");
-            }
-
-            if (boundedSize && !isNaN(boundedSize)) {
-                image = image.resize(boundedSize, boundedSize, {
-                    fit: "cover",
-                });
-            }
-
-            const outputBuffer = await image
-                .toFormat(targetFormat as keyof sharp.FormatEnum)
-                .toBuffer();
-
-            const etag = contentEtag(outputBuffer);
-            if (req.headers["if-none-match"] === etag) {
-                res.status(304).end();
-                return;
-            }
-
-            res.setHeader("Cache-Control", "public, max-age=86400, immutable");
-            res.setHeader("ETag", etag);
-            res.setHeader(
-                "Content-Type",
-                MIME_TYPES[targetFormat] ?? "application/octet-stream",
+            await streamObject(
+                `profiles/${userId}/music/${hash}.mp3`,
+                res,
+                "audio/mpeg",
             );
-            res.send(outputBuffer);
         } catch (err) {
             next(err);
         }

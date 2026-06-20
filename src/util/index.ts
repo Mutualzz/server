@@ -12,5 +12,6 @@ export * from "./Session";
 export * from "./Snowflake";
 export * from "./permissions";
 export * from "./fireAndForget";
+export * from "./reactions";
 export * from "./Voice";
 export * from "./Postmark";
