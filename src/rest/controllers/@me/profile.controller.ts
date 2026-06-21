@@ -5,6 +5,8 @@ import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
   buildEmbed,
   bucketName,
+  cleanupOrphanedProfileAssets,
+  ensureProfileImage,
   lookupDeezerTrack,
   lookupItunesTrack,
   emitEvent,
@@ -182,6 +184,14 @@ export default class ProfileController {
         introMusicTrackSource: body.introMusicTrackSource ?? null,
       });
 
+      const existing = await execNormalized<
+        typeof userProfilesTable.$inferSelect | null
+      >(
+        db.query.userProfilesTable.findFirst({
+          where: eq(userProfilesTable.userId, BigInt(user.id)),
+        }),
+      );
+
       const payload = {
         backgroundColor: body.backgroundColor ?? null,
         backgroundImage: body.backgroundImage ?? null,
@@ -235,6 +245,14 @@ export default class ProfileController {
           user_id: user.id,
           data: apiProfile,
         }),
+      );
+
+      fireAndForget(
+        () => cleanupOrphanedProfileAssets(user.id, existing, payload),
+        {
+          label: "profile:cleanupOrphanedAssets",
+          meta: { userId: user.id },
+        },
       );
     } catch (err) {
       next(err);
@@ -354,33 +372,7 @@ export default class ProfileController {
             buffer = await sharp(buffer).png().toBuffer();
           }
 
-          const hash = generateHash(buffer, isGif);
-          const storedExt = isGif ? "gif" : "png";
-          const folder =
-            type === "banner"
-              ? "banner"
-              : type === "background"
-                ? "background"
-                : "image";
-          const key = `profiles/${user.id}/${folder}/${hash}.${storedExt}`;
-
-          try {
-            await s3Client.send(
-              new GetObjectCommand({
-                Bucket: bucketName,
-                Key: key,
-              }),
-            );
-          } catch {
-            await s3Client.send(
-              new PutObjectCommand({
-                Bucket: bucketName,
-                Body: buffer,
-                Key: key,
-                ContentType: isGif ? "image/gif" : "image/png",
-              }),
-            );
-          }
+          const hash = await ensureProfileImage(user.id, buffer, isGif);
 
           return res.status(HttpStatusCode.Success).json({ hash });
         }

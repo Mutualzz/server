@@ -15,3 +15,4 @@ export * from "./fireAndForget";
 export * from "./reactions";
 export * from "./Voice";
 export * from "./Postmark";
+export * from "./profileAssets";

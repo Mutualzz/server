@@ -1,7 +1,7 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getCache, profileImageCache } from "@mutualzz/cache";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { bucketName, s3Client } from "@mutualzz/util";
+import { bucketName, fetchProfileImageSource, s3Client } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
 import path from "path";
 import sharp from "sharp";
@@ -113,19 +113,13 @@ async function getProfileImage(
         return;
     }
 
-    const sourceExt = isAnimatedHash ? "gif" : "png";
-    const sourceKey = `profiles/${userId}/${kind}/${baseName}.${sourceExt}`;
-
     let sourceBody: Uint8Array;
     try {
-        const { Body } = await s3Client.send(
-            new GetObjectCommand({
-                Bucket: bucketName,
-                Key: sourceKey,
-            }),
+        sourceBody = await fetchProfileImageSource(
+            userId,
+            baseName,
+            kind,
         );
-        if (!Body) throw new Error("Empty body");
-        sourceBody = await Body.transformToByteArray();
     } catch {
         throw new HttpException(
             HttpStatusCode.NotFound,

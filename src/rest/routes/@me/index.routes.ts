@@ -1,5 +1,6 @@
 import { upload } from "@mutualzz/rest";
 import MeController from "@mutualzz/rest/controllers/@me/index.controller";
+import PushTokenController from "@mutualzz/rest/controllers/@me/pushToken.controller";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
@@ -49,6 +50,16 @@ router.post(
     "/confirm-email",
     createLimiter(3_600_000, 3),
     MeController.confirmEmail,
+);
+router.post(
+    "/push-token",
+    createLimiter(60_000, 10),
+    PushTokenController.register,
+);
+router.delete(
+    "/push-token",
+    createLimiter(60_000, 10),
+    PushTokenController.remove,
 );
 
 export default router;
