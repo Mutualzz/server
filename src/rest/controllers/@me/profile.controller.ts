@@ -337,7 +337,8 @@ export default class ProfileController {
         }
 
         case "banner":
-        case "background": {
+        case "background":
+        case "image": {
           const file = imageFileValidator.parse({
             ...req.file,
             mimetype:
@@ -355,10 +356,13 @@ export default class ProfileController {
 
           const hash = generateHash(buffer, isGif);
           const storedExt = isGif ? "gif" : "png";
-          const key =
+          const folder =
             type === "banner"
-              ? `profiles/${user.id}/banner/${hash}.${storedExt}`
-              : `profiles/${user.id}/background/${hash}.${storedExt}`;
+              ? "banner"
+              : type === "background"
+                ? "background"
+                : "image";
+          const key = `profiles/${user.id}/${folder}/${hash}.${storedExt}`;
 
           try {
             await s3Client.send(
