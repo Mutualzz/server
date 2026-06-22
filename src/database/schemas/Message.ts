@@ -10,6 +10,7 @@ import {
   smallint,
   text,
   timestamp,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { channelsTable } from "./channel/Channel.ts";
 import { spacesTable } from "./spaces";
@@ -44,6 +45,13 @@ export const messagesTable = pgTable(
 
     embeds: jsonb().$type<APIMessageEmbed[]>().notNull().default([]),
     expressionIds: bigint({ mode: "bigint" }).array().default([]).notNull(),
+
+    repliedToId: bigint({ mode: "bigint" }).references(
+      (): AnyPgColumn => messagesTable.id,
+      {
+        onDelete: "set null",
+      },
+    ),
 
     nonce: bigint({ mode: "bigint" }),
 
@@ -80,6 +88,10 @@ export const messageRelations = relations(messagesTable, ({ one, many }) => ({
   author: one(usersTable, {
     fields: [messagesTable.authorId],
     references: [usersTable.id],
+  }),
+  repliedTo: one(messagesTable, {
+    fields: [messagesTable.repliedToId],
+    references: [messagesTable.id],
   }),
   reactions: many(messageReactionsTable),
 }));

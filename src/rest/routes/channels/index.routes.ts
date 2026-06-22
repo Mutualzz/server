@@ -1,10 +1,9 @@
 import ChannelsController from "@mutualzz/rest/controllers/channels/channels.controller.ts";
-import ChannelPermissionOverwritesController
-  from "@mutualzz/rest/controllers/channels/channelPermissionOverwrites.controller.ts";
+import ChannelPermissionOverwritesController from "@mutualzz/rest/controllers/channels/channelPermissionOverwrites.controller.ts";
 import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
 import ReactionsController from "@mutualzz/rest/controllers/reactions.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
-import { upload } from "@mutualzz/rest";
+import { upload, scanUploads } from "@mutualzz/rest";
 import DMsController from "@mutualzz/rest/controllers/channels/dms.controller.ts";
 
 const router = createRouter();
@@ -14,6 +13,7 @@ router.post(
   "/",
   createLimiter(60_000, 15),
   upload.single("icon"),
+  scanUploads,
   ChannelsController.create,
 );
 router.post("/@me", createLimiter(5_000, 10), DMsController.createDM);
@@ -21,6 +21,7 @@ router.post(
   "/@me/group",
   createLimiter(5_000, 10),
   upload.single("icon"),
+  scanUploads,
   DMsController.createGroupDM,
 );
 router.delete(
@@ -54,6 +55,7 @@ router.patch(
   "/:channelId",
   createLimiter(60_000, 20),
   upload.single("icon"),
+  scanUploads,
   ChannelsController.update,
 );
 router.delete(
@@ -78,6 +80,8 @@ router.delete(
 router.post(
   "/:channelId/messages",
   createLimiter(5_000, 10),
+  upload.array("attachments", 10),
+  scanUploads,
   MessagesController.create,
 );
 router.patch(

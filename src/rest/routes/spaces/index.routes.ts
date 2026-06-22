@@ -1,4 +1,4 @@
-import { upload } from "@mutualzz/rest";
+import { scanUploads, upload } from "@mutualzz/rest";
 import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts";
 import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller.ts";
 import MembersController from "@mutualzz/rest/controllers/spaces/members.controller.ts";
@@ -11,6 +11,7 @@ router.post(
   "/",
   createLimiter(60_000, 5),
   upload.single("icon"),
+  scanUploads,
   SpacesController.create,
 );
 router.delete("/:spaceId", createLimiter(60_000, 10), SpacesController.delete);

@@ -1,65 +1,55 @@
-import { upload } from "@mutualzz/rest";
+import { scanUploads, upload } from "@mutualzz/rest";
 import MeController from "@mutualzz/rest/controllers/@me/index.controller";
-import PushTokenController from "@mutualzz/rest/controllers/@me/pushToken.controller";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
 router.patch(
-    "/",
-    createLimiter(60_000, 5),
-    upload.single("avatar"),
-    MeController.update,
+  "/",
+  createLimiter(60_000, 5),
+  upload.single("avatar"),
+  scanUploads,
+  MeController.update,
 );
 router.patch(
-    "/settings",
-    createLimiter(60_000, 10),
-    MeController.updateSettings,
+  "/settings",
+  createLimiter(60_000, 10),
+  MeController.updateSettings,
 );
 router.post(
-    "/verify-email",
-    createLimiter(60_000, 5),
-    MeController.verifyEmail,
+  "/verify-email",
+  createLimiter(60_000, 5),
+  MeController.verifyEmail,
 );
 router.post(
-    "/change-email",
-    createLimiter(60_000, 5),
-    MeController.changeEmail,
+  "/change-email",
+  createLimiter(60_000, 5),
+  MeController.changeEmail,
 );
 router.post(
-    "/change-username",
-    createLimiter(60_000, 5),
-    MeController.changeUsername,
+  "/change-username",
+  createLimiter(60_000, 5),
+  MeController.changeUsername,
 );
 router.post(
-    "/change-email-unverified",
-    createLimiter(60_000, 5),
-    MeController.changeEmailUnverified,
+  "/change-email-unverified",
+  createLimiter(60_000, 5),
+  MeController.changeEmailUnverified,
 );
 router.post(
-    "/send-email-code",
-    createLimiter(3_600_000, 3),
-    MeController.sendEmailCode,
+  "/send-email-code",
+  createLimiter(3_600_000, 3),
+  MeController.sendEmailCode,
 );
 router.post(
-    "/change-password",
-    createLimiter(60_000, 5),
-    MeController.changePassword,
+  "/change-password",
+  createLimiter(60_000, 5),
+  MeController.changePassword,
 );
 router.post(
-    "/confirm-email",
-    createLimiter(3_600_000, 3),
-    MeController.confirmEmail,
-);
-router.post(
-    "/push-token",
-    createLimiter(60_000, 10),
-    PushTokenController.register,
-);
-router.delete(
-    "/push-token",
-    createLimiter(60_000, 10),
-    PushTokenController.remove,
+  "/confirm-email",
+  createLimiter(3_600_000, 3),
+  MeController.confirmEmail,
 );
 
 export default router;

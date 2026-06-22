@@ -92,6 +92,8 @@ export default class MessagesController {
       const {
         content,
         nonce,
+        repliedToId,
+        mentionReply = true,
         expressionIds = [],
       } = validateMessageBodyPut.parse(req.body);
 
@@ -132,6 +134,7 @@ export default class MessagesController {
           db.query.messagesTable.findFirst({
             with: {
               channel: true,
+              repliedTo: true,
             },
             where: and(
               eq(messagesTable.nonce, BigInt(nonce)),
@@ -285,8 +288,9 @@ export default class MessagesController {
             embeds: effectiveCanEmbed
               ? await buildEmbeds(sanitizedContent || "")
               : [],
+            repliedToId: repliedToId ? BigInt(repliedToId) : undefined,
             expressionIds: validatedStickerIds,
-            type: MessageType.Default,
+            type: repliedToId ? MessageType.Reply : MessageType.Default,
           })
           .returning()
           .then((r) => r[0]),
@@ -336,6 +340,28 @@ export default class MessagesController {
         ).values(),
       ];
 
+      let repliedTo: APIMessage | null = null;
+      if (repliedToId)
+        repliedTo = await execNormalized<APIMessage>(
+          db.query.messagesTable.findFirst({
+            where: eq(messagesTable.id, BigInt(repliedToId)),
+          }),
+        );
+
+      if (mentionReply && repliedTo && repliedTo.authorId !== user.id) {
+        const replyAuthorMention = {
+          type: "user" as MentionType,
+          id: repliedTo.authorId.toString(),
+        };
+        if (
+          !uniqueMentions.some(
+            (m) => m.type === "user" && m.id === replyAuthorMention.id,
+          )
+        ) {
+          uniqueMentions.push(replyAuthorMention);
+        }
+      }
+
       const message = {
         ...newMessage,
         mentions: uniqueMentions,
@@ -350,6 +376,7 @@ export default class MessagesController {
           id.toString(),
         ),
         reactions: [],
+        repliedTo,
       };
 
       res.status(HttpStatusCode.Created).json(message);
@@ -765,6 +792,7 @@ export default class MessagesController {
               author: {
                 columns: publicUserColumns,
               },
+              repliedTo: true,
               space: true,
             },
             where: and(
@@ -782,6 +810,7 @@ export default class MessagesController {
               author: {
                 columns: publicUserColumns,
               },
+              repliedTo: true,
               space: true,
             },
             where: and(
@@ -804,6 +833,7 @@ export default class MessagesController {
               author: {
                 columns: publicUserColumns,
               },
+              repliedTo: true,
               space: true,
             },
             where: and(
@@ -840,6 +870,7 @@ export default class MessagesController {
               author: {
                 columns: publicUserColumns,
               },
+              repliedTo: true,
               space: true,
             },
             where: eq(messagesTable.channelId, BigInt(channelId)),
@@ -893,6 +924,7 @@ export default class MessagesController {
             with: {
               author: true,
               channel: true,
+              repliedTo: true,
             },
             where: and(
               eq(messagesTable.id, BigInt(messageId)),
