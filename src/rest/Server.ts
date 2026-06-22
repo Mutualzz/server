@@ -18,7 +18,6 @@ import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./util";
 import type { LogLevel } from "@mutualzz/logger";
 import {
   checkArachnid,
-  checkPhotoDNA,
   reportToNCMEC,
   validateAttachment,
 } from "@mutualzz/util/contentSafety";
