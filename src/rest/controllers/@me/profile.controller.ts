@@ -197,6 +197,19 @@ export default class ProfileController {
         }),
       );
 
+      const normalizedBlocks = body.blocks.map((block) => {
+        if (block.type === "draw") {
+          return {
+            ...block,
+            svgData: block.svgData ?? null,
+            paths: block.paths ?? null,
+            backgroundColor: block.backgroundColor ?? null,
+          };
+        }
+
+        return block;
+      });
+
       const payload = {
         backgroundColor: body.backgroundColor ?? null,
         backgroundImage: body.backgroundImage ?? null,
@@ -204,9 +217,9 @@ export default class ProfileController {
         bio: body.bio ?? null,
         pageFontFamily: body.pageFontFamily ?? null,
         introMusic,
-        blocks: body.blocks,
+        blocks: normalizedBlocks,
         configured: isConfigured({
-          blocks: body.blocks,
+          blocks: normalizedBlocks,
           backgroundColor: body.backgroundColor ?? null,
           backgroundImage: body.backgroundImage ?? null,
           banner: body.banner ?? null,
