@@ -3,7 +3,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import type { APIProfileBlock, APIProfileIntroMusic } from "@mutualzz/types";
+import type { APIProfileBlock, APIProfileMusic } from "@mutualzz/types";
 import { generateHash } from "./Common";
 import { bucketName, s3Client } from "./S3";
 
@@ -28,7 +28,7 @@ type ProfileAssetSource = {
   banner?: string | null;
   backgroundImage?: string | null;
   pageFontFamily?: string | null;
-  introMusic?: APIProfileIntroMusic | null;
+  profileMusic?: APIProfileMusic | null;
   blocks?: APIProfileBlock[] | unknown[];
 };
 
@@ -110,7 +110,7 @@ export const collectProfileAssetRefs = (
   const fontHash = parseFontHash(profile.pageFontFamily);
   if (fontHash) fonts.add(fontHash);
 
-  const audioHash = profile.introMusic?.audioHash;
+  const audioHash = profile.profileMusic?.audioHash;
   if (isProfileAssetHash(audioHash)) music.add(audioHash);
 
   for (const block of profile.blocks ?? []) {

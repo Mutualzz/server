@@ -1,5 +1,5 @@
 import type {
-  APIProfileIntroMusic,
+  APIProfileMusic,
   APIProfileMusicSearchTrack,
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
@@ -67,9 +67,9 @@ export const toMusicSearchTrack = (
   trackUrl: track.trackViewUrl,
 });
 
-export const toIntroMusicFromItunesTrack = (
+export const toProfileMusicFromItunesTrack = (
   track: ItunesTrack,
-): APIProfileIntroMusic => {
+): APIProfileMusic => {
   if (!track.previewUrl)
     throw new HttpException(
       HttpStatusCode.BadRequest,

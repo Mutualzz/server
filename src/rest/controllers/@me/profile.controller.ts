@@ -1,6 +1,6 @@
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { db, userProfilesTable } from "@mutualzz/database";
-import type { APIProfileIntroMusic, APIUserProfile } from "@mutualzz/types";
+import type { APIProfileMusic, APIUserProfile } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
   buildEmbed,
@@ -18,8 +18,8 @@ import {
   searchDeezerTracks,
   searchItunesTracks,
   toDeezerMusicSearchTrack,
-  toIntroMusicFromDeezerTrack,
-  toIntroMusicFromItunesTrack,
+  toProfileMusicFromDeezerTrack,
+  toProfileMusicFromItunesTrack,
   toMusicSearchTrack,
 } from "@mutualzz/util";
 import {
@@ -45,7 +45,7 @@ const toAPIUserProfile = (
   banner: row.banner,
   bio: row.bio,
   pageFontFamily: row.pageFontFamily,
-  introMusic: row.introMusic,
+  profileMusic: row.profileMusic,
   blocks: row.blocks,
   updatedAt: row.updatedAt,
 });
@@ -58,7 +58,7 @@ const emptyProfile = (userId: string): APIUserProfile => ({
   banner: null,
   bio: null,
   pageFontFamily: null,
-  introMusic: null,
+  profileMusic: null,
   blocks: [],
   updatedAt: new Date(),
 });
@@ -69,51 +69,51 @@ const isConfigured = (profile: {
   backgroundColor?: string | null;
   banner?: string | null;
   bio?: string | null;
-  introMusic?: APIProfileIntroMusic | null;
+  profileMusic?: APIProfileMusic | null;
 }) =>
   profile.blocks.length > 0 ||
   !!profile.backgroundImage ||
   !!profile.backgroundColor ||
   !!profile.banner ||
   !!profile.bio ||
-  !!profile.introMusic;
+  !!profile.profileMusic;
 
-const resolveIntroMusic = async (input: {
-  introMusicUrl?: string | null;
-  introMusicTrackId?: string | null;
-  introMusicTrackSource?: "itunes" | "deezer" | null;
-  introMusicTitle?: string | null;
-  introMusicAuthorName?: string | null;
-}): Promise<APIProfileIntroMusic | null> => {
-  if (input.introMusicTrackId) {
-    const source = input.introMusicTrackSource ?? "itunes";
+const resolveProfileMusic = async (input: {
+  profileMusicUrl?: string | null;
+  profileMusicTrackId?: string | null;
+  profileMusicTrackSource?: "itunes" | "deezer" | null;
+  profileMusicTitle?: string | null;
+  profileMusicAuthorName?: string | null;
+}): Promise<APIProfileMusic | null> => {
+  if (input.profileMusicTrackId) {
+    const source = input.profileMusicTrackSource ?? "itunes";
 
     if (source === "deezer") {
-      const track = await lookupDeezerTrack(input.introMusicTrackId);
+      const track = await lookupDeezerTrack(input.profileMusicTrackId);
       if (!track) {
         throw new HttpException(HttpStatusCode.BadRequest, "Track not found");
       }
-      return toIntroMusicFromDeezerTrack(track);
+      return toProfileMusicFromDeezerTrack(track);
     }
 
-    const track = await lookupItunesTrack(input.introMusicTrackId).catch(
+    const track = await lookupItunesTrack(input.profileMusicTrackId).catch(
       () => null,
     );
     if (!track)
       throw new HttpException(HttpStatusCode.BadRequest, "Track not found");
 
-    return toIntroMusicFromItunesTrack(track);
+    return toProfileMusicFromItunesTrack(track);
   }
 
-  const ref = input.introMusicUrl;
+  const ref = input.profileMusicUrl;
   if (!ref) return null;
 
   if (/^[a-f0-9_]+$/i.test(ref)) {
     return {
       url: ref,
       audioHash: ref,
-      title: input.introMusicTitle?.trim() || "Intro music",
-      authorName: input.introMusicAuthorName?.trim() || null,
+      title: input.profileMusicTitle?.trim() || "Profile music",
+      authorName: input.profileMusicAuthorName?.trim() || null,
     };
   }
 
@@ -121,7 +121,7 @@ const resolveIntroMusic = async (input: {
   if (!embed?.spotify && !embed?.youtube && !embed?.apple) {
     throw new HttpException(
       HttpStatusCode.BadRequest,
-      "Intro music must be a searched track, MP3 upload, or YouTube / Apple Music link",
+      "Profile music must be a searched track, MP3 upload, or YouTube / Apple Music link",
     );
   }
 
@@ -181,12 +181,12 @@ export default class ProfileController {
       const { user } = req;
       const body = validateProfileUpdate.parse(req.body);
 
-      const introMusic = await resolveIntroMusic({
-        introMusicUrl: body.introMusicUrl,
-        introMusicTrackId: body.introMusicTrackId,
-        introMusicTrackSource: body.introMusicTrackSource ?? null,
-        introMusicTitle: body.introMusicTitle ?? null,
-        introMusicAuthorName: body.introMusicAuthorName ?? null,
+      const profileMusic = await resolveProfileMusic({
+        profileMusicUrl: body.profileMusicUrl,
+        profileMusicTrackId: body.profileMusicTrackId,
+        profileMusicTrackSource: body.profileMusicTrackSource ?? null,
+        profileMusicTitle: body.profileMusicTitle ?? null,
+        profileMusicAuthorName: body.profileMusicAuthorName ?? null,
       });
 
       const existing = await execNormalized<
@@ -216,7 +216,7 @@ export default class ProfileController {
         banner: body.banner ?? null,
         bio: body.bio ?? null,
         pageFontFamily: body.pageFontFamily ?? null,
-        introMusic,
+        profileMusic,
         blocks: normalizedBlocks,
         configured: isConfigured({
           blocks: normalizedBlocks,
@@ -224,7 +224,7 @@ export default class ProfileController {
           backgroundImage: body.backgroundImage ?? null,
           banner: body.banner ?? null,
           bio: body.bio ?? null,
-          introMusic,
+          profileMusic,
         }),
         updatedAt: new Date(),
       };

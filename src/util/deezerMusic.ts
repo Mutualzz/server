@@ -1,5 +1,5 @@
 import type {
-  APIProfileIntroMusic,
+  APIProfileMusic,
   APIProfileMusicSearchTrack,
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
@@ -84,9 +84,9 @@ export const toDeezerMusicSearchTrack = (
   trackUrl: track.link,
 });
 
-export const toIntroMusicFromDeezerTrack = (
+export const toProfileMusicFromDeezerTrack = (
   track: DeezerSearchResult,
-): APIProfileIntroMusic => {
+): APIProfileMusic => {
   if (!track.preview) {
     throw new HttpException(
       HttpStatusCode.BadRequest,
