@@ -82,6 +82,8 @@ const resolveIntroMusic = async (input: {
   introMusicUrl?: string | null;
   introMusicTrackId?: string | null;
   introMusicTrackSource?: "itunes" | "deezer" | null;
+  introMusicTitle?: string | null;
+  introMusicAuthorName?: string | null;
 }): Promise<APIProfileIntroMusic | null> => {
   if (input.introMusicTrackId) {
     const source = input.introMusicTrackSource ?? "itunes";
@@ -110,7 +112,8 @@ const resolveIntroMusic = async (input: {
     return {
       url: ref,
       audioHash: ref,
-      title: "Intro music",
+      title: input.introMusicTitle?.trim() || "Intro music",
+      authorName: input.introMusicAuthorName?.trim() || null,
     };
   }
 
@@ -182,6 +185,8 @@ export default class ProfileController {
         introMusicUrl: body.introMusicUrl,
         introMusicTrackId: body.introMusicTrackId,
         introMusicTrackSource: body.introMusicTrackSource ?? null,
+        introMusicTitle: body.introMusicTitle ?? null,
+        introMusicAuthorName: body.introMusicAuthorName ?? null,
       });
 
       const existing = await execNormalized<
