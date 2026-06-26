@@ -259,6 +259,13 @@
       "when": 1782019679594,
       "tag": "0036_yummy_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1782460270873,
+      "tag": "0037_bizarre_violations",
+      "breakpoints": true
     }
   ],
   "version": "7"
