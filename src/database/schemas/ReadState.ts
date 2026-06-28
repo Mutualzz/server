@@ -24,6 +24,7 @@ export const readStatesTable = pgTable(
         lastMessageId: bigint({ mode: "bigint" }),
         notificationsCursor: bigint({ mode: "bigint" }),
         lastAckedId: bigint({ mode: "bigint" }),
+        lastMentionMessageId: bigint({ mode: "bigint" }),
         mentionCount: integer().notNull().default(0),
         lastPinTimestamp: timestamp({ mode: "date", withTimezone: true }),
         badgeCount: integer().notNull().default(0),

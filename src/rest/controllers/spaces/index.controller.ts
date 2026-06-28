@@ -19,6 +19,7 @@ import {
   generateHash,
   getMember,
   getSpace,
+  requireSpacePermissions,
   s3Client,
   Snowflake,
 } from "@mutualzz/util";
@@ -30,6 +31,8 @@ import {
   validateSpaceDeleteParams,
   validateSpaceGetBulkQuery,
   validateSpaceGetOneParams,
+  validateSpaceUpdate,
+  validateSpaceUpdateParams,
 } from "@mutualzz/validators";
 import { eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -355,6 +358,126 @@ export default class SpacesController {
           },
         },
       ]);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async update(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+
+      const { spaceId } = validateSpaceUpdateParams.parse(req.params);
+
+      const { space } = await requireSpacePermissions({
+        spaceId,
+        userId: user.id,
+        needed: ["ManageSpace"],
+      });
+
+      let rawCrop;
+      if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
+      const { name, description, crop } = validateSpaceUpdate.parse({
+        ...req.body,
+        crop: rawCrop,
+      });
+
+      const iconFile = imageFileValidator.optional().parse(req.file);
+      const removeIcon = req.body.icon === "";
+
+      const updates: Partial<typeof spacesTable.$inferInsert> = {};
+
+      if (name !== undefined) updates.name = name;
+      if (description !== undefined) updates.description = description;
+
+      if (removeIcon) {
+        if (space.icon) {
+          const isGif = space.icon.startsWith("a_");
+          const storedExt = isGif ? "gif" : "png";
+          try {
+            await s3Client.send(
+              new DeleteObjectCommand({
+                Bucket: bucketName,
+                Key: `icons/spaces/${space.id}/${space.icon}.${storedExt}`,
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+        updates.icon = null;
+      } else if (iconFile) {
+        const isGif = iconFile.mimetype === "image/gif";
+
+        let iconSharp: sharp.Sharp;
+        if (isGif) iconSharp = sharp(iconFile.buffer, { animated: true });
+        else iconSharp = sharp(iconFile.buffer).toFormat("png");
+
+        if (crop) {
+          const { x, y, width, height } = crop;
+          iconSharp = iconSharp.extract({ left: x, top: y, width, height });
+        }
+
+        const iconBuffer = await iconSharp.toBuffer();
+        const iconHash = generateHash(iconBuffer, isGif);
+        const storedExt = isGif ? "gif" : "png";
+
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: bucketName,
+            Body: iconBuffer,
+            Key: `icons/spaces/${space.id}/${iconHash}.${storedExt}`,
+            ContentType: isGif ? "image/gif" : "image/png",
+          }),
+        );
+
+        if (space.icon && space.icon !== iconHash) {
+          const oldExt = space.icon.startsWith("a_") ? "gif" : "png";
+          try {
+            await s3Client.send(
+              new DeleteObjectCommand({
+                Bucket: bucketName,
+                Key: `icons/spaces/${space.id}/${space.icon}.${oldExt}`,
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+
+        updates.icon = iconHash;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        res.status(HttpStatusCode.Success).json(space);
+        return;
+      }
+
+      const updatedSpace = await execNormalized<APISpace>(
+        db
+          .update(spacesTable)
+          .set(updates)
+          .where(eq(spacesTable.id, BigInt(space.id)))
+          .returning()
+          .then((res) => (res.length ? res[0] : null)),
+      );
+
+      if (!updatedSpace)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to update space",
+        );
+
+      void setCache("space", updatedSpace.id, updatedSpace);
+      void invalidateCache("spaceHydrated", updatedSpace.id);
+
+      res.status(HttpStatusCode.Success).json(updatedSpace);
+
+      void emitEvent({
+        event: "SpaceUpdate",
+        space_id: updatedSpace.id,
+        data: updatedSpace,
+      });
     } catch (error) {
       next(error);
     }

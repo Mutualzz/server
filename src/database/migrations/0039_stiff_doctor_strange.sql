@@ -1,0 +1,1 @@
+ALTER TABLE "read_states" ADD COLUMN "lastMentionMessageId" bigint;

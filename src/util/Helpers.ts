@@ -374,6 +374,7 @@ export async function incrementMentionCounts(
   channelId: string,
   userIds: string[],
   roleIds?: string[],
+  messageId?: string,
 ) {
   const mentionedUserIds = Array.from(new Set(userIds));
   let allUserIds = [...mentionedUserIds];
@@ -402,6 +403,7 @@ export async function incrementMentionCounts(
         channelId: BigInt(channelId),
         type: ReadStateType.Messages,
         mentionCount: 1,
+        ...(messageId && { lastMentionMessageId: BigInt(messageId) }),
       })),
     )
     .onConflictDoUpdate({
@@ -412,6 +414,9 @@ export async function incrementMentionCounts(
       ],
       set: {
         mentionCount: sql`read_states."mentionCount" + 1`,
+        ...(messageId && {
+          lastMentionMessageId: sql`GREATEST(COALESCE(read_states."lastMentionMessageId", 0), ${BigInt(messageId)})`,
+        }),
       },
     });
 }

@@ -245,6 +245,11 @@ export function offlineLike(presence: PresencePayload | null): boolean {
   return status === "offline" || status === "invisible";
 }
 
+export function unavailableLike(presence: PresencePayload | null): boolean {
+  const status = presence?.status ?? "offline";
+  return status === "offline" || status === "invisible" || status === "dnd";
+}
+
 export async function attachPresenceMember(member: APISpaceMember): Promise<
   APISpaceMember & {
     presence?: PresencePayload;

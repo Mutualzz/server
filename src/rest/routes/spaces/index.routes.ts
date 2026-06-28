@@ -14,6 +14,13 @@ router.post(
   scanUploads,
   SpacesController.create,
 );
+router.patch(
+  "/:spaceId",
+  createLimiter(60_000, 10),
+  upload.single("icon"),
+  scanUploads,
+  SpacesController.update,
+);
 router.delete("/:spaceId", createLimiter(60_000, 10), SpacesController.delete);
 
 router.get("/", createLimiter(60_000, 60), SpacesController.getAll);

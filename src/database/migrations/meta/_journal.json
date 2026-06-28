@@ -254,24 +254,38 @@
       "when": 1781750921423
     },
     {
+      "breakpoints": true,
       "idx": 36,
-      "version": "7",
-      "when": 1782019679594,
       "tag": "0036_yummy_malice",
-      "breakpoints": true
+      "version": "7",
+      "when": 1782019679594
     },
     {
+      "breakpoints": true,
       "idx": 37,
-      "version": "7",
-      "when": 1782460270873,
       "tag": "0037_bizarre_violations",
+      "version": "7",
+      "when": 1782460270873
+    },
+    {
+      "breakpoints": true,
+      "idx": 38,
+      "tag": "0038_white_darkstar",
+      "version": "7",
+      "when": 1782468595340
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1782595387115,
+      "tag": "0039_stiff_doctor_strange",
       "breakpoints": true
     },
     {
-      "idx": 38,
+      "idx": 40,
       "version": "7",
-      "when": 1782468595340,
-      "tag": "0038_white_darkstar",
+      "when": 1782625668288,
+      "tag": "0040_cute_secret_warriors",
       "breakpoints": true
     }
   ],

@@ -12,7 +12,9 @@ import {
   spaceMembersTable,
 } from "@mutualzz/database";
 import {
+  type APIAttachment,
   type APIMessage,
+  type APIMessageEmbed,
   type APIRelationship,
   ChannelType,
   HttpException,
@@ -24,6 +26,7 @@ import {
 } from "@mutualzz/types";
 import {
   buildEmbeds,
+  bucketName,
   emitEvent,
   execNormalized,
   execNormalizedMany,
@@ -40,10 +43,13 @@ import {
   resolveExpressions,
   attachReactionsToMessages,
   hydrateMessagesForResponse,
+  s3Client,
   sanitizeContent,
   Snowflake,
   validateMessageStickers,
 } from "@mutualzz/util";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import sharp from "sharp";
 import {
   validateChannelParamsGet,
   validateMessageAckParams,
@@ -62,7 +68,7 @@ import {
 import { createSystemMessage } from "@mutualzz/util/systemUser";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
-import { offlineLike } from "@mutualzz/gateway/util/Calculations";
+import { offlineLike, unavailableLike } from "@mutualzz/gateway/util/Calculations";
 import { z } from "zod";
 
 export default class MessagesController {
@@ -96,6 +102,16 @@ export default class MessagesController {
         mentionReply = true,
         expressionIds = [],
       } = validateMessageBodyPut.parse(req.body);
+
+      const uploadedFiles: Express.Multer.File[] = Array.isArray(req.files)
+        ? req.files
+        : [];
+
+      if (!content && expressionIds.length === 0 && uploadedFiles.length === 0)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Message must have content, stickers, or attachments",
+        );
 
       switch (channel.type) {
         case ChannelType.DM:
@@ -275,19 +291,77 @@ export default class MessagesController {
         }
       }
 
+      const messageId = BigInt(Snowflake.generate());
+
+      const allUploaded: APIAttachment[] = await Promise.all(
+        uploadedFiles.map(async (file) => {
+          const attachmentId = Snowflake.generate();
+          const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const key = `attachments/${messageId}/${attachmentId}_${safeName}`;
+
+          await s3Client.send(
+            new PutObjectCommand({
+              Bucket: bucketName,
+              Body: file.buffer,
+              Key: key,
+              ContentType: file.mimetype,
+            }),
+          );
+
+          let width: number | undefined;
+          let height: number | undefined;
+          if (file.mimetype.startsWith("image/")) {
+            try {
+              const meta = await sharp(file.buffer).metadata();
+              width = meta.width;
+              height = meta.height;
+            } catch {
+              // ignore dimension errors
+            }
+          }
+
+          const cdnBase = process.env.CDN_URL ?? "";
+          return {
+            id: attachmentId,
+            filename: file.originalname,
+            size: file.size,
+            contentType: file.mimetype,
+            url: `${cdnBase}/attachments/${messageId}/${attachmentId}_${safeName}`,
+            width,
+            height,
+          } satisfies APIAttachment;
+        }),
+      );
+
+      // GIF uploads become gifv embeds so they work with the gif picker
+      const attachments = allUploaded.filter((a) => a.contentType !== "image/gif");
+      const gifEmbeds: APIMessageEmbed[] = allUploaded
+        .filter((a) => a.contentType === "image/gif")
+        .map((gif) => ({
+          type: "gifv",
+          url: gif.url,
+          media: gif.url,
+          image: gif.url,
+          title: gif.filename,
+        }));
+
+      const contentEmbeds = effectiveCanEmbed
+        ? await buildEmbeds(sanitizedContent || "")
+        : [];
+      const embeds = [...contentEmbeds, ...gifEmbeds];
+
       const newMessage = await execNormalized<APIMessage>(
         db
           .insert(messagesTable)
           .values({
-            id: BigInt(Snowflake.generate()),
+            id: messageId,
             authorId: BigInt(user.id),
             nonce: nonce ? BigInt(nonce) : undefined,
             channelId: BigInt(channel.id),
             spaceId: channel.spaceId ? BigInt(channel.spaceId) : undefined,
             content: sanitizedContent,
-            embeds: effectiveCanEmbed
-              ? await buildEmbeds(sanitizedContent || "")
-              : [],
+            embeds,
+            attachments,
             repliedToId: repliedToId ? BigInt(repliedToId) : undefined,
             expressionIds: validatedStickerIds,
             type: repliedToId ? MessageType.Reply : MessageType.Default,
@@ -375,6 +449,7 @@ export default class MessagesController {
         expressionIds: (newMessage.expressionIds ?? []).map((id) =>
           id.toString(),
         ),
+        attachments,
         reactions: [],
         repliedTo,
       };
@@ -445,7 +520,7 @@ export default class MessagesController {
 
                 const onlineMemberIds = memberIds.filter((_, idx) => {
                   const p = presences[idx];
-                  return !offlineLike(p ?? null);
+                  return !unavailableLike(p ?? null);
                 });
 
                 membersToNotify.push(...onlineMemberIds);
@@ -458,6 +533,7 @@ export default class MessagesController {
                   channel.id,
                   uniqueMembers,
                   roleMentionIds,
+                  newMessage.id,
                 );
               }
             }
@@ -1002,7 +1078,7 @@ export default class MessagesController {
           );
       }
 
-      await db
+      const [updated] = await db
         .insert(readStatesTable)
         .values({
           userId: BigInt(user.id),
@@ -1026,10 +1102,13 @@ export default class MessagesController {
             notificationsCursor: sql`GREATEST(read_states."notificationsCursor", EXCLUDED."notificationsCursor")`,
             lastAckedId: sql`GREATEST(read_states."lastAckedId", EXCLUDED."lastAckedId")`,
 
-            mentionCount: 0,
+            // Only clear mentions if we've acked past the last mention message,
+            // preventing a race where a new mention arrives mid-ack
+            mentionCount: sql`CASE WHEN EXCLUDED."lastAckedId" >= COALESCE(read_states."lastMentionMessageId", 0) THEN 0 ELSE read_states."mentionCount" END`,
             updatedAt: new Date(),
           },
-        });
+        })
+        .returning({ mentionCount: readStatesTable.mentionCount });
 
       res.sendStatus(HttpStatusCode.NoContent);
 
@@ -1045,6 +1124,7 @@ export default class MessagesController {
                 lastMessageId: messageId,
                 notificationCursor: messageId,
                 lastAckedId: messageId,
+                mentionCount: updated?.mentionCount ?? 0,
                 type: ReadStateType.Messages,
               },
             }),
@@ -1103,7 +1183,7 @@ export default class MessagesController {
         return;
       }
 
-      await db
+      const updatedRows = await db
         .insert(readStatesTable)
         .values(
           validStates.map((state) => ({
@@ -1127,16 +1207,25 @@ export default class MessagesController {
             lastMessageId: sql`EXCLUDED."lastMessageId"`,
             notificationsCursor: sql`GREATEST(read_states."notificationsCursor", EXCLUDED."notificationsCursor")`,
             lastAckedId: sql`GREATEST(read_states."lastAckedId", EXCLUDED."lastAckedId")`,
-            mentionCount: 0,
+            mentionCount: sql`CASE WHEN EXCLUDED."lastAckedId" >= COALESCE(read_states."lastMentionMessageId", 0) THEN 0 ELSE read_states."mentionCount" END`,
             updatedAt: new Date(),
           },
+        })
+        .returning({
+          channelId: readStatesTable.channelId,
+          mentionCount: readStatesTable.mentionCount,
         });
+
+      const mentionCountByChannel = new Map(
+        updatedRows.map((r) => [r.channelId.toString(), r.mentionCount]),
+      );
 
       const results = validStates.map((state) => ({
         channelId: state.channelId,
         lastMessageId: state.lastMessageId,
         notificationCursor: state.lastMessageId,
         lastAckedId: state.lastMessageId,
+        mentionCount: mentionCountByChannel.get(state.channelId) ?? 0,
         type: ReadStateType.Messages,
       }));
 
