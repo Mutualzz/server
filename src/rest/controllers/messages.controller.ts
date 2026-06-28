@@ -68,7 +68,7 @@ import {
 import { createSystemMessage } from "@mutualzz/util/systemUser";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
-import { offlineLike, unavailableLike } from "@mutualzz/gateway/util/Calculations";
+import { unavailableLike } from "@mutualzz/gateway/util/Calculations";
 import { z } from "zod";
 
 export default class MessagesController {
@@ -334,7 +334,9 @@ export default class MessagesController {
       );
 
       // GIF uploads become gifv embeds so they work with the gif picker
-      const attachments = allUploaded.filter((a) => a.contentType !== "image/gif");
+      const attachments = allUploaded.filter(
+        (a) => a.contentType !== "image/gif",
+      );
       const gifEmbeds: APIMessageEmbed[] = allUploaded
         .filter((a) => a.contentType === "image/gif")
         .map((gif) => ({
