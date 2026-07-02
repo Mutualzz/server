@@ -7,6 +7,7 @@ import {
   bucketName,
   cleanupOrphanedProfileAssets,
   ensureProfileImage,
+  profileFontKey,
   lookupDeezerTrack,
   lookupItunesTrack,
   emitEvent,
@@ -23,6 +24,7 @@ import {
   toMusicSearchTrack,
 } from "@mutualzz/util";
 import {
+  fontExtFromFile,
   fontFileValidator,
   imageFileValidator,
   profileMusicFileValidator,
@@ -34,6 +36,13 @@ import {
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
+
+const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
+  woff2: "font/woff2",
+  woff: "font/woff",
+  ttf: "font/ttf",
+  otf: "font/otf",
+};
 
 const toAPIUserProfile = (
   row: typeof userProfilesTable.$inferSelect,
@@ -342,8 +351,9 @@ export default class ProfileController {
 
         case "font": {
           const file = fontFileValidator.parse(req.file);
+          const ext = fontExtFromFile(file);
           const hash = generateHash(file.buffer, false);
-          const key = `profiles/${user.id}/fonts/${hash}.woff2`;
+          const key = profileFontKey(user.id, hash, ext);
 
           try {
             await s3Client.send(
@@ -358,16 +368,18 @@ export default class ProfileController {
                 Bucket: bucketName,
                 Body: file.buffer,
                 Key: key,
-                ContentType: "font/woff2",
+                ContentType: FONT_CONTENT_TYPES[ext],
               }),
             );
           }
 
-          const displayName = file.originalname.replace(/\.woff2$/i, "").trim();
+          const displayName = file.originalname
+            .replace(/\.(woff2|woff|ttf|otf)$/i, "")
+            .trim();
 
           return res.status(HttpStatusCode.Success).json({
             hash,
-            fontFamily: `font:${hash}`,
+            fontFamily: `font:${hash}.${ext}`,
             displayName: displayName || "Custom font",
           });
         }

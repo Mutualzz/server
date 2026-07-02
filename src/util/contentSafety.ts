@@ -19,6 +19,18 @@ const ALLOWED_MIME_TYPES = new Set([
   "audio/wav",
   "application/pdf",
   "text/plain",
+  "font/woff2",
+  "font/woff",
+  "font/ttf",
+  "font/otf",
+  "font/sfnt",
+  "application/font-woff2",
+  "application/font-woff",
+  "application/font-sfnt",
+  "application/x-font-woff",
+  "application/x-font-ttf",
+  "application/x-font-otf",
+  "application/vnd.ms-fontobject",
 ]);
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB

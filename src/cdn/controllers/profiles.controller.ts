@@ -11,6 +11,13 @@ import { contentEtag, normalizeFormat } from "../utils";
 const FONT_HASH_RE = /^[a-f0-9]{64}$/i;
 const MUSIC_HASH_RE = /^[a-f0-9]{64}$/i;
 
+const FONT_CONTENT_TYPES: Record<string, string> = {
+  woff2: "font/woff2",
+  woff: "font/woff",
+  ttf: "font/ttf",
+  otf: "font/otf",
+};
+
 type ProfileImageKind = "banner" | "background" | "image";
 
 async function streamObject(
@@ -223,14 +230,24 @@ export default class ProfilesController {
       };
 
       const hash = path.basename(font, path.extname(font));
+      const ext = path.extname(font).replace(".", "").toLowerCase();
+
       if (!FONT_HASH_RE.test(hash)) {
         throw new HttpException(HttpStatusCode.BadRequest, "Invalid font hash");
       }
 
+      const contentType = FONT_CONTENT_TYPES[ext];
+      if (!contentType) {
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Invalid font format",
+        );
+      }
+
       await streamObject(
-        `profiles/${userId}/fonts/${hash}.woff2`,
+        `profiles/${userId}/fonts/${hash}.${ext}`,
         res,
-        "font/woff2",
+        contentType,
       );
     } catch (err) {
       next(err);
