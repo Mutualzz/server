@@ -287,6 +287,34 @@
       "when": 1782625668288,
       "tag": "0040_cute_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1782782088961,
+      "tag": "0041_fancy_fantastic_four",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1782860232789,
+      "tag": "0042_flawless_praxagora",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1782873566759,
+      "tag": "0043_zippy_hawkeye",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1782881054387,
+      "tag": "0044_open_king_bedlam",
+      "breakpoints": true
     }
   ],
   "version": "7"

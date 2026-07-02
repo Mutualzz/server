@@ -20,7 +20,7 @@ import {
 import { logger } from "../Logger";
 import { PresenceBucket } from "./Presence.bucket.ts";
 import { resyncMemberListWindows } from "../util/Calculations";
-import { redis } from "@mutualzz/util";
+import { emitEvent, redis } from "@mutualzz/util";
 
 type ResyncKey = string;
 
@@ -223,6 +223,24 @@ export class PresenceService {
 
     static async get(userId: string) {
         return this.store.get(userId);
+    }
+
+    static async getScheduleForUser(
+        userId: string,
+    ): Promise<PresenceSchedule | null> {
+        const schedule = await this.getSchedule(userId).catch(() => null);
+        if (!schedule || schedule.until <= Date.now()) return null;
+        return schedule;
+    }
+
+    static async getCustomStatusScheduleForUser(
+        userId: string,
+    ): Promise<CustomStatusSchedule | null> {
+        const schedule = await this.getCustomStatusSchedule(userId).catch(
+            () => null,
+        );
+        if (!schedule || schedule.until <= Date.now()) return null;
+        return schedule;
     }
 
     static async handleUpdate(ws: WebSocket, rawPresence: any) {
@@ -478,12 +496,11 @@ export class PresenceService {
 
     private static async broadcast(userId: string, presence: PresencePayload) {
         const targets = PresenceBucket.socketsSeeingUser(userId);
-        if (!targets.length) return;
-
         const payload = { userId, presence };
 
-        await Promise.allSettled(
-            targets.map((socket) =>
+        await Promise.allSettled([
+            // Direct send to sockets tracking this user via member lists / presenceSubs
+            ...targets.map((socket) =>
                 Send(socket, {
                     op: "Dispatch",
                     t: "PresenceUpdate",
@@ -493,7 +510,11 @@ export class PresenceService {
                     logger.debug("[Presence] send fail:", error);
                 }),
             ),
-        );
+            // Publish to the user's exchange so SubscribeUser listeners receive it
+            emitEvent({ event: "PresenceUpdate", user_id: userId, data: payload }).catch(
+                (error) => { logger.debug("[Presence] emit fail:", error); },
+            ),
+        ]);
 
         this.scheduleResyncForTargets(userId, targets);
     }

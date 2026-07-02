@@ -3,8 +3,10 @@ import {
     index,
     pgTable,
     smallint,
+    text,
     timestamp,
     uniqueIndex,
+    varchar,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./User";
 
@@ -22,6 +24,9 @@ export const relationshipsTable = pgTable(
             .references(() => usersTable.id, { onDelete: "cascade" }),
 
         type: smallint().notNull(),
+
+        nickname: varchar({ length: 32 }),
+        note: text(),
 
         createdAt: timestamp({ withTimezone: true, mode: "date" })
             .notNull()

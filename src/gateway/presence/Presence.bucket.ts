@@ -38,15 +38,16 @@ export class PresenceBucket {
         const out: WebSocket[] = [];
         for (const ws of this.sockets) {
             if (!ws.userId) continue;
-            const visibility = ws.presences;
-            if (!visibility) continue;
 
-            for (const set of visibility.values()) {
-                if (set.has(userId)) {
-                    out.push(ws);
-                    break;
-                }
+            let sees = false;
+
+            for (const set of ws.presences?.values() ?? []) {
+                if (set.has(userId)) { sees = true; break; }
             }
+
+            if (!sees && ws.presenceSubs?.has(userId)) sees = true;
+
+            if (sees) out.push(ws);
         }
         return out;
     }

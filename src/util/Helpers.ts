@@ -13,6 +13,7 @@ import {
   spacesTable,
   themesTable,
   toPublicUser,
+  userProfilesTable,
   userSettingsTable,
   usersTable,
 } from "@mutualzz/database";
@@ -26,18 +27,19 @@ import {
   type APISpaceMember,
   type APITheme,
   type APIUser,
+  type APIUserProfile,
   type APIUserSettings,
   ExpressionType,
   HttpException,
   HttpStatusCode,
   type PresencePayload,
   ReadStateType,
+  RelationshipType,
   type Snowflake,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
 import { and, eq, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
-import { perspectiveForUser } from "@mutualzz/rest/util";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
@@ -191,6 +193,9 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     expressions,
     settings,
     readStates,
+    profile,
+    presenceSchedule,
+    customStatusSchedule,
   ] = await Promise.all([
     // Get all themes owned by the user
     execNormalizedMany<APITheme>(
@@ -281,10 +286,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
 
     execNormalizedMany<APIRelationship>(
       db.query.relationshipsTable.findMany({
-        where: or(
-          eq(relationshipsTable.userId, BigInt(user.id)),
-          eq(relationshipsTable.otherUserId, BigInt(user.id)),
-        ),
+        where: eq(relationshipsTable.userId, BigInt(user.id)),
       }),
     ),
 
@@ -309,6 +311,17 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
       }),
     ),
     getReadStates(user.id),
+
+    // Get user profile
+    execNormalized<APIUserProfile>(
+      db.query.userProfilesTable.findFirst({
+        where: eq(userProfilesTable.userId, BigInt(user.id)),
+      }),
+    ),
+
+    // Get presence schedule and custom status schedule
+    PresenceService.getScheduleForUser(user.id),
+    PresenceService.getCustomStatusScheduleForUser(user.id),
   ]);
 
   const presenceUserIds = new Set<string>();
@@ -320,8 +333,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
   }
 
   for (const r of relationships) {
-    const otherId = r.userId === user.id ? r.otherUserId : r.userId;
-    presenceUserIds.add(otherId);
+    presenceUserIds.add(r.otherUserId);
   }
 
   const mergedPresences = await getBulkPresences([...presenceUserIds]);
@@ -338,20 +350,19 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     })),
   )) satisfies APIChannel[];
 
-  const relationshipsForReady = relationships.map((r) =>
-    perspectiveForUser(r, user.id),
-  );
-
   return {
     user,
     themes,
     spaces,
     channels,
-    relationships: relationshipsForReady,
+    relationships,
     expressions,
     settings,
     readStates,
     mergedPresences,
+    profile,
+    presenceSchedule,
+    customStatusSchedule,
   };
 };
 
@@ -879,3 +890,17 @@ export async function getChannelOverwrites(
   await setCache("channelOverwrites", cacheKey, overwrites);
   return overwrites;
 }
+
+export const getFriendIds = async (userId: string): Promise<string[]> => {
+  const rows = await db
+    .select({ otherUserId: relationshipsTable.otherUserId })
+    .from(relationshipsTable)
+    .where(
+      and(
+        eq(relationshipsTable.userId, BigInt(userId)),
+        eq(relationshipsTable.type, RelationshipType.Friend),
+      ),
+    );
+
+  return rows.map((row) => row.otherUserId.toString());
+};

@@ -5,6 +5,7 @@ import {
   spaceMembersTable,
   spacesTable,
 } from "@mutualzz/database";
+import { ChannelType } from "@mutualzz/types";
 import {
   type EventOpts,
   listenEvent,
@@ -244,6 +245,19 @@ export async function consume(this: WebSocket, opts: EventOpts) {
       for (const ch of data.channels ?? []) {
         const chid = String(ch.id);
         this.events[chid] = await listenEvent(chid, consumer, listenOpts);
+      }
+      // When a new DM is created mid-session, add recipient(s) to presenceSubs
+      // so PresenceBucket.socketsSeeingUser includes this socket going forward.
+      if (
+        event === "ChannelCreate" &&
+        (data.type === ChannelType.DM || data.type === ChannelType.GroupDM)
+      ) {
+        this.presenceSubs = this.presenceSubs ?? new Set();
+        for (const recipientId of data.recipientIds ?? []) {
+          if (String(recipientId) !== this.userId) {
+            this.presenceSubs.add(String(recipientId));
+          }
+        }
       }
       break;
     }

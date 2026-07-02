@@ -9,10 +9,10 @@ router.get("/outgoing", RelationshipsController.getOutgoing);
 router.get("/blocked", RelationshipsController.getBlocked);
 
 router.post("/", createLimiter(60_000, 10), RelationshipsController.create);
-router.patch("/:userId/accept", RelationshipsController.accept);
-router.patch("/:userId/decline", RelationshipsController.decline);
-router.delete("/:userId", RelationshipsController.remove);
-router.put("/:userId/block", RelationshipsController.block);
-router.delete("/:userId/block", RelationshipsController.unblock);
+router.patch("/:identifier/accept", RelationshipsController.accept);
+router.patch("/:identifier/decline", RelationshipsController.decline);
+router.delete("/:identifier", RelationshipsController.remove);
+router.put("/:identifier/block", RelationshipsController.block);
+router.delete("/:identifier/block", RelationshipsController.unblock);
 
 export default router;

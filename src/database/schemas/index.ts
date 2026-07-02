@@ -2,6 +2,7 @@ export * from "./channel";
 export * from "./spaces";
 export * from "./users";
 export * from "./discord";
+export * from "./post";
 
 export * from "./Theme";
 export * from "./Invite";

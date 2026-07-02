@@ -1,230 +1,251 @@
 import type {
-    APIChannel,
-    APIChannelPermissionOverwrite,
-    APIExpression,
-    APIInvite,
-    APIMessage,
-    APIPrivateUser,
-    APIRole,
-    APISpace,
-    APISpaceMember,
-    APITheme,
-    APIUser,
-    APIUserSettings,
+  APIChannel,
+  APIChannelPermissionOverwrite,
+  APIExpression,
+  APIInvite,
+  APIMessage,
+  APIPrivateUser,
+  APIRole,
+  APISpace,
+  APISpaceMember,
+  APITheme,
+  APIUser,
+  APIUserSettings,
 } from "@mutualzz/types";
 import { LRUCache } from "lru-cache";
 
 // [START] Auth User Caches
 export const authUserLRU = new LRUCache<string, APIPrivateUser>({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
-    forEach: (value: any) => {
-        delete value.hash;
-    },
+  max: 1000,
+  ttl: 1000 * 60 * 5,
+  forEach: (value: any) => {
+    delete value.hash;
+  },
 });
 // [END] Auth User Caches
 
 // [START] System User Cache
 export const systemUserLRU = new LRUCache<string, APIUser>({
-    max: 5,
-    ttl: 1000 * 60 * 60 * 24 * 7, // 7 days
-    forEach: (value: any) => {
-        delete value.hash;
-    },
+  max: 5,
+  ttl: 1000 * 60 * 60 * 24 * 7, // 7 days
+  forEach: (value: any) => {
+    delete value.hash;
+  },
 });
 
 // [START] Expression Cache
 export const expressionLRU = new LRUCache<string, APIExpression>({
-    max: 5000,
-    ttl: 1000 * 60,
+  max: 5000,
+  ttl: 1000 * 60,
 });
 
 export const expressionsLRU = new LRUCache<string, APIExpression[]>({
-    max: 500,
-    ttl: 1000 * 60,
+  max: 500,
+  ttl: 1000 * 60,
 });
 
 // [END] Expression Cache
 
 // [START] Channel Caches
 export const channelsLRU = new LRUCache<string, APIChannel[]>({
-    max: 1000,
-    ttl: 1000 * 60,
+  max: 1000,
+  ttl: 1000 * 60,
 });
 
 export const channelLRU = new LRUCache<string, APIChannel>({
-    max: 1000,
-    ttl: 1000 * 60,
+  max: 1000,
+  ttl: 1000 * 60,
 });
 
 export const channelRecipientLRU = new LRUCache<string, boolean>({
-    max: 1000,
-    ttl: 1000 * 60,
+  max: 1000,
+  ttl: 1000 * 60,
 });
 
 export const channelRecipientsLRU = new LRUCache<string, string[]>({
-    max: 500,
-    ttl: 1000 * 60,
+  max: 500,
+  ttl: 1000 * 60,
 });
 
 // [END] Channel Caches
 
 // [START] Space Caches
 export const spaceLRU = new LRUCache<string, APISpace>({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
+  max: 1000,
+  ttl: 1000 * 60 * 5,
 });
 
 export const spaceHydratedLRU = new LRUCache<string, APISpace>({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
+  max: 1000,
+  ttl: 1000 * 60 * 5,
 });
 
 export const spacesLRU = new LRUCache<string, APISpace[]>({
-    max: 500,
-    ttl: 1000 * 60 * 5,
+  max: 500,
+  ttl: 1000 * 60 * 5,
 });
 
 export const spaceMembersLRU = new LRUCache<string, APISpaceMember[]>({
-    max: 1000,
-    ttl: 1000 * 60,
+  max: 1000,
+  ttl: 1000 * 60,
 });
 
 export const spaceMemberLRU = new LRUCache<string, APISpaceMember>({
-    max: 1000,
-    ttl: 1000 * 60,
+  max: 1000,
+  ttl: 1000 * 60,
 });
 
 // [END] Space Caches
 
 // [START] Invite Caches
 export const invitesLRU = new LRUCache<string, APIInvite[]>({
-    max: 1000,
-    ttl: 1000 * 60,
+  max: 1000,
+  ttl: 1000 * 60,
 });
 
 export const inviteLRU = new LRUCache<string, APIInvite>({
-    max: 2000,
-    ttl: 1000 * 30,
+  max: 2000,
+  ttl: 1000 * 30,
 });
 
 export const inviteEditLRU = new LRUCache<string, Pick<APIInvite, "inviterId">>(
-    {
-        max: 500,
-        ttl: 1000 * 60 * 5,
-    },
+  {
+    max: 500,
+    ttl: 1000 * 60 * 5,
+  },
 );
 
 // [END] Invite Caches
 
 // [START] Message Caches
 export const messagesLRU = new LRUCache<string, APIMessage[]>({
-    max: 2000,
-    ttl: 1000 * 30,
+  max: 2000,
+  ttl: 1000 * 30,
 });
 
 export const messageLRU = new LRUCache<string, APIMessage>({
-    max: 4000,
-    ttl: 1000 * 60,
+  max: 4000,
+  ttl: 1000 * 60,
 });
 // [END] Message Caches
 
 // [START] User Caches
 export const userLRU = new LRUCache<string, APIUser>({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
-    forEach: (value: any) => {
-        delete value.hash;
-    },
+  max: 1000,
+  ttl: 1000 * 60 * 5,
+  forEach: (value: any) => {
+    delete value.hash;
+  },
 });
 
 export const usersLRU = new LRUCache<string, APIUser[]>({
-    max: 500,
-    ttl: 1000 * 60 * 5,
-    forEach: (value: any) => {
-        value.forEach((v: any) => {
-            delete v.hash;
-        });
-    },
+  max: 500,
+  ttl: 1000 * 60 * 5,
+  forEach: (value: any) => {
+    value.forEach((v: any) => {
+      delete v.hash;
+    });
+  },
 });
 
 export const userSettingsLRU = new LRUCache<string, APIUserSettings>({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
+  max: 1000,
+  ttl: 1000 * 60 * 5,
 });
 
 // [END] User Caches
 
 // [START] Theme Caches
 export const themeLRU = new LRUCache<string, APITheme>({
-    max: 500,
-    ttl: 1000 * 60 * 10,
+  max: 500,
+  ttl: 1000 * 60 * 10,
 });
 
 export const themesLRU = new LRUCache<string, APITheme[]>({
-    max: 200,
-    ttl: 1000 * 60 * 10,
+  max: 200,
+  ttl: 1000 * 60 * 10,
 });
 // [END] Theme Caches
 
 // [START] Role Caches
 export const rolesLRU = new LRUCache<string, APIRole[]>({
-    max: 500,
-    ttl: 1000 * 60 * 3,
+  max: 500,
+  ttl: 1000 * 60 * 3,
 });
 
 export const roleLRU = new LRUCache<string, APIRole>({
-    max: 1000,
-    ttl: 1000 * 60 * 3,
+  max: 1000,
+  ttl: 1000 * 60 * 3,
 });
 // [END] Roles Cache
 
 // [START] Permission Related Caches
 export const memberRolesLRU = new LRUCache<
-    string,
-    Pick<APIRole, "id" | "allow" | "deny" | "flags" | "position">[]
+  string,
+  Pick<APIRole, "id" | "allow" | "deny" | "flags" | "position">[]
 >({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
+  max: 1000,
+  ttl: 1000 * 60 * 5,
 });
 
 export const everyoneRoleLRU = new LRUCache<
-    string,
-    Pick<APIRole, "id" | "allow" | "deny" | "flags" | "position">
+  string,
+  Pick<APIRole, "id" | "allow" | "deny" | "flags" | "position">
 >({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
+  max: 1000,
+  ttl: 1000 * 60 * 5,
 });
 
 export const channelOverwritesLRU = new LRUCache<
-    string,
-    Pick<
-        APIChannelPermissionOverwrite,
-        "roleId" | "userId" | "allow" | "deny"
-    >[]
+  string,
+  Pick<APIChannelPermissionOverwrite, "roleId" | "userId" | "allow" | "deny">[]
 >({
-    max: 1000,
-    ttl: 1000 * 60 * 5,
+  max: 1000,
+  ttl: 1000 * 60 * 5,
 });
 
 // [START] TURN credentials cache
 export const turnCredentialsLRU = new LRUCache<
-    string,
-    { iceServers: any[]; expiresAt: number }
+  string,
+  { iceServers: any[]; expiresAt: number }
 >({
-    max: 100,
-    ttl: 1000 * 60 * 60 * 24, // 24 hours
+  max: 100,
+  ttl: 1000 * 60 * 60 * 24, // 24 hours
 });
 // [END] TURN credentials cache
 
 // [START] GIFs
 export const gifSearchLRU = new LRUCache<string, any>({
-    max: 200,
-    ttl: 1000 * 60 * 5, // 5 minutes
+  max: 200,
+  ttl: 1000 * 60 * 5, // 5 minutes
 });
 
 export const gifTagsLRU = new LRUCache<string, any>({
-    max: 1,
-    ttl: 1000 * 60 * 60, // 1 hour
+  max: 1,
+  ttl: 1000 * 60 * 60, // 1 hour
 });
 // [END] GIFs
+
+// [START] Post Caches
+export const postsLRU = new LRUCache<string, any>({
+  max: 1000,
+  ttl: 1000 * 60 * 5, // 5 minutes
+});
+
+export const postLRU = new LRUCache<string, any>({
+  max: 1000,
+  ttl: 1000 * 60 * 5, // 5 minutes
+});
+// [END] Post Caches
+
+// [START] Post Comments Caches
+export const postCommentsLRU = new LRUCache<string, any>({
+  max: 1000,
+  ttl: 1000 * 60 * 5, // 5 minutes
+});
+
+export const postCommentLRU = new LRUCache<string, any>({
+  max: 1000,
+  ttl: 1000 * 60 * 5, // 5 minutes
+});
+// [END] Post Comments Caches

@@ -1,10 +1,4 @@
-import {
-    type APIRelationship,
-    HttpException,
-    HttpStatusCode,
-    RelationshipType,
-    type Snowflake,
-} from "@mutualzz/types";
+import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { db, rolesTable, spaceMemberRolesTable } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
 
@@ -37,39 +31,6 @@ export const assertNotEveryoneDelete = (spaceId: string, roleId: string) => {
             "Cannot delete @everyone role",
         );
 };
-
-export function perspectiveForUser(
-    rel: APIRelationship,
-    receivingUserId: Snowflake,
-): APIRelationship {
-    const out: APIRelationship = { ...rel };
-
-    if (
-        out.type === RelationshipType.Friend ||
-        out.type === RelationshipType.Blocked
-    )
-        return out;
-
-    if (out.type === RelationshipType.OutgoingRequest) {
-        out.type =
-            receivingUserId.toString() === out.userId.toString()
-                ? RelationshipType.OutgoingRequest
-                : RelationshipType.IncomingRequest;
-        return out;
-    }
-
-    // I know its unnecessary but dont change it, since i wanna make sure thats the case
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (out.type === RelationshipType.IncomingRequest) {
-        out.type =
-            receivingUserId.toString() === out.userId.toString()
-                ? RelationshipType.IncomingRequest
-                : RelationshipType.OutgoingRequest;
-        return out;
-    }
-
-    return out;
-}
 
 export const assertEveryoneUpdateRules = (
     spaceId: string,

@@ -8,6 +8,7 @@ import {
   channelRecipientsTable,
   db,
   messagesTable,
+  postsTable,
   relationshipsTable,
   spaceMembersTable,
 } from "@mutualzz/database";
@@ -15,6 +16,7 @@ import {
   type APIAttachment,
   type APIMessage,
   type APIMessageEmbed,
+  type APIPost,
   type APIRelationship,
   ChannelType,
   HttpException,
@@ -25,6 +27,7 @@ import {
   RelationshipType,
 } from "@mutualzz/types";
 import {
+  attachHashtagsToPosts,
   buildEmbeds,
   bucketName,
   emitEvent,
@@ -101,13 +104,19 @@ export default class MessagesController {
         repliedToId,
         mentionReply = true,
         expressionIds = [],
+        sharedPostId,
       } = validateMessageBodyPut.parse(req.body);
 
       const uploadedFiles: Express.Multer.File[] = Array.isArray(req.files)
         ? req.files
         : [];
 
-      if (!content && expressionIds.length === 0 && uploadedFiles.length === 0)
+      if (
+        !content &&
+        expressionIds.length === 0 &&
+        uploadedFiles.length === 0 &&
+        !sharedPostId
+      )
         throw new HttpException(
           HttpStatusCode.BadRequest,
           "Message must have content, stickers, or attachments",
@@ -350,7 +359,37 @@ export default class MessagesController {
       const contentEmbeds = effectiveCanEmbed
         ? await buildEmbeds(sanitizedContent || "")
         : [];
-      const embeds = [...contentEmbeds, ...gifEmbeds];
+
+      const postEmbeds: APIMessageEmbed[] = [];
+      if (sharedPostId) {
+        const sharedPost = await execNormalized<APIPost>(
+          db.query.postsTable.findFirst({
+            with: { author: { columns: publicUserColumns } },
+            where: eq(postsTable.id, BigInt(sharedPostId)),
+          }),
+        );
+
+        if (sharedPost) {
+          const [hydratedSharedPost] = await attachHashtagsToPosts([
+            sharedPost,
+          ]);
+
+          postEmbeds.push({
+            type: "post",
+            post: {
+              id: hydratedSharedPost.id,
+              authorId: hydratedSharedPost.authorId,
+              author: hydratedSharedPost.author,
+              content: hydratedSharedPost.content,
+              attachments: hydratedSharedPost.attachments,
+              hashtags: hydratedSharedPost.hashtags,
+              createdAt: hydratedSharedPost.createdAt,
+            },
+          });
+        }
+      }
+
+      const embeds = [...contentEmbeds, ...gifEmbeds, ...postEmbeds];
 
       const newMessage = await execNormalized<APIMessage>(
         db
@@ -1104,8 +1143,6 @@ export default class MessagesController {
             notificationsCursor: sql`GREATEST(read_states."notificationsCursor", EXCLUDED."notificationsCursor")`,
             lastAckedId: sql`GREATEST(read_states."lastAckedId", EXCLUDED."lastAckedId")`,
 
-            // Only clear mentions if we've acked past the last mention message,
-            // preventing a race where a new mention arrives mid-ack
             mentionCount: sql`CASE WHEN EXCLUDED."lastAckedId" >= COALESCE(read_states."lastMentionMessageId", 0) THEN 0 ELSE read_states."mentionCount" END`,
             updatedAt: new Date(),
           },
