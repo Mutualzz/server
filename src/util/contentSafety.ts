@@ -31,9 +31,22 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/x-font-ttf",
   "application/x-font-otf",
   "application/vnd.ms-fontobject",
+  "application/octet-stream",
 ]);
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+
+const FONT_SIGNATURES: Buffer[] = [
+  Buffer.from("wOFF", "ascii"),
+  Buffer.from("wOF2", "ascii"),
+  Buffer.from("OTTO", "ascii"),
+  Buffer.from("true", "ascii"),
+  Buffer.from("typ1", "ascii"),
+  Buffer.from([0x00, 0x01, 0x00, 0x00]),
+];
+
+export const isFontBuffer = (buffer: Buffer): boolean =>
+  FONT_SIGNATURES.some((sig) => buffer.subarray(0, sig.length).equals(sig));
 
 export const validateAttachment = (
   mimetype: string,

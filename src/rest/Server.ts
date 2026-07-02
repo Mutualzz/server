@@ -18,6 +18,7 @@ import { DEFAULT_PORT, MAX_FILE_SIZE_BYTES } from "./util";
 import type { LogLevel } from "@mutualzz/logger";
 import {
   checkArachnid,
+  isFontBuffer,
   reportToNCMEC,
   validateAttachment,
 } from "@mutualzz/util/contentSafety";
@@ -74,6 +75,14 @@ export const scanUploads = async (
     const uploadedAt = new Date().toISOString();
 
     for (const file of files) {
+      if (
+        file.mimetype === "application/octet-stream" &&
+        !isFontBuffer(file.buffer)
+      )
+        return next(
+          new HttpException(HttpStatusCode.BadRequest, "File type not allowed"),
+        );
+
       const isMedia =
         file.mimetype.startsWith("image/") ||
         file.mimetype.startsWith("video/") ||
