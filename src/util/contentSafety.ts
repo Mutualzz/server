@@ -30,7 +30,6 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/x-font-woff",
   "application/x-font-ttf",
   "application/x-font-otf",
-  "application/vnd.ms-fontobject",
   "application/octet-stream",
 ]);
 
