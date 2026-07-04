@@ -16,7 +16,7 @@ import {
   validateRoleUpdate,
   validateSpaceParam,
 } from "@mutualzz/validators";
-import { and, asc, eq, max } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import {
   assertEveryoneUpdateRules,
@@ -125,27 +125,41 @@ export default class RolesController {
         needed: ["ManageRoles"],
       });
 
-      const maxPosition = await db
-        .select({
-          max: max(rolesTable.position),
-        })
-        .from(rolesTable)
-        .where(eq(rolesTable.spaceId, BigInt(spaceId)))
-        .then((res) => res[0].max);
+      // New roles are inserted directly above @everyone (position 0), not
+      // above the space's highest role — matching Discord's hierarchy
+      // convention. Existing non-@everyone roles shift up to make room.
+      const { newRole, shiftedRoles } = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${spaceId}, 1))`,
+        );
 
-      const newRole = await db
-        .insert(rolesTable)
-        .values({
-          id: BigInt(Snowflake.generate()),
-          spaceId: BigInt(spaceId),
-          name: "New Role",
-          color: "#99aab5",
-          position: (maxPosition ?? -1) + 1,
-          allow: 0n,
-          deny: 0n,
-        })
-        .returning()
-        .then((res) => (res.length ? res[0] : null));
+        const shiftedRoles = await tx
+          .update(rolesTable)
+          .set({ position: sql`${rolesTable.position} + 1` })
+          .where(
+            and(
+              eq(rolesTable.spaceId, BigInt(spaceId)),
+              gt(rolesTable.position, 0),
+            ),
+          )
+          .returning();
+
+        const newRole = await tx
+          .insert(rolesTable)
+          .values({
+            id: BigInt(Snowflake.generate()),
+            spaceId: BigInt(spaceId),
+            name: "New Role",
+            color: "#99aab5",
+            position: 1,
+            allow: 0n,
+            deny: 0n,
+          })
+          .returning()
+          .then((res) => (res.length ? res[0] : null));
+
+        return { newRole, shiftedRoles };
+      });
 
       if (!newRole)
         throw new HttpException(
@@ -165,6 +179,15 @@ export default class RolesController {
               data: newRole,
             }),
         },
+        ...shiftedRoles.map((role) => ({
+          label: `event:RoleUpdate:${role.id}`,
+          run: () =>
+            emitEvent({
+              event: "RoleUpdate",
+              space_id: space.id,
+              data: role,
+            }),
+        })),
         {
           label: "cache:invalidate:everyoneRole",
           run: () => invalidateCache("everyoneRole", spaceId),

@@ -9,184 +9,177 @@ import sharp from "sharp";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 
 export default class ExpressionsController {
-    static async getExpression(
-        req: Request,
-        res: Response,
-        next: NextFunction,
-    ) {
-        try {
-            const { expressionId, assetHash } = req.params as {
-                expressionId: string;
-                assetHash: string;
-            };
+  static async getExpression(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { expressionId, assetHash } = req.params as {
+        expressionId: string;
+        assetHash: string;
+      };
 
-            const {
-                format: formatQuery,
-                size: sizeQuery,
-                animated: animatedQueryRaw,
-            } = req.query as {
-                format?: string;
-                size?: string;
-                animated?: string;
-            };
+      const {
+        format: formatQuery,
+        size: sizeQuery,
+        animated: animatedQueryRaw,
+      } = req.query as {
+        format?: string;
+        size?: string;
+        animated?: string;
+      };
 
-            const baseName = path.basename(assetHash, path.extname(assetHash));
-            const urlExt = path
-                .extname(assetHash)
-                .replace(".", "")
-                .toLowerCase();
+      const baseName = path.basename(assetHash, path.extname(assetHash));
+      const urlExt = path.extname(assetHash).replace(".", "").toLowerCase();
 
-            const isAnimatedHash = baseName.startsWith("a_");
+      const isAnimatedHash = baseName.startsWith("a_");
 
-            // Normalize caller intent: choose target format from ?format override or URL ext
-            let targetFormat =
-                normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
+      let targetFormat =
+        normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
 
-            const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
-            const explicitAnimated = ["true", "1", "on", "yes"].includes(
-                animatedQuery,
-            );
-            const explicitStatic = ["false", "0", "off", "no"].includes(
-                animatedQuery,
-            );
+      const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
+      const explicitAnimated = ["true", "1", "on", "yes"].includes(
+        animatedQuery,
+      );
+      const explicitStatic = ["false", "0", "off", "no"].includes(
+        animatedQuery,
+      );
 
-            if (!targetFormat)
-                targetFormat =
-                    isAnimatedHash && explicitAnimated ? "webp" : "png";
+      if (!targetFormat)
+        targetFormat = isAnimatedHash && explicitAnimated ? "webp" : "png";
 
-            let willAnimate: boolean;
-            if (targetFormat === "gif")
-                willAnimate = isAnimatedHash && !explicitStatic;
-            else if (targetFormat === "webp")
-                willAnimate = isAnimatedHash && explicitAnimated;
-            else willAnimate = false;
+      let willAnimate: boolean;
+      if (targetFormat === "gif")
+        willAnimate = isAnimatedHash && !explicitStatic;
+      else if (targetFormat === "webp")
+        willAnimate = isAnimatedHash && explicitAnimated;
+      else willAnimate = false;
 
-            if (!willAnimate && targetFormat === "gif") targetFormat = "png";
+      if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
-            const boundedSize = (() => {
-                const n = Number(sizeQuery);
-                if (!Number.isFinite(n)) return undefined as number | undefined;
-                return Math.max(1, Math.min(4096, Math.floor(n)));
-            })();
+      const boundedSize = (() => {
+        const n = Number(sizeQuery);
+        if (!Number.isFinite(n)) return undefined as number | undefined;
+        return Math.max(1, Math.min(4096, Math.floor(n)));
+      })();
 
-            let cacheKey = `${expressionId}:${baseName}:${targetFormat}`;
-            if (boundedSize) cacheKey += `:${boundedSize}`;
-            if (willAnimate) cacheKey += `:a`;
+      let cacheKey = `${expressionId}:${baseName}:${targetFormat}`;
+      if (boundedSize) cacheKey += `:${boundedSize}`;
+      if (willAnimate) cacheKey += `:a`;
 
-            const cached = await getCache("expressions", cacheKey);
-            if (cached) {
-                res.setHeader(
-                    "Cache-Control",
-                    "public, max-age=86400, immutable",
-                );
-                res.setHeader("ETag", contentEtag(cached));
-                res.setHeader(
-                    "Content-Type",
-                    MIME_TYPES[targetFormat] || "application/octet-stream",
-                );
-                res.status(HttpStatusCode.Success).end(Buffer.from(cached));
-                return;
-            }
+      const cached = await getCache("expressions", cacheKey);
+      if (cached) {
+        res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+        res.setHeader("ETag", contentEtag(cached));
+        res.setHeader(
+          "Content-Type",
+          MIME_TYPES[targetFormat] || "application/octet-stream",
+        );
+        res.status(HttpStatusCode.Success).end(Buffer.from(cached));
+        return;
+      }
 
-            const sourceExt = isAnimatedHash ? "gif" : "png";
-            const sourceKey = `expressions/${expressionId}/${baseName}.${sourceExt}`;
+      const sourceExt = isAnimatedHash ? "gif" : "png";
+      const sourceKey = `expressions/${expressionId}/${baseName}.${sourceExt}`;
 
-            let sourceBody: Uint8Array;
-            try {
-                const { Body } = await s3Client.send(
-                    new GetObjectCommand({
-                        Bucket: bucketName,
-                        Key: sourceKey,
-                    }),
-                );
-                if (!Body) throw new Error("Empty body");
-                sourceBody = await Body.transformToByteArray();
-            } catch {
-                throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Expression not found",
-                );
-            }
+      let sourceBody: Uint8Array;
+      try {
+        const { Body } = await s3Client.send(
+          new GetObjectCommand({
+            Bucket: bucketName,
+            Key: sourceKey,
+          }),
+        );
+        if (!Body) throw new Error("Empty body");
+        sourceBody = await Body.transformToByteArray();
+      } catch {
+        throw new HttpException(
+          HttpStatusCode.NotFound,
+          "Expression not found",
+        );
+      }
 
-            let image: sharp.Sharp;
-            if (willAnimate) image = sharp(sourceBody, { animated: true });
-            else image = sharp(sourceBody);
+      let image: sharp.Sharp;
+      if (willAnimate) image = sharp(sourceBody, { animated: true });
+      else image = sharp(sourceBody);
 
-            if (typeof image.toColourspace === "function")
-                image = image.toColourspace("srgb");
+      if (typeof image.toColourspace === "function")
+        image = image.toColourspace("srgb");
 
-            if (boundedSize)
-                image = image.resize(boundedSize, boundedSize, {
-                    fit: "cover",
-                });
+      if (boundedSize)
+        image = image.resize(boundedSize, boundedSize, {
+          fit: "cover",
+        });
 
-            let actualFormat: string = targetFormat;
+      let actualFormat: string = targetFormat;
 
-            if (willAnimate) {
-                // Animated branch
-                if (targetFormat === "webp") {
-                    image = image.webp({ quality: 80, loop: 0 });
-                } else if (targetFormat === "gif") {
-                    if (!boundedSize) {
-                        const etag = contentEtag(sourceBody);
-                        expressionsCache.set(cacheKey, sourceBody);
-                        res.setHeader(
-                            "Cache-Control",
-                            "public, max-age=86400, immutable",
-                        );
-                        res.setHeader("ETag", etag);
-                        res.setHeader("Content-Type", MIME_TYPES["gif"]);
-                        res.status(HttpStatusCode.Success).end(sourceBody);
-                        return;
-                    } else {
-                        actualFormat = "webp";
-                        image = image.webp({ quality: 80, loop: 0 });
-                    }
-                } else {
-                    actualFormat = "webp";
-                    image = image.webp({ quality: 80, loop: 0 });
-                }
-            } else {
-                // Static branch
-                switch (targetFormat) {
-                    case "png":
-                        image = image.png({ compressionLevel: 9 });
-                        break;
-                    case "webp":
-                        image = image.webp({ quality: 80 });
-                        break;
-                    case "avif":
-                        image = image.avif({ quality: 50 });
-                        break;
-                    case "jpg":
-                        image = image.jpeg({ mozjpeg: true, quality: 82 });
-                        break;
-                    case "gif":
-                        // This shouldn't happen due to prior logic, but just in case
-                        actualFormat = "png";
-                        image = image.png({ compressionLevel: 9 });
-                        break;
-                    default:
-                        actualFormat = "png";
-                        image = image.png({ compressionLevel: 9 });
-                }
-            }
-
-            const outputBuffer = await image.toBuffer();
-
-            const etag = contentEtag(outputBuffer);
-            expressionsCache.set(cacheKey, outputBuffer);
-
+      if (willAnimate) {
+        // Animated branch
+        if (targetFormat === "webp") {
+          image = image.webp({ quality: 80, loop: 0 });
+        } else if (targetFormat === "gif") {
+          if (!boundedSize) {
+            const etag = contentEtag(sourceBody);
+            expressionsCache.set(cacheKey, sourceBody);
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");
             res.setHeader("ETag", etag);
-            res.setHeader(
-                "Content-Type",
-                MIME_TYPES[actualFormat] || "application/octet-stream",
-            );
-
-            res.status(HttpStatusCode.Success).end(outputBuffer);
-        } catch (err) {
-            next(err);
+            res.setHeader("Content-Type", MIME_TYPES["gif"]);
+            res.status(HttpStatusCode.Success).end(sourceBody);
+            return;
+          } else {
+            actualFormat = "webp";
+            image = image.webp({ quality: 80, loop: 0 });
+          }
+        } else {
+          actualFormat = "webp";
+          image = image.webp({ quality: 80, loop: 0 });
         }
+      } else {
+        // Static branch
+        switch (targetFormat) {
+          case "png":
+            image = image.png({ compressionLevel: 9 });
+            break;
+          case "webp":
+            image = image.webp({ quality: 80 });
+            break;
+          case "avif":
+            image = image.avif({ quality: 50 });
+            break;
+          case "jpg":
+            image = image.jpeg({ mozjpeg: true, quality: 82 });
+            break;
+          case "gif":
+            // This shouldn't happen due to prior logic, but just in case
+            actualFormat = "png";
+            image = image.png({ compressionLevel: 9 });
+            break;
+          default:
+            actualFormat = "png";
+            image = image.png({ compressionLevel: 9 });
+        }
+      }
+
+      let outputBuffer: Buffer;
+      try {
+        outputBuffer = await image.toBuffer();
+      } catch (encodeErr) {
+        if (!willAnimate) throw encodeErr;
+
+        actualFormat = "gif";
+        outputBuffer = Buffer.from(sourceBody);
+      }
+
+      const etag = contentEtag(outputBuffer);
+      expressionsCache.set(cacheKey, outputBuffer);
+
+      res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+      res.setHeader("ETag", etag);
+      res.setHeader(
+        "Content-Type",
+        MIME_TYPES[actualFormat] || "application/octet-stream",
+      );
+
+      res.status(HttpStatusCode.Success).end(outputBuffer);
+    } catch (err) {
+      next(err);
     }
+  }
 }
