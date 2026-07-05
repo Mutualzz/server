@@ -7,7 +7,11 @@ import {
     text,
     timestamp,
 } from "drizzle-orm/pg-core";
-import type { APIProfileBlock, APIProfileMusic } from "@mutualzz/types";
+import type {
+    APIMobileProfileBlock,
+    APIProfileBlock,
+    APIProfileMusic,
+} from "@mutualzz/types";
 import { usersTable } from "./User";
 
 export const userProfilesTable = pgTable("user_profiles", {
@@ -29,6 +33,11 @@ export const userProfilesTable = pgTable("user_profiles", {
     profileMusic: jsonb().$type<APIProfileMusic | null>(),
 
     blocks: jsonb().$type<APIProfileBlock[]>().notNull().default([]),
+
+    mobileBlocks: jsonb()
+        .$type<APIMobileProfileBlock[]>()
+        .notNull()
+        .default([]),
 
     updatedAt: timestamp({ withTimezone: true, mode: "date" })
         .notNull()

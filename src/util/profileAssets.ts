@@ -3,7 +3,11 @@ import {
   GetObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import type { APIProfileBlock, APIProfileMusic } from "@mutualzz/types";
+import type {
+  APIMobileProfileBlock,
+  APIProfileBlock,
+  APIProfileMusic,
+} from "@mutualzz/types";
 import { generateHash } from "./Common";
 import { bucketName, s3Client } from "./S3";
 
@@ -35,6 +39,7 @@ type ProfileAssetSource = {
   pageFontFamily?: string | null;
   profileMusic?: APIProfileMusic | null;
   blocks?: APIProfileBlock[] | unknown[];
+  mobileBlocks?: APIMobileProfileBlock[] | unknown[];
 };
 
 export const isProfileAssetHash = (
@@ -131,6 +136,13 @@ export const collectProfileAssetRefs = (
   if (isProfileAssetHash(audioHash)) music.add(audioHash);
 
   for (const block of profile.blocks ?? []) {
+    const candidate = block as { type?: string; src?: string };
+    if (candidate.type === "image" && isProfileAssetHash(candidate.src)) {
+      images.add(candidate.src);
+    }
+  }
+
+  for (const block of profile.mobileBlocks ?? []) {
     const candidate = block as { type?: string; src?: string };
     if (candidate.type === "image" && isProfileAssetHash(candidate.src)) {
       images.add(candidate.src);

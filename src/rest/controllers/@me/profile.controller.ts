@@ -56,6 +56,7 @@ const toAPIUserProfile = (
   pageFontFamily: row.pageFontFamily,
   profileMusic: row.profileMusic,
   blocks: row.blocks,
+  mobileBlocks: row.mobileBlocks,
   updatedAt: row.updatedAt,
 });
 
@@ -69,6 +70,7 @@ const emptyProfile = (userId: string): APIUserProfile => ({
   pageFontFamily: null,
   profileMusic: null,
   blocks: [],
+  mobileBlocks: [],
   updatedAt: new Date(),
 });
 
@@ -219,6 +221,19 @@ export default class ProfileController {
         return block;
       });
 
+      const normalizedMobileBlocks = body.mobileBlocks.map((block) => {
+        if (block.type === "draw") {
+          return {
+            ...block,
+            svgData: block.svgData ?? null,
+            paths: block.paths ?? null,
+            backgroundColor: block.backgroundColor ?? null,
+          };
+        }
+
+        return block;
+      });
+
       const payload = {
         backgroundColor: body.backgroundColor ?? null,
         backgroundImage: body.backgroundImage ?? null,
@@ -227,6 +242,7 @@ export default class ProfileController {
         pageFontFamily: body.pageFontFamily ?? null,
         profileMusic,
         blocks: normalizedBlocks,
+        mobileBlocks: normalizedMobileBlocks,
         configured: isConfigured({
           blocks: normalizedBlocks,
           backgroundColor: body.backgroundColor ?? null,

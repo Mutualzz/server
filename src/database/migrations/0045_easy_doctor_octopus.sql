@@ -1,0 +1,1 @@
+ALTER TABLE "user_profiles" ADD COLUMN "mobileBlocks" jsonb DEFAULT '[]'::jsonb NOT NULL;
