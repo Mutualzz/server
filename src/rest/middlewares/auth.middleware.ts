@@ -1,4 +1,5 @@
 import { verifySessionToken } from "@mutualzz/rest/util";
+import { BitField, userFlags } from "@mutualzz/bitfield";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { getUser } from "@mutualzz/util";
 import type { NextFunction, Request, Response } from "express";
@@ -35,6 +36,12 @@ const authMiddleware = async (
             throw new HttpException(
                 HttpStatusCode.Unauthorized,
                 "Unauthorized",
+            );
+
+        if (BitField.fromString(userFlags, user.flags.toString()).has("Disabled"))
+            throw new HttpException(
+                HttpStatusCode.Unauthorized,
+                "This account has been disabled",
             );
 
         req.user = user;

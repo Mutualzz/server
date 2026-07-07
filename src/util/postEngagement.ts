@@ -117,7 +117,10 @@ export const attachExpressionsToPosts = async (
   return Promise.all(
     posts.map(async (post) => ({
       ...post,
-      expressions: await resolveExpressions(post.content ?? null),
+      expressions: await resolveExpressions(
+        post.content ?? null,
+        post.expressionIds,
+      ),
     })),
   );
 };

@@ -487,18 +487,11 @@ export class PresenceService {
 
   private static async broadcast(userId: string, presence: PresencePayload) {
     const seenBy = PresenceBucket.socketsSeeingUser(userId);
-    // socketsSeeingUser only returns *other* sockets watching this user
-    // (member list windows / presenceSubs) — it never includes the
-    // actor's own connections, so without this a client's other active
-    // sessions (e.g. mobile + desktop signed into the same account)
-    // never learn about a status change made elsewhere.
     const own = PresenceBucket.socketsByUserId(userId);
     const targets = new Set([...seenBy, ...own]);
     const payload = { userId, presence };
 
     await Promise.allSettled([
-      // Direct send to sockets tracking this user via member lists /
-      // presenceSubs, plus the user's own other sessions.
       ...[...targets].map((socket) =>
         Send(socket, {
           op: "Dispatch",

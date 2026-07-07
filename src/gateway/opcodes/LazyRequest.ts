@@ -7,7 +7,6 @@ import {
     computeListIdFromOverwrites,
     computeVisibleUserIds,
     getEveryonePermissions,
-    getMemberCount,
     getMembers,
     getParentOverwrites,
     subscribeToMemberEvents,
@@ -22,8 +21,6 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
 
     const ranges = channels[channelId] as MemberListRange[];
     if (!Array.isArray(ranges)) throw new Error("Not a valid Array");
-
-    const memberCount = await getMemberCount(spaceId);
 
     const { allow: everyoneAllow, deny: everyoneDeny } =
         await getEveryonePermissions(spaceId);
@@ -68,6 +65,14 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
     const groupsMap = new Map<string, any>();
     for (const g of ops.flatMap((x) => x.groups)) groupsMap.set(g.id, g);
     const groups = [...groupsMap.values()];
+
+    // Use the visible member count from the ops result rather than the total
+    // space member count — overwrites can filter members out entirely, and
+    // the client uses memberCount to determine hasMore.
+    const memberCount = ops.reduce(
+        (acc, x) => acc + (x.members?.length ?? 0),
+        0,
+    );
 
     const visibleUserIds = computeVisibleUserIds(ops);
     this.presences = this.presences ?? new Map();

@@ -10,12 +10,14 @@ import {
   HttpException,
   HttpStatusCode,
   type APIAttachment,
+  type APIMessageEmbed,
   type APIPost,
 } from "@mutualzz/types";
 import {
   attachEngagementToPosts,
   attachExpressionsToPosts,
   attachHashtagsToPosts,
+  buildEmbeds,
   bucketName,
   emitEvent,
   execNormalized,
@@ -77,16 +79,20 @@ export default class PostsController {
     try {
       const { user } = req;
 
-      const { content, scheduledFor } = validatePostBodyPut.parse(req.body);
+      const {
+        content,
+        scheduledFor,
+        expressionIds = [],
+      } = validatePostBodyPut.parse(req.body);
 
       const uploadedFiles: Express.Multer.File[] = Array.isArray(req.files)
         ? req.files
         : [];
 
-      if (!content && uploadedFiles.length === 0)
+      if (!content && uploadedFiles.length === 0 && expressionIds.length === 0)
         throw new HttpException(
           HttpStatusCode.BadRequest,
-          "Post must have content or attachments",
+          "Post must have content, stickers, or attachments",
         );
 
       const scheduledForDate = scheduledFor
@@ -95,7 +101,7 @@ export default class PostsController {
 
       const postId = BigInt(Snowflake.generate());
 
-      const attachments: APIAttachment[] = await Promise.all(
+      const allUploaded: APIAttachment[] = await Promise.all(
         uploadedFiles.map(async (file) => {
           const attachmentId = Snowflake.generate();
           const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -135,9 +141,30 @@ export default class PostsController {
         }),
       );
 
+      // GIF uploads become gifv embeds so they work with the gif picker
+      const attachments = allUploaded.filter(
+        (a) => a.contentType !== "image/gif",
+      );
+      const gifEmbeds: APIMessageEmbed[] = allUploaded
+        .filter((a) => a.contentType === "image/gif")
+        .map((gif) => ({
+          type: "gifv",
+          url: gif.url,
+          media: gif.url,
+          image: gif.url,
+          title: gif.filename,
+        }));
+
       const sanitizedContent = content
         ? await sanitizeContent(content, null, user.id, false)
         : null;
+
+      const contentEmbeds = await buildEmbeds(sanitizedContent || "");
+      const embeds = [...contentEmbeds, ...gifEmbeds];
+
+      const validatedExpressionIds = [...new Set(expressionIds)].map((id) =>
+        BigInt(id),
+      );
 
       const newPost = await execNormalized<APIPost>(
         db
@@ -147,6 +174,8 @@ export default class PostsController {
             authorId: BigInt(user.id),
             content: sanitizedContent,
             attachments,
+            embeds,
+            expressionIds: validatedExpressionIds,
             scheduledFor: scheduledForDate,
           })
           .returning()
@@ -161,7 +190,7 @@ export default class PostsController {
 
       const [hashtags, expressions] = await Promise.all([
         syncPostHashtags(postId, sanitizedContent),
-        resolveExpressions(sanitizedContent),
+        resolveExpressions(sanitizedContent, newPost.expressionIds),
       ]);
 
       const post: APIPost = {
@@ -400,7 +429,7 @@ export default class PostsController {
 
       const [hashtags, expressions] = await Promise.all([
         syncPostHashtags(BigInt(postId), result.content),
-        resolveExpressions(result.content ?? null),
+        resolveExpressions(result.content ?? null, result.expressionIds),
       ]);
 
       const updatedPost: APIPost = {

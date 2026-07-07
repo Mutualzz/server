@@ -7,7 +7,7 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "../users/User";
-import type { APIAttachment } from "@mutualzz/types";
+import type { APIAttachment, APIMessageEmbed } from "@mutualzz/types";
 import { relations } from "drizzle-orm";
 
 export const postsTable = pgTable(
@@ -20,6 +20,8 @@ export const postsTable = pgTable(
 
     content: text(),
     attachments: jsonb().$type<APIAttachment[]>().notNull().default([]),
+    embeds: jsonb().$type<APIMessageEmbed[]>().notNull().default([]),
+    expressionIds: bigint({ mode: "bigint" }).array().default([]).notNull(),
 
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .defaultNow()

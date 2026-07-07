@@ -10,3 +10,5 @@ export * from "./Message";
 export * from "./MessageReaction";
 export * from "./Expression";
 export * from "./ReadState";
+export * from "./Report";
+export * from "./ReportRelations";

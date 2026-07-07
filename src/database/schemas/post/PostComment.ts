@@ -3,12 +3,15 @@ import {
   bigint,
   boolean,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "../users/User";
 import { postsTable } from "./Post";
+import type { APIMessageEmbed } from "@mutualzz/types";
 
 export const postCommentsTable = pgTable(
   "post_comments",
@@ -24,7 +27,13 @@ export const postCommentsTable = pgTable(
       .references(() => usersTable.id, { onDelete: "cascade" }),
 
     content: text().notNull(),
+    embeds: jsonb().$type<APIMessageEmbed[]>().notNull().default([]),
     expressionIds: bigint({ mode: "bigint" }).array().default([]).notNull(),
+
+    repliedToId: bigint({ mode: "bigint" }).references(
+      (): AnyPgColumn => postCommentsTable.id,
+      { onDelete: "set null" },
+    ),
 
     edited: boolean().default(false).notNull(),
 
@@ -43,6 +52,7 @@ export const postCommentsTable = pgTable(
       table.postId,
       table.createdAt,
     ),
+    index("post_comment_replied_to_id_idx").on(table.repliedToId),
   ],
 );
 
@@ -54,5 +64,9 @@ export const postCommentRelations = relations(postCommentsTable, ({ one }) => ({
   author: one(usersTable, {
     fields: [postCommentsTable.authorId],
     references: [usersTable.id],
+  }),
+  repliedTo: one(postCommentsTable, {
+    fields: [postCommentsTable.repliedToId],
+    references: [postCommentsTable.id],
   }),
 }));

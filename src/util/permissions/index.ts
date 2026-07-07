@@ -1,4 +1,5 @@
 export * from "./channel";
 export * from "./space";
+export * from "./staff";
 export * from "./util";
 export * from "./hierarchy";

@@ -5,7 +5,7 @@ import {
   spaceMembersTable,
   spacesTable,
 } from "@mutualzz/database";
-import { ChannelType } from "@mutualzz/types";
+import { ChannelType, GatewayCloseCodes } from "@mutualzz/types";
 import {
   type EventOpts,
   listenEvent,
@@ -174,6 +174,11 @@ export async function consume(this: WebSocket, opts: EventOpts) {
   const listenOpts = opts as ListenEventOpts;
 
   switch (event) {
+    case "UserForceLogout": {
+      this.close(GatewayCloseCodes.ForceLogout, "Forced logout by staff");
+      opts?.acknowledge?.();
+      return;
+    }
     case "SpaceMemberRemove": {
       const mid = String(data?.user?.id);
       this.memberEvents?.[mid]?.();

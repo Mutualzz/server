@@ -125,9 +125,6 @@ export default class RolesController {
         needed: ["ManageRoles"],
       });
 
-      // New roles are inserted directly above @everyone (position 0), not
-      // above the space's highest role — matching Discord's hierarchy
-      // convention. Existing non-@everyone roles shift up to make room.
       const { newRole, shiftedRoles } = await db.transaction(async (tx) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${spaceId}, 1))`,

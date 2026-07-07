@@ -9,9 +9,24 @@ import {
   spaceMembersTable,
 } from "@mutualzz/database";
 import { and, eq } from "drizzle-orm";
-import { hasAny, permissionFlags, resolveEffectiveChannelBits, } from "@mutualzz/bitfield";
-import { arrayPartition, execNormalizedMany, listenEvent, murmur, } from "@mutualzz/util";
-import type { APIMemberRole, APISpaceMember, APIUser, PresencePayload, Snowflake, } from "@mutualzz/types";
+import {
+  hasAny,
+  permissionFlags,
+  resolveEffectiveChannelBits,
+} from "@mutualzz/bitfield";
+import {
+  arrayPartition,
+  execNormalizedMany,
+  listenEvent,
+  murmur,
+} from "@mutualzz/util";
+import type {
+  APIMemberRole,
+  APISpaceMember,
+  APIUser,
+  PresencePayload,
+  Snowflake,
+} from "@mutualzz/types";
 import { PresenceService } from "../presence/Presence.service.ts";
 
 interface OverwriteLike {
@@ -483,16 +498,6 @@ export async function subscribeToMemberEvents(
   return true;
 }
 
-export async function getMemberCount(spaceId: Snowflake): Promise<number> {
-  return db.query.spaceMembersTable
-    .findMany({
-      where: eq(spaceMembersTable.spaceId, BigInt(spaceId)),
-      columns: { userId: true },
-    })
-    .then((rows) => rows.length)
-    .catch(() => 0);
-}
-
 export function computeVisibleUserIds(ops: { members: any[] }[]): Set<string> {
   const out = new Set<string>();
   for (const op of ops) {
@@ -535,10 +540,6 @@ export async function resyncMemberListWindows(
     );
     const parentOverwrites = await getParentOverwrites(spaceId, sub.channelId);
 
-    // Recompute the listId from current overwrites — it may have changed since
-    // the subscription was created (e.g. after an overwrite upsert/delete).
-    // The client keys its memberLists store by channel.listId, so sending the
-    // fresh listId ensures updateMemberList sets the store under the right key.
     const currentListId = computeListIdFromOverwrites({
       parentOverwrites,
       channelOverwrites,

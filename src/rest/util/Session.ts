@@ -1,5 +1,5 @@
 import type { RESTSession } from "@mutualzz/types";
-import { base64UrlEncode, redis, Snowflake } from "@mutualzz/util";
+import { base64UrlDecode, base64UrlEncode, redis, Snowflake } from "@mutualzz/util";
 import crypto from "crypto";
 import { LRUCache } from "lru-cache";
 
@@ -7,6 +7,10 @@ export const sessionLRU = new LRUCache<string, RESTSession>({
     max: 1000,
     ttl: 5 * 60 * 1000, // 5 minutes
 });
+
+// Sliding session lifetime: refreshed on every touch (see verifySessionToken),
+// so a session only expires after this long of inactivity.
+export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 export const generateSessionToken = (userId: string) => {
     userId = userId.toString();
@@ -40,7 +44,12 @@ export const createSession = async (
         lastUsedAt: Date.now(),
     };
 
-    await redis.set(`rest:sessions:${token}`, JSON.stringify(sessionData));
+    await redis.set(
+        `rest:sessions:${token}`,
+        JSON.stringify(sessionData),
+        "EX",
+        SESSION_TTL_SECONDS,
+    );
     await redis.sadd(`users:${userId}:sessions`, token);
 
     sessionLRU.set(token, sessionData);
@@ -66,7 +75,13 @@ export const verifySessionToken = async (token: string) => {
 
     if (!session) {
         const raw = await redis.get(`rest:sessions:${token}`);
-        if (!raw) return null;
+        if (!raw) {
+            // Session expired (or was never created) — drop the dangling
+            // reference from the user's session set, if any.
+            const userId = base64UrlDecode(base64UserId);
+            await redis.srem(`users:${userId}:sessions`, token);
+            return null;
+        }
 
         session = JSON.parse(raw);
         if (!session) return null;
@@ -79,10 +94,13 @@ export const verifySessionToken = async (token: string) => {
     const now = Date.now();
     if (!session.lastUsedAt || now - session.lastUsedAt > 300000) {
         session.lastUsedAt = now;
+        // Reset the TTL on each touch so active sessions stay alive
+        // indefinitely, while abandoned ones age out after SESSION_TTL_SECONDS.
         await redis.set(
             `rest:sessions:${token}`,
             JSON.stringify(session),
-            "KEEPTTL",
+            "EX",
+            SESSION_TTL_SECONDS,
         );
     }
 

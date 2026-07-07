@@ -7,6 +7,7 @@ import {
   HttpStatusCode,
 } from "@mutualzz/types";
 import {
+  buildEmbeds,
   emitEvent,
   execNormalized,
   execNormalizedMany,
@@ -41,16 +42,47 @@ export default class PostCommentsController {
       if (!post)
         throw new HttpException(HttpStatusCode.NotFound, "Post not found");
 
-      const { content, expressionIds = [] } = validatePostCommentBodyPut.parse(
-        req.body,
-      );
-
-      const sanitizedContent = await sanitizeContent(
+      const {
         content,
-        null,
-        user.id,
-        false,
-      );
+        expressionIds = [],
+        repliedToId,
+      } = validatePostCommentBodyPut.parse(req.body);
+
+      if (!content && expressionIds.length === 0)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Comment must have content or stickers",
+        );
+
+      let resolvedRepliedToId: bigint | undefined;
+      if (repliedToId) {
+        const repliedToComment = await execNormalized<APIPostComment>(
+          db.query.postCommentsTable.findFirst({
+            where: eq(postCommentsTable.id, BigInt(repliedToId)),
+          }),
+        );
+
+        if (
+          !repliedToComment ||
+          repliedToComment.postId.toString() !== postId
+        )
+          throw new HttpException(
+            HttpStatusCode.BadRequest,
+            "Comment being replied to could not be found",
+          );
+
+        // Keep replies a single level deep: replying to a reply
+        // redirects to the root comment of that thread.
+        resolvedRepliedToId = repliedToComment.repliedToId
+          ? BigInt(repliedToComment.repliedToId)
+          : BigInt(repliedToComment.id);
+      }
+
+      const sanitizedContent = content
+        ? await sanitizeContent(content, null, user.id, false)
+        : "";
+
+      const embeds = await buildEmbeds(sanitizedContent);
 
       const commentId = BigInt(Snowflake.generate());
 
@@ -62,7 +94,11 @@ export default class PostCommentsController {
             postId: BigInt(postId),
             authorId: BigInt(user.id),
             content: sanitizedContent,
-            expressionIds: expressionIds.map((id) => BigInt(id)),
+            embeds,
+            expressionIds: [...new Set(expressionIds)].map((id) =>
+              BigInt(id),
+            ),
+            repliedToId: resolvedRepliedToId,
           })
           .returning()
           .then((r) => (r.length > 0 ? r[0] : null)),
@@ -222,7 +258,11 @@ export default class PostCommentsController {
       const result = await execNormalized<APIPostComment>(
         db
           .update(postCommentsTable)
-          .set({ content: sanitizedContent, edited: true })
+          .set({
+            content: sanitizedContent,
+            embeds: await buildEmbeds(sanitizedContent || ""),
+            edited: true,
+          })
           .where(eq(postCommentsTable.id, BigInt(commentId)))
           .returning()
           .then((r) => (r.length > 0 ? r[0] : null)),

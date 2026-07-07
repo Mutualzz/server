@@ -73,6 +73,9 @@ export const base64UrlEncode = (input: Buffer | string) =>
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
 
+export const base64UrlDecode = (input: string) =>
+  Buffer.from(input.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString();
+
 export const asAcronym = (str: string) =>
   str
     .split(" ")
@@ -315,10 +318,6 @@ export const fetchTenorMetadata = async (
   }
 };
 
-/**
- * Giphy share links (giphy.com/gifs/...) and CDN URLs (media.giphy.com, i.giphy.com).
- * Same pattern as Tenor — og:video is MP4, which is what we want.
- */
 export const fetchGiphyMetadata = async (
   url: string,
   spoiler = false,
@@ -360,11 +359,6 @@ export const fetchGiphyMetadata = async (
   }
 };
 
-/**
- * Imgur — two distinct cases:
- *   - i.imgur.com/abc.gif  → direct file, HEAD check
- *   - imgur.com/abc        → HTML page, parse OG tags
- */
 export const fetchImgurMetadata = async (
   url: string,
   spoiler = false,
@@ -411,9 +405,6 @@ export const fetchImgurMetadata = async (
   }
 };
 
-/**
- * Redgifs — serves og:video as MP4.
- */
 export const fetchRedgifsMetadata = async (
   url: string,
   spoiler = false,
@@ -444,10 +435,6 @@ export const fetchRedgifsMetadata = async (
   }
 };
 
-/**
- * Arbitrary direct .gif URLs on any host.
- * Does a HEAD request to confirm Content-Type before embedding.
- */
 export const fetchDirectGifMetadata = async (
   url: string,
   spoiler = false,

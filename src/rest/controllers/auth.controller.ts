@@ -1,3 +1,4 @@
+import { BitField, userFlags } from "@mutualzz/bitfield";
 import { db, userSettingsTable, usersTable } from "@mutualzz/database";
 import type { APIPrivateUser } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
@@ -7,7 +8,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { eq, or } from "drizzle-orm";
 import { type NextFunction, type Request, type Response } from "express";
-import { BCRYPT_SALT_ROUNDS, createSession, generateSessionToken, } from "../util";
+import { BCRYPT_SALT_ROUNDS, createSession, generateSessionToken, revokeSession, } from "../util";
 
 export default class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
@@ -128,6 +129,7 @@ export default class AuthController {
         columns: {
           id: true,
           hash: true,
+          flags: true,
         },
         where: or(...whereConditions),
       });
@@ -161,6 +163,12 @@ export default class AuthController {
           ],
         );
 
+      if (BitField.fromString(userFlags, user.flags.toString()).has("Disabled"))
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "This account has been disabled",
+        );
+
       await db.transaction(async (tx) => {
         const existingSettings = await tx.query.userSettingsTable.findFirst({
           columns: {
@@ -185,6 +193,17 @@ export default class AuthController {
         token,
         userId: user.id,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async logout(req: Request, res: Response, next: NextFunction) {
+    try {
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token) await revokeSession(token);
+
+      res.status(HttpStatusCode.Success).json({ success: true });
     } catch (error) {
       next(error);
     }
