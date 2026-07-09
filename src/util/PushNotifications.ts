@@ -23,6 +23,9 @@ import {
 } from "./pushNotificationAvatar.js";
 import { formatPushNotificationBody } from "./pushNotificationContent.js";
 
+const ANDROID_MESSAGE_CHANNEL_ID = "messages";
+const MESSAGE_PUSH_DISPLAY_MODE = "notifee";
+
 const logger = new Logger({ tag: "PushNotifications" });
 
 const expoAccessToken = process.env.EXPO_ACCESS_TOKEN?.trim();
@@ -193,24 +196,30 @@ function shouldSendPushForSettings(
 }
 
 async function getTokensForUsers(userIds: string[]) {
-  if (userIds.length === 0) return new Map<string, string[]>();
+  if (userIds.length === 0) {
+    return new Map<string, { token: string; platform: string }[]>();
+  }
 
   const rows = await db
     .select({
       userId: pushTokensTable.userId,
       token: pushTokensTable.token,
+      platform: pushTokensTable.platform,
     })
     .from(pushTokensTable)
     .where(
       sql`${pushTokensTable.userId} = ANY(ARRAY[${sql.raw(userIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
     );
 
-  const tokensByUser = new Map<string, string[]>();
+  const tokensByUser = new Map<string, { token: string; platform: string }[]>();
 
   for (const row of rows) {
     const userId = row.userId.toString();
     const existing = tokensByUser.get(userId) ?? [];
-    existing.push(row.token);
+    existing.push({
+      token: row.token,
+      platform: row.platform,
+    });
     tokensByUser.set(userId, existing);
   }
 
@@ -291,7 +300,8 @@ export async function sendMessagePushNotifications(
     ctx.channel.type === ChannelType.DM ||
     ctx.channel.type === ChannelType.GroupDM;
 
-  const title = isDm ? ctx.authorName : "New mention";
+  const title = ctx.authorName;
+  const subtitle = isDm ? undefined : "Mentioned you";
   const body = formatPushNotificationBody(
     ctx.message.content,
     ctx.authorName,
@@ -315,23 +325,42 @@ export async function sendMessagePushNotifications(
 
       if (!shouldPushForPresence(status)) return;
 
-      for (const token of tokens) {
-        messages.push({
-          to: token,
-          sound: "default",
+      for (const { token, platform } of tokens) {
+        const isIos = platform === "ios";
+        const sharedData = {
+          displayMode: MESSAGE_PUSH_DISPLAY_MODE,
+          url,
+          channelId: ctx.channel.id,
+          conversationId: ctx.channel.id,
+          senderId: ctx.authorId,
+          senderName: ctx.authorName,
+          authorAvatarUrl: authorAvatarUrl ?? "",
           title,
           body,
-          ...(authorAvatarUrl
-            ? {
-                richContent: { image: authorAvatarUrl },
-                mutableContent: true,
-              }
-            : {}),
-          ...(isDm ? { categoryId: DM_REPLY_CATEGORY_ID } : {}),
-          data: {
-            url,
-            ...(isDm ? { channelId: ctx.channel.id } : {}),
-          },
+          subtitle: subtitle ?? "",
+          pushType: isDm ? "dm" : "mention",
+        };
+
+        if (isIos) {
+          messages.push({
+            to: token,
+            sound: "default",
+            title,
+            ...(subtitle ? { subtitle } : {}),
+            body,
+            mutableContent: true,
+            ...(isDm ? { categoryId: DM_REPLY_CATEGORY_ID } : {}),
+            data: sharedData,
+          });
+          continue;
+        }
+
+        messages.push({
+          to: token,
+          priority: "high",
+          channelId: ANDROID_MESSAGE_CHANNEL_ID,
+          _contentAvailable: true,
+          data: sharedData,
         });
       }
     }),

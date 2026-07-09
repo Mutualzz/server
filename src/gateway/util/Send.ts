@@ -4,6 +4,7 @@ import {
     type GatewayPayload,
 } from "@mutualzz/types";
 import { JSONReplacer } from "@mutualzz/util";
+import { bufferDispatchFromPayload } from "./SessionEventBuffer";
 import type { WebSocket } from "./WebSocket";
 
 export function Send(socket: WebSocket, data: GatewayPayload) {
@@ -13,6 +14,20 @@ export function Send(socket: WebSocket, data: GatewayPayload) {
         s: data.s,
         t: data.t ? GatewayDispatchEvents[data.t] : undefined,
     };
+
+    if (
+        socket.sessionId &&
+        payload.op === GatewayOpcodes.Dispatch &&
+        payload.s != null &&
+        payload.t
+    ) {
+        bufferDispatchFromPayload(socket.sessionId, {
+            op: "Dispatch",
+            t: data.t,
+            d: data.d,
+            s: data.s,
+        });
+    }
 
     return new Promise((resolve, reject) => {
         if (socket.readyState !== socket.OPEN)
