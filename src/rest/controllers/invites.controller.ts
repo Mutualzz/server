@@ -502,6 +502,8 @@ export default class InvitesController {
 
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
+      const { user } = req;
+
       const { spaceId, code } = validateInviteParamsCode.parse(req.params);
 
       const space = await getSpace(spaceId);
@@ -521,6 +523,43 @@ export default class InvitesController {
 
       if (!invite)
         throw new HttpException(HttpStatusCode.NotFound, "Invite not found");
+
+      let canModerate = false;
+      if (invite.channelId) {
+        try {
+          await requireChannelPermissions({
+            channelId: invite.channelId,
+            userId: user.id,
+            needed: ["CreateInvites"],
+          });
+
+          canModerate = true;
+        } catch {
+          canModerate = false;
+        }
+      }
+
+      if (!canModerate) {
+        try {
+          await requireSpacePermissions({
+            spaceId,
+            userId: user.id,
+            needed: ["ManageChannels"],
+          });
+
+          canModerate = true;
+        } catch {
+          canModerate = false;
+        }
+      }
+
+      const isInviter = BigInt(invite.inviterId) === BigInt(user.id);
+
+      if (!canModerate && !isInviter)
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "Missing permission",
+        );
 
       await db
         .delete(invitesTable)

@@ -23,6 +23,8 @@ import {
   postmark,
   redis,
   s3Client,
+  deletePushTokensForUser,
+  upsertPushToken,
 } from "@mutualzz/util";
 import type { APIPrivateUser, APIUserSettings } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
@@ -31,6 +33,8 @@ import {
   validateChangePassword,
   validateMeSettingsUpdate,
   validateMeUpdate,
+  validatePushTokenDelete,
+  validatePushTokenRegister,
   validateUsernameChange,
   validateVerifyEmail,
 } from "@mutualzz/validators";
@@ -192,6 +196,10 @@ export default class MeController {
             );
           }
 
+          user.previousAvatars = user.previousAvatars.filter(
+            (prevAvatar) => prevAvatar !== avatar,
+          );
+
           if (user.avatar && !user.previousAvatars.includes(user.avatar)) {
             user.previousAvatars.unshift(user.avatar);
             if (user.previousAvatars.length >= 9) {
@@ -210,10 +218,6 @@ export default class MeController {
               }
             }
           }
-
-          user.previousAvatars = user.previousAvatars.filter(
-            (prevAvatar) => prevAvatar !== avatar,
-          );
 
           const storedExt = isGif ? "gif" : "png";
 
@@ -945,6 +949,47 @@ export default class MeController {
       res.status(HttpStatusCode.Success).json({
         success: true,
       });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async registerPushToken(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const { user } = req;
+      const { token, platform } = validatePushTokenRegister.parse(req.body);
+
+      await upsertPushToken(user.id, token, platform);
+
+      res.status(HttpStatusCode.NoContent).send();
+    } catch (err) {
+      if (err instanceof Error && err.message === "Invalid Expo push token") {
+        next(
+          new HttpException(HttpStatusCode.BadRequest, "Invalid push token"),
+        );
+        return;
+      }
+
+      next(err);
+    }
+  }
+
+  static async deletePushToken(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const { user } = req;
+      const { token } = validatePushTokenDelete.parse(req.body ?? {});
+
+      await deletePushTokensForUser(user.id, token);
+
+      res.status(HttpStatusCode.NoContent).send();
     } catch (err) {
       next(err);
     }

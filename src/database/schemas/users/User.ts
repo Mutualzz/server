@@ -36,6 +36,9 @@ export const usersTable = pgTable(
             .notNull()
             .default(sql`0`),
 
+        restrictedUntil: timestamp(),
+        restrictionReason: text(),
+
         createdAt: timestamp().notNull().defaultNow(),
         updatedAt: timestamp()
             .notNull()
@@ -47,6 +50,13 @@ export const usersTable = pgTable(
 
 export const toPublicUser = (user: APIPrivateUser) => {
     if ("hash" in user) delete user.hash;
-    const { dateOfBirth, previousAvatars, email, ...publicUser } = user;
+    const {
+        dateOfBirth,
+        previousAvatars,
+        email,
+        restrictedUntil,
+        restrictionReason,
+        ...publicUser
+    } = user;
     return publicUser;
 };

@@ -43,11 +43,13 @@ import {
   isChannelRecipient,
   publicUserColumns,
   requireChannelPermissions,
+  requireNotRestricted,
   resolveExpressions,
   attachReactionsToMessages,
   hydrateMessagesForResponse,
   s3Client,
   sanitizeContent,
+  sendMessagePushNotifications,
   Snowflake,
   validateMessageStickers,
 } from "@mutualzz/util";
@@ -78,6 +80,8 @@ export default class MessagesController {
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
+
+      requireNotRestricted(user);
 
       const { channelId } = validateMessageParamsPut.parse(req.params);
 
@@ -150,6 +154,13 @@ export default class MessagesController {
           needed: ["ViewChannel", "SendMessages"],
         });
 
+      if (channel.spaceId && uploadedFiles.length > 0)
+        await requireChannelPermissions({
+          channelId: channel.id,
+          userId: user.id,
+          needed: ["AttachFiles"],
+        });
+
       if (nonce) {
         let existingMessage = await getCache("message", nonce);
         if (existingMessage)
@@ -194,6 +205,7 @@ export default class MessagesController {
       let canUseExternalEmojis = false;
       let canEmbed = false;
       let canUseExternalStickers = false;
+      let canMentionEveryone = false;
 
       if (channel.spaceId) {
         try {
@@ -221,15 +233,17 @@ export default class MessagesController {
           const { permissions } = await requireChannelPermissions({
             channelId: channel.id,
             userId: user.id,
-            needed: ["UseExternalEmojis", "EmbedLinks"],
+            needed: ["UseExternalEmojis", "EmbedLinks", "MentionEveryone"],
             mode: "Any",
           });
 
           canUseExternalEmojis = permissions.has("UseExternalEmojis");
           canEmbed = permissions.has("EmbedLinks");
+          canMentionEveryone = permissions.has("MentionEveryone");
         } catch {
           canUseExternalEmojis = false;
           canEmbed = false;
+          canMentionEveryone = false;
         }
       }
 
@@ -254,25 +268,27 @@ export default class MessagesController {
 
         if (enforceBlockCheck) {
           for (const otherId of otherRecipients) {
-            const canonicalUserId =
-              BigInt(user.id) < BigInt(otherId) ? user.id : otherId;
-            const canonicalOtherId =
-              BigInt(user.id) < BigInt(otherId) ? otherId : user.id;
-
-            const existingRel = await execNormalized<APIRelationship>(
+            const theirBlockOfMe = await execNormalized<APIRelationship>(
               db.query.relationshipsTable.findFirst({
                 where: and(
-                  eq(relationshipsTable.userId, BigInt(canonicalUserId)),
-                  eq(relationshipsTable.otherUserId, BigInt(canonicalOtherId)),
+                  eq(relationshipsTable.userId, BigInt(otherId)),
+                  eq(relationshipsTable.otherUserId, BigInt(user.id)),
+                  eq(relationshipsTable.type, RelationshipType.Blocked),
                 ),
               }),
             );
 
-            if (
-              existingRel &&
-              existingRel.type === RelationshipType.Blocked &&
-              existingRel.userId.toString() === otherId.toString()
-            ) {
+            const myBlockOfThem = await execNormalized<APIRelationship>(
+              db.query.relationshipsTable.findFirst({
+                where: and(
+                  eq(relationshipsTable.userId, BigInt(user.id)),
+                  eq(relationshipsTable.otherUserId, BigInt(otherId)),
+                  eq(relationshipsTable.type, RelationshipType.Blocked),
+                ),
+              }),
+            );
+
+            if (theirBlockOfMe || myBlockOfThem) {
               const sysMsg = await createSystemMessage(
                 channelId,
                 "You cannot message this person",
@@ -438,11 +454,13 @@ export default class MessagesController {
         }));
 
       const everyoneMentions: { type: MentionType; id: string }[] =
-        sanitizedContent?.includes("@everyone")
+        canMentionEveryone && sanitizedContent?.includes("@everyone")
           ? [{ type: "everyone", id: "0" }]
           : [];
       const hereMentions: { type: MentionType; id: string }[] =
-        sanitizedContent?.includes("@here") ? [{ type: "here", id: "0" }] : [];
+        canMentionEveryone && sanitizedContent?.includes("@here")
+          ? [{ type: "here", id: "0" }]
+          : [];
 
       const uniqueMentions = [
         ...new Map(
@@ -602,6 +620,28 @@ export default class MessagesController {
         {
           label: "cache:invalidate:messages",
           run: () => invalidateCache("messages", channel.id),
+        },
+        {
+          label: "push:message",
+          run: () =>
+            sendMessagePushNotifications({
+              message,
+              channel: {
+                id: channel.id,
+                type: channel.type,
+                spaceId: channel.spaceId,
+              },
+              authorId: user.id,
+              authorName: user.globalName ?? user.username,
+              userMentionIds: userMentionMatches.map((mention) =>
+                mention.id.toString(),
+              ),
+              roleMentionIds: roleMentionMatches.map((mention) =>
+                mention.id.toString(),
+              ),
+              everyoneMentioned: everyoneMentions.length > 0,
+              hereMentioned: hereMentions.length > 0,
+            }),
         },
       ]);
 

@@ -12,3 +12,5 @@ export * from "./Expression";
 export * from "./ReadState";
 export * from "./Report";
 export * from "./ReportRelations";
+export * from "./Appeal";
+export * from "./AppealRelations";

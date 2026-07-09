@@ -486,8 +486,8 @@ export async function subscribeToMemberEvents(
   this: WebSocket,
   userId: Snowflake,
 ) {
-  if (this.events[userId]) return false;
-  if (this.memberEvents[userId]) return false;
+  if (this.events?.[userId]) return false;
+  if (this.memberEvents?.[userId]) return false;
 
   this.memberEvents[userId] = await listenEvent(
     userId,

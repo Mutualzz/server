@@ -141,15 +141,18 @@ export default class SpacesController {
               spaceId: BigInt(newSpace.id),
               flags: roleFlags.Everyone,
               allow:
-                permissionFlags.ViewChannel |
-                permissionFlags.SendMessages |
-                permissionFlags.CreateInvites |
-                permissionFlags.Connect |
-                permissionFlags.Speak |
-                permissionFlags.AttachFiles |
-                permissionFlags.ReadMessageHistory |
-                permissionFlags.UseExternalEmojis |
-                permissionFlags.EmbedLinks,
+              permissionFlags.ViewChannel |
+              permissionFlags.SendMessages |
+              permissionFlags.CreateInvites |
+              permissionFlags.Connect |
+              permissionFlags.Speak |
+              permissionFlags.AttachFiles |
+              permissionFlags.ReadMessageHistory |
+              permissionFlags.UseExternalEmojis |
+              permissionFlags.UseExternalStickers |
+              permissionFlags.EmbedLinks |
+              permissionFlags.AddReactions |
+              permissionFlags.ChangeNickname,
             })
             .returning()
             .then((res) => (res.length ? res[0] : null)),

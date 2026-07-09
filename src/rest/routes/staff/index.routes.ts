@@ -24,10 +24,35 @@ router.post(
     createLimiter(60_000, 10),
     StaffController.sendVerifyReminder,
 );
+router.post(
+    "/users/:userId/warn",
+    createLimiter(60_000, 10),
+    StaffController.warnUser,
+);
+router.get(
+    "/users/:userId/notes",
+    createLimiter(60_000, 30),
+    StaffController.getNotes,
+);
+router.post(
+    "/users/:userId/notes",
+    createLimiter(60_000, 20),
+    StaffController.createNote,
+);
 router.patch(
     "/users/:userId/disabled",
     createLimiter(60_000, 20),
     StaffController.setDisabled,
+);
+router.patch(
+    "/users/:userId/restrict",
+    createLimiter(60_000, 10),
+    StaffController.restrictUser,
+);
+router.delete(
+    "/users/:userId/restrict",
+    createLimiter(60_000, 10),
+    StaffController.liftRestriction,
 );
 router.patch(
     "/users/:userId/flags/:flag",

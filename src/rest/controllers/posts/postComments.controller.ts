@@ -13,6 +13,7 @@ import {
   execNormalizedMany,
   fireAndForgetAll,
   publicUserColumns,
+  requireNotRestricted,
   resolveExpressions,
   sanitizeContent,
   Snowflake,
@@ -30,6 +31,8 @@ export default class PostCommentsController {
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
+
+      requireNotRestricted(user);
 
       const { postId } = validatePostParams.parse(req.params);
 

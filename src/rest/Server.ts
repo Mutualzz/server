@@ -192,13 +192,16 @@ export class Server {
   private initHeadMiddlewares() {
     this.app.use(
       cors({
-        origin: [
-          "http://localhost:1420",
-          "http://localhost:5173",
-          "https://mutualzz.com",
-          "https://gateway.mutualzz.com",
-          "http://localhost",
-        ],
+        origin:
+          process.env.NODE_ENV === "development"
+            ? "*"
+            : [
+                "http://localhost:1420",
+                "http://localhost:5173",
+                "https://mutualzz.com",
+                "https://gateway.mutualzz.com",
+                "http://localhost",
+              ],
         credentials: true,
       }),
     );

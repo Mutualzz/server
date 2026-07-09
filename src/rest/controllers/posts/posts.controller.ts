@@ -25,6 +25,7 @@ import {
   fireAndForgetAll,
   getFriendIds,
   publicUserColumns,
+  requireNotRestricted,
   resolveExpressions,
   s3Client,
   sanitizeContent,
@@ -78,6 +79,8 @@ export default class PostsController {
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
+
+      requireNotRestricted(user);
 
       const {
         content,

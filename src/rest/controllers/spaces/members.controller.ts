@@ -1340,6 +1340,30 @@ export default class MembersController {
       }
 
       if (disconnect) {
+        const { permissions } = await requireSpacePermissions({
+          spaceId,
+          userId: user.id,
+          needed: ["MoveMembers"],
+        });
+
+        const isAdmin =
+          (permissions.bits & permissionFlags.Administrator) ===
+          permissionFlags.Administrator;
+
+        if (!isAdmin) {
+          const actorRoles = await getMemberRoles(space.id, user.id);
+          const targetRoles = await getMemberRoles(space.id, member.userId);
+
+          const actorTop = topPos(actorRoles);
+          const targetTop = topPos(targetRoles);
+
+          if (actorTop <= targetTop)
+            throw new HttpException(
+              HttpStatusCode.Forbidden,
+              "Role hierarchy prevents disconnecting this member",
+            );
+        }
+
         const kicked = await VoiceStateService.kickMemberFromVoice(
           space.id,
           userId,

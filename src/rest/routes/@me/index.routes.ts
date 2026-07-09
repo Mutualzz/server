@@ -51,5 +51,15 @@ router.post(
   createLimiter(3_600_000, 3),
   MeController.confirmEmail,
 );
+router.post(
+  "/push-token",
+  createLimiter(60_000, 10),
+  MeController.registerPushToken,
+);
+router.delete(
+  "/push-token",
+  createLimiter(60_000, 10),
+  MeController.deletePushToken,
+);
 
 export default router;
