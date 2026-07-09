@@ -3,9 +3,10 @@ import {
   isStaffToggleableUserFlag,
   userFlags,
 } from "@mutualzz/bitfield";
-import { deleteCache } from "@mutualzz/cache";
+import { deleteCache, invalidateCache } from "@mutualzz/cache";
 import {
   db,
+  spacesTable,
   staffActionsTable,
   staffNotesTable,
   usersTable,
@@ -25,6 +26,7 @@ import {
   revokeSession,
 } from "@mutualzz/rest/util";
 import {
+  bucketName,
   buildAppealUrl,
   emitEvent,
   execNormalizedMany,
@@ -37,11 +39,13 @@ import {
   requireFounder,
   requireStaff,
   resolveUserIdentifier,
+  s3Client,
   Snowflake,
 } from "@mutualzz/util";
 import {
   validateStaffActionsQuery,
   validateStaffCreateNoteBody,
+  validateStaffDeleteUserBody,
   validateStaffDisableUserBody,
   validateStaffForceLogoutBody,
   validateStaffNotesQuery,
@@ -56,6 +60,7 @@ import {
 } from "@mutualzz/validators";
 import { and, asc, desc, eq, gt, ilike, lt, or, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 const UNVERIFIED_FILTER = "Unverified";
 const VERIFY_REMINDER_COOLDOWN_SECONDS = 60 * 60;
@@ -647,6 +652,195 @@ export default class StaffController {
             data: updated,
           }),
         { label: "event:UserUpdate (staff.setFlag)" },
+      );
+
+      res.status(HttpStatusCode.Success).json(updated);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const actor = requireStaff(req.user);
+
+      const { userId } = validateStaffUserParams.parse(req.params);
+      const { mode, reason, confirmUsername } = validateStaffDeleteUserBody.parse(
+        req.body,
+      );
+
+      const target = (await resolveUserIdentifier(
+        userId,
+        true,
+      )) as APIPrivateUser | null;
+      if (!target)
+        throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      if (BigInt(target.id) === BigInt(actor.id))
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Cannot delete your own account",
+        );
+
+      if (confirmUsername !== target.username)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Username confirmation does not match",
+        );
+
+      const targetFlags = BitField.fromString(
+        userFlags,
+        target.flags.toString(),
+      );
+
+      if (mode === "hard") {
+        requireFounder(actor);
+
+        if (targetFlags.has("Founder"))
+          throw new HttpException(
+            HttpStatusCode.BadRequest,
+            "Cannot hard delete a founder account",
+          );
+
+        const ownedSpaces = await db.query.spacesTable.findMany({
+          columns: { id: true, icon: true },
+          where: eq(spacesTable.ownerId, BigInt(target.id)),
+        });
+
+        await revokeAllSessions(target.id);
+
+        const auditReason = `@${target.username} (${target.id}) — ${reason}`;
+
+        await db.transaction(async (tx) => {
+          if (ownedSpaces.length > 0) {
+            await tx
+              .delete(spacesTable)
+              .where(eq(spacesTable.ownerId, BigInt(target.id)))
+              .execute();
+          }
+
+          await tx.insert(staffActionsTable).values({
+            id: BigInt(Snowflake.generate()),
+            actorId: BigInt(actor.id),
+            targetId: BigInt(target.id),
+            action: "user.hard_delete" satisfies StaffActionType,
+            reason: auditReason,
+          });
+
+          await tx
+            .delete(usersTable)
+            .where(eq(usersTable.id, BigInt(target.id)))
+            .execute();
+        });
+
+        await Promise.all([
+          deleteCache("authUser", target.id),
+          deleteCache("user", target.id),
+        ]);
+
+        for (const space of ownedSpaces) {
+          const spaceId = space.id.toString();
+
+          void deleteCache("space", spaceId);
+          void deleteCache("spaceMembers", spaceId);
+          void invalidateCache("spaceHydrated", spaceId);
+
+          fireAndForget(
+            () =>
+              emitEvent({
+                event: "SpaceDelete",
+                space_id: spaceId,
+                data: { id: spaceId },
+              }),
+            { label: "event:SpaceDelete (staff.hardDeleteUser)" },
+          );
+
+          if (!space.icon) continue;
+
+          const isGif = space.icon.startsWith("a_");
+          const storedExt = isGif ? "gif" : "png";
+
+          fireAndForget(
+            async () => {
+              await s3Client.send(
+                new DeleteObjectCommand({
+                  Bucket: bucketName,
+                  Key: `icons/spaces/${spaceId}/${space.icon}.${storedExt}`,
+                }),
+              );
+            },
+            { label: "s3:delete-space-icon (staff.hardDeleteUser)" },
+          );
+        }
+
+        fireAndForget(
+          () =>
+            emitEvent({
+              event: "UserForceLogout",
+              user_id: target.id,
+              data: {},
+            }),
+          { label: "event:UserForceLogout (staff.hardDeleteUser)" },
+        );
+
+        res.status(HttpStatusCode.Success).json({ success: true, hard: true });
+        return;
+      }
+
+      if (targetFlags.has("Deleted"))
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "This account has already been soft deleted",
+        );
+
+      await revokeAllSessions(target.id);
+
+      const newFlags = targetFlags.set("Deleted", true).toBigInt();
+
+      await db
+        .update(usersTable)
+        .set({ flags: newFlags })
+        .where(eq(usersTable.id, BigInt(target.id)))
+        .execute();
+
+      await db.insert(staffActionsTable).values({
+        id: BigInt(Snowflake.generate()),
+        actorId: BigInt(actor.id),
+        targetId: BigInt(target.id),
+        action: "user.delete" satisfies StaffActionType,
+        reason,
+      });
+
+      await Promise.all([
+        deleteCache("authUser", target.id),
+        deleteCache("user", target.id),
+      ]);
+
+      fireAndForget(
+        () =>
+          emitEvent({
+            event: "UserForceLogout",
+            user_id: target.id,
+            data: {},
+          }),
+        { label: "event:UserForceLogout (staff.deleteUser)" },
+      );
+
+      const updated = await getUser(target.id, true);
+      if (!updated)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to delete user",
+        );
+
+      fireAndForget(
+        () =>
+          emitEvent({
+            event: "UserUpdate",
+            user_id: updated.id,
+            data: updated,
+          }),
+        { label: "event:UserUpdate (staff.deleteUser)" },
       );
 
       res.status(HttpStatusCode.Success).json(updated);

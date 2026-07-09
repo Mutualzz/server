@@ -33,6 +33,10 @@ export const userSettingsTable = pgTable("user_settings", {
   favoriteGifs: text().array().default([]).notNull(),
   favoriteStickers: text().array().default([]).notNull(),
 
+  pushEnabled: boolean().notNull().default(true),
+  pushDirectMessages: boolean().notNull().default(true),
+  pushMentions: boolean().notNull().default(true),
+
   updatedAt: timestamp()
     .notNull()
     .defaultNow()

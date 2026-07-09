@@ -38,7 +38,15 @@ const authMiddleware = async (
                 "Unauthorized",
             );
 
-        if (BitField.fromString(userFlags, user.flags.toString()).has("Disabled"))
+        const flags = BitField.fromString(userFlags, user.flags.toString());
+
+        if (flags.has("Deleted"))
+            throw new HttpException(
+                HttpStatusCode.Unauthorized,
+                "This account has been deleted",
+            );
+
+        if (flags.has("Disabled"))
             throw new HttpException(
                 HttpStatusCode.Unauthorized,
                 "This account has been disabled",

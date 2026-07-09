@@ -14,10 +14,8 @@ export const staffActionsTable = pgTable(
                 onUpdate: "cascade",
             }),
 
-        targetId: bigint({ mode: "bigint" })
-            .notNull()
-            .references(() => usersTable.id, {
-                onDelete: "cascade",
+        targetId: bigint({ mode: "bigint" }).references(() => usersTable.id, {
+                onDelete: "set null",
                 onUpdate: "cascade",
             }),
 

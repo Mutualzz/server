@@ -4,6 +4,7 @@ import {
     pushTokensTable,
     spaceMemberRolesTable,
     spaceMembersTable,
+    userSettingsTable,
 } from "@mutualzz/database";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { unavailableLike } from "@mutualzz/gateway/util/Calculations";
@@ -161,6 +162,57 @@ async function resolveRecipientIds(
     return recipients;
 }
 
+type UserPushSettings = {
+    pushEnabled: boolean;
+    pushDirectMessages: boolean;
+    pushMentions: boolean;
+};
+
+const DEFAULT_PUSH_SETTINGS: UserPushSettings = {
+    pushEnabled: true,
+    pushDirectMessages: true,
+    pushMentions: true,
+};
+
+async function getPushSettingsForUsers(
+    userIds: string[],
+): Promise<Map<string, UserPushSettings>> {
+    if (userIds.length === 0) return new Map();
+
+    const rows = await db
+        .select({
+            userId: userSettingsTable.userId,
+            pushEnabled: userSettingsTable.pushEnabled,
+            pushDirectMessages: userSettingsTable.pushDirectMessages,
+            pushMentions: userSettingsTable.pushMentions,
+        })
+        .from(userSettingsTable)
+        .where(
+            sql`${userSettingsTable.userId} = ANY(ARRAY[${sql.raw(userIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+        );
+
+    const settingsByUser = new Map<string, UserPushSettings>();
+
+    for (const row of rows) {
+        settingsByUser.set(row.userId.toString(), {
+            pushEnabled: row.pushEnabled,
+            pushDirectMessages: row.pushDirectMessages,
+            pushMentions: row.pushMentions,
+        });
+    }
+
+    return settingsByUser;
+}
+
+function shouldSendPushForSettings(
+    settings: UserPushSettings,
+    isDm: boolean,
+): boolean {
+    if (!settings.pushEnabled) return false;
+    if (isDm) return settings.pushDirectMessages;
+    return settings.pushMentions;
+}
+
 async function getTokensForUsers(userIds: string[]) {
     if (userIds.length === 0) return new Map<string, string[]>();
 
@@ -255,11 +307,12 @@ export async function sendMessagePushNotifications(
     const tokensByUser = await getTokensForUsers([...recipientIds]);
     if (tokensByUser.size === 0) return;
 
-    const title =
+    const pushSettingsByUser = await getPushSettingsForUsers([...recipientIds]);
+    const isDm =
         ctx.channel.type === ChannelType.DM ||
-        ctx.channel.type === ChannelType.GroupDM
-            ? ctx.authorName
-            : "New mention";
+        ctx.channel.type === ChannelType.GroupDM;
+
+    const title = isDm ? ctx.authorName : "New mention";
     const body = formatNotificationBody(ctx.message.content, ctx.authorName);
     const url = buildNotificationUrl(ctx.channel);
     const messages: ExpoPushMessage[] = [];
@@ -269,16 +322,17 @@ export async function sendMessagePushNotifications(
             const tokens = tokensByUser.get(userId);
             if (!tokens?.length) return;
 
+            const pushSettings =
+                pushSettingsByUser.get(userId) ?? DEFAULT_PUSH_SETTINGS;
+
+            if (!shouldSendPushForSettings(pushSettings, isDm)) return;
+
             const presence = await PresenceService.get(userId);
             const status = presence?.status ?? "offline";
 
             if (!shouldPushForPresence(status)) return;
 
             for (const token of tokens) {
-                const isDm =
-                    ctx.channel.type === ChannelType.DM ||
-                    ctx.channel.type === ChannelType.GroupDM;
-
                 messages.push({
                     to: token,
                     sound: "default",

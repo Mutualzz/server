@@ -65,6 +65,11 @@ router.get(
     StaffController.getActions,
 );
 router.post(
+    "/users/:userId/delete",
+    createLimiter(60_000, 5),
+    StaffController.deleteUser,
+);
+router.post(
     "/users/:userId/force-logout",
     createLimiter(60_000, 10),
     StaffController.forceLogout,

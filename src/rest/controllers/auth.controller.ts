@@ -163,7 +163,15 @@ export default class AuthController {
           ],
         );
 
-      if (BitField.fromString(userFlags, user.flags.toString()).has("Disabled"))
+      const flags = BitField.fromString(userFlags, user.flags.toString());
+
+      if (flags.has("Deleted"))
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "This account has been deleted",
+        );
+
+      if (flags.has("Disabled"))
         throw new HttpException(
           HttpStatusCode.Forbidden,
           "This account has been disabled",
