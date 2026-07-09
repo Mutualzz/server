@@ -23,6 +23,78 @@ export class VoiceStateService {
     private static readonly STREAM_CHUNK_SIZE = 25;
     private static readonly STREAM_PAUSE_MS = 10;
 
+    private static getVoiceEndpoint() {
+        const endpoint = process.env.VOICE_ENDPOINT?.trim();
+        if (!endpoint) {
+            logger.error(
+                "VOICE_ENDPOINT is not configured; clients cannot connect to voice",
+            );
+            return null;
+        }
+        return endpoint;
+    }
+
+    private static async issueVoiceServerUpdate(
+        socket: WebSocket,
+        params: {
+            roomId: string;
+            spaceId: Snowflake | null;
+            channelId: Snowflake;
+            userId: Snowflake;
+            sessionId: string;
+        },
+    ) {
+        const voiceEndpoint = this.getVoiceEndpoint();
+        if (!voiceEndpoint) {
+            await this.rejectVoiceJoin(
+                socket,
+                params.userId,
+                params.spaceId,
+                "Voice server is not configured",
+            );
+            return false;
+        }
+
+        const tokenId = crypto.randomUUID();
+        const voiceToken = generateVoiceToken(
+            params.userId.toString(),
+            params.sessionId,
+            params.roomId,
+            tokenId,
+        );
+
+        await VoiceStateRedis.setActiveSession({
+            userId: params.userId,
+            sessionId: params.sessionId,
+            roomId: params.roomId,
+            tokenId,
+            updatedAt: Date.now(),
+        });
+
+        await createVoiceSession(
+            voiceToken,
+            params.userId,
+            params.sessionId,
+            params.roomId,
+        );
+
+        await Send(socket, {
+            op: "Dispatch",
+            t: "VoiceServerUpdate",
+            s: socket.sequence++,
+            d: {
+                roomId: params.roomId,
+                spaceId: params.spaceId,
+                channelId: params.channelId,
+                voiceEndpoint,
+                voiceToken,
+                sessionId: params.sessionId,
+            },
+        });
+
+        return true;
+    }
+
     static async handleVoiceStateUpdate(
         socket: WebSocket,
         body: VoiceStateUpdateBody,
@@ -37,6 +109,7 @@ export class VoiceStateService {
 
         const selfMuteRequested = body.selfMute === true;
         const selfDeafRequested = body.selfDeaf === true;
+        const refreshRtcRequested = body.refreshRtc === true;
 
         const previous = await VoiceStateRedis.getState(userId);
         if (!requestedChannelId) {
@@ -184,40 +257,17 @@ export class VoiceStateService {
             data: next,
         });
 
-        if (isFirstJoin || isMove || shouldSupersede) {
+        if (isFirstJoin || isMove || shouldSupersede || refreshRtcRequested) {
             const roomId = voiceScopeKey(spaceId, requestedChannelId);
-            const tokenId = crypto.randomUUID();
 
-            const voiceToken = generateVoiceToken(
-                userId.toString(),
-                sessionId,
+            const issued = await this.issueVoiceServerUpdate(socket, {
                 roomId,
-                tokenId,
-            );
-
-            await VoiceStateRedis.setActiveSession({
+                spaceId,
+                channelId: requestedChannelId,
                 userId,
                 sessionId,
-                roomId,
-                tokenId,
-                updatedAt: Date.now(),
             });
-
-            await createVoiceSession(voiceToken, userId, sessionId, roomId);
-
-            await Send(socket, {
-                op: "Dispatch",
-                t: "VoiceServerUpdate",
-                s: socket.sequence++,
-                d: {
-                    roomId,
-                    spaceId,
-                    channelId: requestedChannelId,
-                    voiceEndpoint: process.env.VOICE_ENDPOINT,
-                    voiceToken,
-                    sessionId,
-                },
-            });
+            if (!issued) return;
 
             void VoiceStateService.streamStatesToSocket(
                 socket,
@@ -339,6 +389,9 @@ export class VoiceStateService {
         });
 
         const roomId = voiceScopeKey(spaceId, channelId);
+        const voiceEndpoint = this.getVoiceEndpoint();
+        if (!voiceEndpoint) return false;
+
         const tokenId = crypto.randomUUID();
         const voiceToken = generateVoiceToken(
             targetUserId.toString(),
@@ -364,7 +417,7 @@ export class VoiceStateService {
                 roomId,
                 spaceId,
                 channelId,
-                voiceEndpoint: process.env.VOICE_ENDPOINT,
+                voiceEndpoint,
                 voiceToken,
                 sessionId,
             },
@@ -425,37 +478,14 @@ export class VoiceStateService {
         await VoiceStateRedis.upsertState(existing);
 
         const roomId = voiceScopeKey(existing.spaceId, existing.channelId);
-        const tokenId = crypto.randomUUID();
-        const voiceToken = generateVoiceToken(
-            userId.toString(),
-            sessionId,
+        const issued = await this.issueVoiceServerUpdate(socket, {
             roomId,
-            tokenId,
-        );
-
-        await VoiceStateRedis.setActiveSession({
+            spaceId: existing.spaceId,
+            channelId: existing.channelId,
             userId,
             sessionId,
-            roomId,
-            tokenId,
-            updatedAt: Date.now(),
         });
-
-        await createVoiceSession(voiceToken, userId, sessionId, roomId);
-
-        await Send(socket, {
-            op: "Dispatch",
-            t: "VoiceServerUpdate",
-            s: socket.sequence++,
-            d: {
-                roomId,
-                spaceId: existing.spaceId,
-                channelId: existing.channelId,
-                voiceEndpoint: process.env.VOICE_ENDPOINT,
-                voiceToken,
-                sessionId,
-            },
-        });
+        if (!issued) return;
 
         void VoiceStateService.streamStatesToSocket(
             socket,

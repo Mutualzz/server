@@ -1,10 +1,10 @@
-import emojiData from "emojibase-data/en/data.json";
-import shortcodesCldr from "emojibase-data/en/shortcodes/cldr.json";
-import shortcodesCldrNative from "emojibase-data/en/shortcodes/cldr-native.json";
-import shortcodesEmojiBase from "emojibase-data/en/shortcodes/emojibase.json";
-import shortcodesGithub from "emojibase-data/en/shortcodes/github.json";
-import shortcodesIamcal from "emojibase-data/en/shortcodes/iamcal.json";
-import shortcodesJoyPixels from "emojibase-data/en/shortcodes/joypixels.json";
+import emojiData from "emojibase-data/en/data.json" with { type: "json" };
+import shortcodesCldr from "emojibase-data/en/shortcodes/cldr.json" with { type: "json" };
+import shortcodesCldrNative from "emojibase-data/en/shortcodes/cldr-native.json" with { type: "json" };
+import shortcodesEmojiBase from "emojibase-data/en/shortcodes/emojibase.json" with { type: "json" };
+import shortcodesGithub from "emojibase-data/en/shortcodes/github.json" with { type: "json" };
+import shortcodesIamcal from "emojibase-data/en/shortcodes/iamcal.json" with { type: "json" };
+import shortcodesJoyPixels from "emojibase-data/en/shortcodes/joypixels.json" with { type: "json" };
 import { joinShortcodes, type Emoji } from "emojibase";
 import shortcodeRegexOrig from "emojibase-regex/shortcode";
 

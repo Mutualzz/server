@@ -25,6 +25,7 @@ export async function onVoiceStateUpdate(
             channelId: null,
             selfMute: body.selfMute === true,
             selfDeaf: body.selfDeaf === true,
+            refreshRtc: body.refreshRtc === true,
         });
         return;
     }
@@ -35,5 +36,6 @@ export async function onVoiceStateUpdate(
         channelId,
         selfMute: body.selfMute === true,
         selfDeaf: body.selfDeaf === true,
+        refreshRtc: body.refreshRtc === true,
     });
 }

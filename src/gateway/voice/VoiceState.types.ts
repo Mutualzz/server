@@ -20,4 +20,6 @@ export type VoiceStateUpdateBody = {
     channelId: Snowflake | null;
     selfMute?: boolean;
     selfDeaf?: boolean;
+    /** Request fresh voice server credentials (e.g. after RTC disconnect). */
+    refreshRtc?: boolean;
 };
