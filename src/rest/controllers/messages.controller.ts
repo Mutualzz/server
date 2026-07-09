@@ -633,6 +633,11 @@ export default class MessagesController {
               },
               authorId: user.id,
               authorName: user.globalName ?? user.username,
+              authorAvatar: {
+                id: user.id,
+                avatar: user.avatar,
+                defaultAvatar: user.defaultAvatar,
+              },
               userMentionIds: userMentionMatches.map((mention) =>
                 mention.id.toString(),
               ),
