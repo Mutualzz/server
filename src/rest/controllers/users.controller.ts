@@ -13,7 +13,7 @@ export default class UsersController {
       if (!user)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      if (req.user.id && req.user.id !== user.id)
+      if (req.user?.id && req.user.id !== user.id)
         await assertUserVisible(req.user.id, user.id);
 
       return res.status(HttpStatusCode.Success).json(user);

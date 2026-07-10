@@ -74,8 +74,8 @@ export default async function Message(this: WebSocket, buffer: Data) {
     !checkRateLimit(
       this,
       decoded.op,
-      OPCODE_LIMITS[decoded.op].limit,
-      OPCODE_LIMITS[decoded.op].window,
+      OPCODE_LIMITS[decoded.op]?.limit,
+      OPCODE_LIMITS[decoded.op]?.window,
     )
   ) {
     logger.warn(

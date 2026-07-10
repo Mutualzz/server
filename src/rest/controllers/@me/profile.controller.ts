@@ -158,7 +158,7 @@ export default class ProfileController {
       if (!user)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      if (req.user.id && req.user.id !== user.id)
+      if (req.user?.id && req.user.id !== user.id)
         await assertUserVisible(req.user.id, user.id);
 
       const userId = user.id;
