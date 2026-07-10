@@ -4,9 +4,10 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import crypto from "crypto";
-import { setCache } from "@mutualzz/cache";
+import { setCache, deleteCache } from "@mutualzz/cache";
 import {
   db,
+  staffActionsTable,
   toPublicUser,
   userSettingsTable,
   usersTable,
@@ -25,12 +26,15 @@ import {
   s3Client,
   deletePushTokensForUser,
   upsertPushToken,
+  Snowflake,
 } from "@mutualzz/util";
-import type { APIPrivateUser, APIUserSettings } from "@mutualzz/types";
+import { revokeAllSessions } from "@mutualzz/rest/util";
+import type { APIPrivateUser, APIUserSettings, StaffActionType } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
   imageFileValidator,
   validateChangePassword,
+  validateDeleteAccountBody,
   validateMeSettingsUpdate,
   validateMeUpdate,
   validatePushTokenDelete,
@@ -990,6 +994,92 @@ export default class MeController {
       await deletePushTokensForUser(user.id, token);
 
       res.status(HttpStatusCode.NoContent).send();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { confirmUsername, password } = validateDeleteAccountBody.parse(
+        req.body,
+      );
+
+      if (confirmUsername !== user.username)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Username confirmation does not match",
+        );
+
+      const storedUser = await db.query.usersTable.findFirst({
+        columns: { id: true, hash: true, flags: true, username: true },
+        where: eq(usersTable.id, BigInt(user.id)),
+      });
+
+      if (!storedUser)
+        throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      const passwordValid = await bcrypt.compare(password, storedUser.hash);
+      if (!passwordValid)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Incorrect password",
+        );
+
+      const flags = BitField.fromString(
+        userFlags,
+        storedUser.flags.toString(),
+      );
+
+      if (flags.has("Deleted"))
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "This account has already been deleted",
+        );
+
+      if (flags.has("Founder"))
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Founder accounts cannot be self-deleted",
+        );
+
+      await revokeAllSessions(user.id);
+
+      const newFlags = flags.set("Deleted", true).toBigInt();
+
+      await db
+        .update(usersTable)
+        .set({ flags: newFlags })
+        .where(eq(usersTable.id, BigInt(user.id)))
+        .execute();
+
+      await db.insert(staffActionsTable).values({
+        id: BigInt(Snowflake.generate()),
+        actorId: BigInt(user.id),
+        targetId: BigInt(user.id),
+        action: "user.delete" satisfies StaffActionType,
+        reason: "Self-deleted account",
+      });
+
+      await Promise.all([
+        deleteCache("authUser", user.id),
+        deleteCache("user", user.id),
+      ]);
+
+      fireAndForgetAll([
+        {
+          run: () =>
+            emitEvent({
+              event: "UserForceLogout",
+              user_id: user.id,
+              data: {},
+            }),
+          label: "event:UserForceLogout (me.deleteAccount)",
+        },
+      ]);
+
+      res.status(HttpStatusCode.Success).json({ success: true });
     } catch (err) {
       next(err);
     }

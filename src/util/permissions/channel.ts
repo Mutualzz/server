@@ -17,6 +17,7 @@ import {
     getSpace,
 } from "../Helpers";
 import { resolveSpacePermissions } from "./space";
+import { assertSpaceNotInLockdown } from "../spaceLockdown";
 
 interface RequireChannelPermissionsOptions {
     channelId: Snowflake;
@@ -43,6 +44,8 @@ export const requireChannelPermissions = async ({
     const space = await getSpace(channel.spaceId);
     if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
+
+    assertSpaceNotInLockdown(space);
 
     if (BigInt(userId) !== BigInt(space.ownerId)) {
         const member = await getMember(space.id, userId, true);

@@ -1,7 +1,7 @@
 import { deleteCache } from "@mutualzz/cache";
 import { db, postSavesTable, postsTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode, type APIPost } from "@mutualzz/types";
-import { execNormalized, fireAndForgetAll } from "@mutualzz/util";
+import { execNormalized, fireAndForgetAll, assertNotBlocked } from "@mutualzz/util";
 import { validatePostParams } from "@mutualzz/validators";
 import { and, eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -21,6 +21,8 @@ export default class PostSavesController {
 
       if (!post)
         throw new HttpException(HttpStatusCode.NotFound, "Post not found");
+
+      await assertNotBlocked(user.id, post.authorId.toString(), "Post not found");
 
       await db
         .insert(postSavesTable)

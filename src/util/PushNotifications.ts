@@ -415,3 +415,24 @@ export async function upsertPushToken(
       },
     });
 }
+
+export async function sendSupportReplyPush(
+  userId: string,
+  ticketId: string,
+  subject: string,
+): Promise<void> {
+  const tokensByUser = await getTokensForUsers([userId]);
+  const tokens = tokensByUser.get(userId);
+  if (!tokens?.length) return;
+
+  const url = `${APP_SCHEME}://support/tickets/${ticketId}`;
+  const messages: ExpoPushMessage[] = tokens.map(({ token }) => ({
+    to: token,
+    sound: "default",
+    title: "Support replied",
+    body: subject,
+    data: { url, ticketId },
+  }));
+
+  await deliverPushMessages(messages);
+}

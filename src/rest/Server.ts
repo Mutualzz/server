@@ -267,7 +267,7 @@ export class Server {
 
       const cleanedPath = rawPath
         .replace(/\/index$/, "") // remove trailing /index
-        .split(path.sep)
+        .split(/[/\\]/)
         .map((segment) => {
           if (segment.startsWith("[...") && segment.endsWith("]")) {
             return "*";

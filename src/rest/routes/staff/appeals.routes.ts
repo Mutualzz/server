@@ -7,7 +7,7 @@ router.get("/", createLimiter(60_000, 30), StaffAppealsController.list);
 router.patch(
     "/:appealId",
     createLimiter(60_000, 30),
-    StaffAppealsController.update,
+    StaffAppealsController.updateStatus,
 );
 
 export default router;

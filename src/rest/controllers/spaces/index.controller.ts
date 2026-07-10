@@ -19,6 +19,7 @@ import {
   generateHash,
   getMember,
   getSpace,
+  assertSpaceNotInLockdown,
   requireSpacePermissions,
   s3Client,
   Snowflake,
@@ -496,6 +497,8 @@ export default class SpacesController {
 
       if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
+
+      assertSpaceNotInLockdown(space);
 
       if (BigInt(space.ownerId) !== BigInt(user.id))
         throw new HttpException(

@@ -61,5 +61,10 @@ router.delete(
   createLimiter(60_000, 10),
   MeController.deletePushToken,
 );
+router.post(
+  "/delete",
+  createLimiter(60_000, 3),
+  MeController.deleteAccount,
+);
 
 export default router;

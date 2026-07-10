@@ -14,3 +14,6 @@ export * from "./Report";
 export * from "./ReportRelations";
 export * from "./Appeal";
 export * from "./AppealRelations";
+export * from "./SupportTicket";
+export * from "./SupportMessage";
+export * from "./SupportRelations";

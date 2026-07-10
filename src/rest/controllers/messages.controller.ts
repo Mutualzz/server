@@ -71,6 +71,10 @@ import {
   type PermissionFlags,
 } from "@mutualzz/bitfield";
 import { createSystemMessage } from "@mutualzz/util/systemUser";
+import {
+  contentHasInviteLinks,
+  resolveMessageCodedLinks,
+} from "../../util/codedLinks";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { unavailableLike } from "@mutualzz/gateway/util/Calculations";
@@ -109,6 +113,7 @@ export default class MessagesController {
         mentionReply = true,
         expressionIds = [],
         sharedPostId,
+        codedLinks = [],
       } = validateMessageBodyPut.parse(req.body);
 
       const uploadedFiles: Express.Multer.File[] = Array.isArray(req.files)
@@ -119,7 +124,9 @@ export default class MessagesController {
         !content &&
         expressionIds.length === 0 &&
         uploadedFiles.length === 0 &&
-        !sharedPostId
+        !sharedPostId &&
+        codedLinks.length === 0 &&
+        !contentHasInviteLinks(content)
       )
         throw new HttpException(
           HttpStatusCode.BadRequest,
@@ -372,8 +379,11 @@ export default class MessagesController {
           title: gif.filename,
         }));
 
+      const { codedLinks: hydratedCodedLinks, content: messageContent } =
+        await resolveMessageCodedLinks(sanitizedContent, codedLinks);
+
       const contentEmbeds = effectiveCanEmbed
-        ? await buildEmbeds(sanitizedContent || "")
+        ? await buildEmbeds(messageContent || "")
         : [];
 
       const postEmbeds: APIMessageEmbed[] = [];
@@ -416,8 +426,9 @@ export default class MessagesController {
             nonce: nonce ? BigInt(nonce) : undefined,
             channelId: BigInt(channel.id),
             spaceId: channel.spaceId ? BigInt(channel.spaceId) : undefined,
-            content: sanitizedContent,
+            content: messageContent,
             embeds,
+            codedLinks: hydratedCodedLinks,
             attachments,
             repliedToId: repliedToId ? BigInt(repliedToId) : undefined,
             expressionIds: validatedStickerIds,

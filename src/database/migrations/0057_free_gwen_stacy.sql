@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "codedLinks" jsonb DEFAULT '[]'::jsonb NOT NULL;

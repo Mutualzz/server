@@ -18,5 +18,8 @@ export * from "./Postmark";
 export * from "./profileAssets";
 export * from "./hashtags";
 export * from "./postEngagement";
+export * from "./blocks";
 export * from "./Appeals";
+export * from "./spaceLockdown";
+export * from "./reportReason";
 export * from "./PushNotifications";

@@ -14,7 +14,7 @@ import {
     getEveryonePermissions,
     getParentOverwrites,
 } from "./Calculations";
-import { execNormalized, getSpace } from "@mutualzz/util";
+import { execNormalized, getSpace, isSpaceInLockdown } from "@mutualzz/util";
 
 async function getMemberWithRoles(spaceId: Snowflake, userId: Snowflake) {
     return execNormalized<APISpaceMember>(
@@ -41,6 +41,8 @@ export async function getEffectiveChannelBits(opts: {
 
     const space = await getSpace(spaceId);
     if (!space) return 0n;
+
+    if (isSpaceInLockdown(space)) return 0n;
 
     if (BigInt(space.ownerId) === BigInt(userId)) return ALL_BITS;
 

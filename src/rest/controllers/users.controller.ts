@@ -1,5 +1,5 @@
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { resolveUserIdentifier } from "@mutualzz/util";
+import { assertUserVisible, resolveUserIdentifier } from "@mutualzz/util";
 import { validateUserGet } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 
@@ -15,6 +15,10 @@ export default class UsersController {
                     HttpStatusCode.NotFound,
                     "User not found",
                 );
+
+            if (req.user?.id && req.user.id !== user.id) {
+                await assertUserVisible(req.user.id, user.id);
+            }
 
             return res.status(HttpStatusCode.Success).json(user);
         } catch (err) {

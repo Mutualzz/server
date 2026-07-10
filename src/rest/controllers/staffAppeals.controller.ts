@@ -1,11 +1,16 @@
-import { appealsTable, db } from "@mutualzz/database";
+import { db, appealsTable } from "@mutualzz/database";
 import type { APIAppeal } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { execNormalizedMany, requireStaff } from "@mutualzz/util";
+import {
+    execNormalizedMany,
+    liftSpaceLockdown,
+    requireStaff,
+    Snowflake,
+} from "@mutualzz/util";
 import {
     validateStaffAppealParams,
-    validateStaffAppealUpdateBody,
     validateStaffAppealsQuery,
+    validateStaffAppealUpdateBody,
 } from "@mutualzz/validators";
 import { and, desc, eq, lt } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -15,6 +20,12 @@ const appealUserColumns = {
     username: true,
     globalName: true,
     avatar: true,
+} as const;
+
+const appealSpaceColumns = {
+    id: true,
+    name: true,
+    icon: true,
 } as const;
 
 export default class StaffAppealsController {
@@ -37,6 +48,7 @@ export default class StaffAppealsController {
                     limit,
                     with: {
                         user: { columns: appealUserColumns },
+                        space: { columns: appealSpaceColumns },
                         reviewedBy: { columns: appealUserColumns },
                     },
                 }),
@@ -48,14 +60,32 @@ export default class StaffAppealsController {
         }
     }
 
-    static async update(req: Request, res: Response, next: NextFunction) {
+    static async updateStatus(req: Request, res: Response, next: NextFunction) {
         try {
             const actor = requireStaff(req.user);
-            const { appealId } = validateStaffAppealParams.parse(req.params);
-            const { status, staffResponse } =
-                validateStaffAppealUpdateBody.parse(req.body);
 
-            const updated = await db
+            const { appealId } = validateStaffAppealParams.parse(req.params);
+            const { status, staffResponse } = validateStaffAppealUpdateBody.parse(
+                req.body,
+            );
+
+            const appeal = await db.query.appealsTable.findFirst({
+                where: eq(appealsTable.id, BigInt(appealId)),
+            });
+
+            if (!appeal)
+                throw new HttpException(
+                    HttpStatusCode.NotFound,
+                    "Appeal not found",
+                );
+
+            if (appeal.status !== "pending")
+                throw new HttpException(
+                    HttpStatusCode.BadRequest,
+                    "Appeal has already been reviewed",
+                );
+
+            await db
                 .update(appealsTable)
                 .set({
                     status,
@@ -63,27 +93,33 @@ export default class StaffAppealsController {
                     reviewedById: BigInt(actor.id),
                     reviewedAt: new Date(),
                 })
-                .where(eq(appealsTable.id, BigInt(appealId)))
-                .returning({ id: appealsTable.id });
+                .where(eq(appealsTable.id, BigInt(appealId)));
 
-            if (!updated.length) {
-                throw new HttpException(
-                    HttpStatusCode.NotFound,
-                    "Appeal not found",
+            if (status === "accepted" && appeal.spaceId) {
+                await liftSpaceLockdown(
+                    appeal.spaceId.toString(),
+                    actor.id,
+                    `Appeal ${appealId} accepted`,
                 );
             }
 
-            const appeals = await execNormalizedMany<APIAppeal>(
+            if (status === "accepted" && !appeal.spaceId) {
+                // Account appeals are reviewed manually in the staff user panel.
+            }
+
+            const [updated] = await execNormalizedMany<APIAppeal>(
                 db.query.appealsTable.findMany({
                     where: eq(appealsTable.id, BigInt(appealId)),
+                    limit: 1,
                     with: {
                         user: { columns: appealUserColumns },
+                        space: { columns: appealSpaceColumns },
                         reviewedBy: { columns: appealUserColumns },
                     },
                 }),
             );
 
-            res.status(HttpStatusCode.Success).json(appeals[0]);
+            res.status(HttpStatusCode.Success).json(updated);
         } catch (err) {
             next(err);
         }

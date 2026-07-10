@@ -22,6 +22,7 @@ import {
   toProfileMusicFromDeezerTrack,
   toProfileMusicFromItunesTrack,
   toMusicSearchTrack,
+  assertUserVisible,
 } from "@mutualzz/util";
 import {
   fontExtFromFile,
@@ -156,6 +157,10 @@ export default class ProfileController {
       const user = await resolveUserIdentifier(identifier);
       if (!user) {
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
+      }
+
+      if (req.user?.id && req.user.id !== user.id) {
+        await assertUserVisible(req.user.id, user.id);
       }
 
       const userId = user.id;

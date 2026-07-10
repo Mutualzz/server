@@ -1,5 +1,6 @@
 import type { AppealStatus } from "@mutualzz/types";
 import { bigint, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { spacesTable } from "./spaces/Space";
 import { usersTable } from "./users/User";
 
 export const appealsTable = pgTable(
@@ -13,6 +14,11 @@ export const appealsTable = pgTable(
                 onDelete: "cascade",
                 onUpdate: "cascade",
             }),
+
+        spaceId: bigint({ mode: "bigint" }).references(() => spacesTable.id, {
+            onDelete: "cascade",
+            onUpdate: "cascade",
+        }),
 
         message: text().notNull(),
 
@@ -29,6 +35,7 @@ export const appealsTable = pgTable(
     },
     (t) => [
         index("appeal_user_id_idx").on(t.userId),
+        index("appeal_space_id_idx").on(t.spaceId),
         index("appeal_status_idx").on(t.status),
     ],
 );

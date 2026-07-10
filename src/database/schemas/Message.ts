@@ -1,5 +1,5 @@
 import { usersTable } from "./users/User";
-import type { APIAttachment, APIMessageEmbed, APIMessageMention } from "@mutualzz/types";
+import type { APIAttachment, APICodedLink, APIMessageEmbed, APIMessageMention } from "@mutualzz/types";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
@@ -44,6 +44,7 @@ export const messagesTable = pgTable(
       .default(sql`0`),
 
     embeds: jsonb().$type<APIMessageEmbed[]>().notNull().default([]),
+    codedLinks: jsonb().$type<APICodedLink[]>().notNull().default([]),
     attachments: jsonb().$type<APIAttachment[]>().notNull().default([]),
     expressionIds: bigint({ mode: "bigint" }).array().default([]).notNull(),
 

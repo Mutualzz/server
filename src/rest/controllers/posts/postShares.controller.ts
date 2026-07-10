@@ -6,6 +6,7 @@ import {
   execNormalized,
   fireAndForgetAll,
   getFriendIds,
+  assertNotBlocked,
 } from "@mutualzz/util";
 import { validatePostParams } from "@mutualzz/validators";
 import { and, eq } from "drizzle-orm";
@@ -26,6 +27,8 @@ export default class PostSharesController {
 
       if (!post)
         throw new HttpException(HttpStatusCode.NotFound, "Post not found");
+
+      await assertNotBlocked(user.id, post.authorId.toString(), "Post not found");
 
       await db
         .insert(postSharesTable)

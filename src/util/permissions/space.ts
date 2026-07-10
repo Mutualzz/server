@@ -6,6 +6,7 @@ import {
     getMemberRoles,
     getSpace,
 } from "../Helpers.ts";
+import { assertSpaceNotInLockdown } from "../spaceLockdown.ts";
 import {
     ALL_BITS,
     BitField,
@@ -62,6 +63,8 @@ export const requireSpacePermissions = async ({
     const space = await getSpace(spaceId);
     if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
+
+    assertSpaceNotInLockdown(space);
 
     if (userId !== space.ownerId) {
         const member = await getMember(space.id, userId, true);

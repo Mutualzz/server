@@ -4,6 +4,7 @@ import {
     postCommentsTable,
     postsTable,
     reportsTable,
+    spacesTable,
 } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { resolveUserIdentifier, Snowflake } from "@mutualzz/util";
@@ -55,6 +56,14 @@ export default class ReportsController {
                 case "user": {
                     const target = await resolveUserIdentifier(targetId);
                     targetExists = !!target;
+                    break;
+                }
+                case "space": {
+                    const space = await db.query.spacesTable.findFirst({
+                        columns: { id: true },
+                        where: eq(spacesTable.id, BigInt(targetId)),
+                    });
+                    targetExists = !!space;
                     break;
                 }
             }

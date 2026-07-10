@@ -17,6 +17,10 @@ import {
   resolveExpressions,
   sanitizeContent,
   Snowflake,
+  assertNotBlocked,
+  filterByBlockedAuthors,
+  getBlockedUserIds,
+  isBlockedBetween,
 } from "@mutualzz/util";
 import {
   validatePostCommentBodyPatch,
@@ -44,6 +48,8 @@ export default class PostCommentsController {
 
       if (!post)
         throw new HttpException(HttpStatusCode.NotFound, "Post not found");
+
+      await assertNotBlocked(user.id, post.authorId.toString(), "Post not found");
 
       const {
         content,
@@ -156,7 +162,23 @@ export default class PostCommentsController {
 
   static async getAll(req: Request, res: Response, next: NextFunction) {
     try {
+      const { user } = req;
       const { postId } = validatePostParams.parse(req.params);
+
+      const post = await execNormalized<APIPost>(
+        db.query.postsTable.findFirst({
+          where: eq(postsTable.id, BigInt(postId)),
+        }),
+      );
+
+      if (!post)
+        throw new HttpException(HttpStatusCode.NotFound, "Post not found");
+
+      if (
+        BigInt(post.authorId) !== BigInt(user.id) &&
+        (await isBlockedBetween(user.id, post.authorId.toString()))
+      )
+        throw new HttpException(HttpStatusCode.NotFound, "Post not found");
 
       const beforeRaw = req.query.before ? `${req.query.before}` : undefined;
       const afterRaw = req.query.after ? `${req.query.after}` : undefined;
@@ -205,8 +227,11 @@ export default class PostCommentsController {
         );
       }
 
+      const blockedIds = await getBlockedUserIds(user.id);
+      const visibleComments = filterByBlockedAuthors(comments, blockedIds);
+
       const hydrated = await Promise.all(
-        comments.map(async (comment) => ({
+        visibleComments.map(async (comment) => ({
           ...comment,
           expressions: await resolveExpressions(
             comment.content,

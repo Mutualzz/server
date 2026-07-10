@@ -22,8 +22,11 @@ import {
   emitEvent,
   execNormalized,
   execNormalizedMany,
+  filterByBlockedAuthors,
   fireAndForgetAll,
+  getBlockedUserIds,
   getFriendIds,
+  isBlockedBetween,
   publicUserColumns,
   requireNotRestricted,
   resolveExpressions,
@@ -275,6 +278,12 @@ export default class PostsController {
       if (isUnpublished(post) && BigInt(post.authorId) !== BigInt(user.id))
         throw new HttpException(HttpStatusCode.NotFound, "Post not found");
 
+      if (
+        BigInt(post.authorId) !== BigInt(user.id) &&
+        (await isBlockedBetween(user.id, post.authorId.toString()))
+      )
+        throw new HttpException(HttpStatusCode.NotFound, "Post not found");
+
       const [engaged] = await attachEngagementToPosts([post], user.id);
       const [hydrated] = await attachExpressionsToPosts([engaged]);
 
@@ -300,6 +309,7 @@ export default class PostsController {
 
       const friendIds = await getFriendIds(user.id);
       const authorIds = [BigInt(user.id), ...friendIds.map((id) => BigInt(id))];
+      const blockedIds = await getBlockedUserIds(user.id);
 
       let posts: APIPost[];
 
@@ -343,7 +353,9 @@ export default class PostsController {
         );
       }
 
-      const withHashtags = await attachHashtagsToPosts(posts);
+      const withHashtags = await attachHashtagsToPosts(
+        filterByBlockedAuthors(posts, blockedIds),
+      );
       const engaged = await attachEngagementToPosts(withHashtags, user.id);
       const hydrated = await attachExpressionsToPosts(engaged);
 
@@ -560,12 +572,16 @@ export default class PostsController {
         }),
       );
 
-      const [withHashtags, friendIds] = await Promise.all([
+      const [withHashtags, friendIds, blockedIds] = await Promise.all([
         attachHashtagsToPosts(candidates),
         getFriendIds(user.id),
+        getBlockedUserIds(user.id),
       ]);
 
-      const hydrated = await attachEngagementToPosts(withHashtags, user.id);
+      const hydrated = await attachEngagementToPosts(
+        filterByBlockedAuthors(withHashtags, blockedIds),
+        user.id,
+      );
 
       const friendSet = new Set(friendIds);
       const now = Date.now();
@@ -620,6 +636,7 @@ export default class PostsController {
         .where(eq(postSavesTable.userId, BigInt(user.id)));
 
       const savedPostIds = savedRows.map((row) => row.postId);
+      const blockedIds = await getBlockedUserIds(user.id);
 
       if (savedPostIds.length === 0) {
         res.status(HttpStatusCode.Success).json([]);
@@ -668,7 +685,9 @@ export default class PostsController {
         );
       }
 
-      const withHashtags = await attachHashtagsToPosts(posts);
+      const withHashtags = await attachHashtagsToPosts(
+        filterByBlockedAuthors(posts, blockedIds),
+      );
       const engaged = await attachEngagementToPosts(withHashtags, user.id);
       const hydrated = await attachExpressionsToPosts(engaged);
 

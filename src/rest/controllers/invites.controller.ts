@@ -1,7 +1,12 @@
 import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
-import { db, invitesTable, spaceMembersTable } from "@mutualzz/database";
-import type { APIInvite } from "@mutualzz/types";
-import { HttpException, HttpStatusCode, InviteType } from "@mutualzz/types";
+import { db, invitesTable, relationshipsTable, spaceMembersTable } from "@mutualzz/database";
+import type { APIInvite, APIRelationship } from "@mutualzz/types";
+import {
+  HttpException,
+  HttpStatusCode,
+  InviteType,
+  RelationshipType,
+} from "@mutualzz/types";
 import {
   emitEvent,
   execNormalized,
@@ -11,11 +16,14 @@ import {
   getSpace,
   getUser,
   requireChannelPermissions,
+  requireNotRestricted,
   requireSpacePermissions,
+  Snowflake,
 } from "@mutualzz/util";
 import {
   validateInviteBodyPatch,
   validateInviteBodyPost,
+  validateInviteCodeParam,
   validateInviteParamsCode,
   validateInviteParamsGet,
 } from "@mutualzz/validators";
@@ -117,16 +125,25 @@ export default class InvitesController {
         .pick({ code: true })
         .parse(req.params);
 
+      const viewerId = req.user?.id;
+
       const invite = await execNormalized<APIInvite>(
         db.query.invitesTable.findFirst({
           with: {
-            space: {
-              with: {
-                members: {
-                  where: eq(spaceMembersTable.userId, BigInt(req.user.id)),
-                },
-              },
-            },
+            space: viewerId
+              ? {
+                  with: {
+                    members: {
+                      where: eq(
+                        spaceMembersTable.userId,
+                        BigInt(viewerId),
+                      ),
+                    },
+                  },
+                }
+              : true,
+            channel: { columns: { id: true, name: true, type: true } },
+            user: true,
             inviter: true,
           },
           where: eq(invitesTable.code, code),
@@ -648,6 +665,338 @@ export default class InvitesController {
           meta: { code: inv.code, spaceId },
         })),
       ]);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getFriendInvite(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+
+      if (!user)
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+
+      const invite = await execNormalized<APIInvite>(
+        db.query.invitesTable.findFirst({
+          with: {
+            user: true,
+            inviter: true,
+          },
+          where: and(
+            eq(invitesTable.type, InviteType.Friend),
+            eq(invitesTable.userId, BigInt(user.id)),
+          ),
+        }),
+      );
+
+      if (
+        invite &&
+        invite.expiresAt &&
+        dayjs().isAfter(dayjs(invite.expiresAt))
+      ) {
+        await db
+          .delete(invitesTable)
+          .where(eq(invitesTable.code, invite.code));
+        await deleteCache("invite", invite.code);
+
+        return res.status(HttpStatusCode.Success).json(null);
+      }
+
+      return res.status(HttpStatusCode.Success).json(invite ?? null);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async createFriendInvite(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const { user } = req;
+
+      if (!user)
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+
+      requireNotRestricted(user);
+
+      const existing = await execNormalized<APIInvite>(
+        db.query.invitesTable.findFirst({
+          with: {
+            user: true,
+            inviter: true,
+          },
+          where: and(
+            eq(invitesTable.type, InviteType.Friend),
+            eq(invitesTable.userId, BigInt(user.id)),
+          ),
+        }),
+      );
+
+      if (
+        existing &&
+        (!existing.expiresAt || dayjs().isBefore(dayjs(existing.expiresAt)))
+      ) {
+        return res.status(HttpStatusCode.Success).json(existing);
+      }
+
+      const code = generateInviteCode();
+
+      const invite = await execNormalized<APIInvite>(
+        db
+          .insert(invitesTable)
+          .values({
+            code,
+            type: InviteType.Friend,
+            userId: BigInt(user.id),
+            inviterId: BigInt(user.id),
+            expiresAt: dayjs().add(7, "days").toDate(),
+          })
+          .returning()
+          .then((results) => results[0]),
+      );
+
+      if (!invite)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to create friend invite",
+        );
+
+      const hydrated = await execNormalized<APIInvite>(
+        db.query.invitesTable.findFirst({
+          with: {
+            user: true,
+            inviter: true,
+          },
+          where: eq(invitesTable.code, invite.code),
+        }),
+      );
+
+      if (!hydrated)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to create friend invite",
+        );
+
+      await setCache("invite", code, hydrated);
+
+      return res.status(HttpStatusCode.Created).json(hydrated);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async acceptFriend(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+
+      if (!user)
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+
+      requireNotRestricted(user);
+
+      const { code } = validateInviteCodeParam.parse(req.params);
+
+      const invite = await execNormalized<APIInvite>(
+        db.query.invitesTable.findFirst({
+          with: {
+            user: true,
+          },
+          where: and(
+            eq(invitesTable.code, code),
+            eq(invitesTable.type, InviteType.Friend),
+          ),
+        }),
+      );
+
+      if (!invite)
+        throw new HttpException(HttpStatusCode.NotFound, "Invite not found");
+
+      if (invite.expiresAt && dayjs().isAfter(dayjs(invite.expiresAt))) {
+        await db.delete(invitesTable).where(eq(invitesTable.code, code));
+        await deleteCache("invite", code);
+        throw new HttpException(HttpStatusCode.NotFound, "Invite not found");
+      }
+
+      const targetUserId = invite.userId ?? invite.inviterId;
+      if (!targetUserId)
+        throw new HttpException(HttpStatusCode.NotFound, "Invite not found");
+
+      if (BigInt(targetUserId) === BigInt(user.id))
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "You cannot add yourself",
+        );
+
+      const targetUser = await getUser(targetUserId.toString(), true);
+      if (!targetUser)
+        throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      const theirRow = await db.query.relationshipsTable.findFirst({
+        where: and(
+          eq(relationshipsTable.userId, BigInt(targetUser.id)),
+          eq(relationshipsTable.otherUserId, BigInt(user.id)),
+        ),
+      });
+
+      if (theirRow?.type === RelationshipType.Blocked)
+        throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      const myRow = await db.query.relationshipsTable.findFirst({
+        where: and(
+          eq(relationshipsTable.userId, BigInt(user.id)),
+          eq(relationshipsTable.otherUserId, BigInt(targetUser.id)),
+        ),
+      });
+
+      let relationship: APIRelationship;
+
+      if (myRow) {
+        if (myRow.type === RelationshipType.Blocked)
+          throw new HttpException(
+            HttpStatusCode.Forbidden,
+            "You cannot send a friend request to this user",
+          );
+
+        if (myRow.type === RelationshipType.Friend) {
+          relationship = await execNormalized<APIRelationship>(
+            Promise.resolve(myRow),
+          );
+        } else if (myRow.type === RelationshipType.OutgoingRequest) {
+          throw new HttpException(
+            HttpStatusCode.Conflict,
+            "You have already sent a friend request to this user",
+          );
+        } else if (myRow.type === RelationshipType.IncomingRequest) {
+          const updatedMine = await execNormalized<APIRelationship | null>(
+            db
+              .update(relationshipsTable)
+              .set({ type: RelationshipType.Friend, updatedAt: new Date() })
+              .where(eq(relationshipsTable.id, myRow.id))
+              .returning()
+              .then((res) => (res.length ? res[0] : null)),
+          );
+
+          if (!updatedMine)
+            throw new HttpException(
+              HttpStatusCode.InternalServerError,
+              "Failed to accept relationship",
+            );
+
+          relationship = updatedMine;
+
+          if (theirRow) {
+            const updatedTheirs = await execNormalized<APIRelationship | null>(
+              db
+                .update(relationshipsTable)
+                .set({ type: RelationshipType.Friend, updatedAt: new Date() })
+                .where(eq(relationshipsTable.id, theirRow.id))
+                .returning()
+                .then((res) => (res.length ? res[0] : null)),
+            );
+
+            if (updatedTheirs) {
+              fireAndForgetAll([
+                {
+                  label: "event:RelationshipUpdate:other",
+                  run: () =>
+                    emitEvent({
+                      event: "RelationshipUpdate",
+                      user_id: targetUser.id,
+                      data: updatedTheirs,
+                    }),
+                },
+              ]);
+            }
+          }
+
+          fireAndForgetAll([
+            {
+              label: "event:RelationshipUpdate:self",
+              run: () =>
+                emitEvent({
+                  event: "RelationshipUpdate",
+                  user_id: user.id,
+                  data: updatedMine,
+                }),
+            },
+          ]);
+        } else {
+          throw new HttpException(
+            HttpStatusCode.InternalServerError,
+            "Failed to accept relationship",
+          );
+        }
+      } else {
+        const myCreated = await execNormalized<APIRelationship | null>(
+          db
+            .insert(relationshipsTable)
+            .values({
+              id: BigInt(Snowflake.generate()),
+              userId: BigInt(user.id),
+              otherUserId: BigInt(targetUser.id),
+              type: RelationshipType.OutgoingRequest,
+            })
+            .returning()
+            .then((res) => (res.length ? res[0] : null)),
+        );
+
+        if (!myCreated)
+          throw new HttpException(
+            HttpStatusCode.InternalServerError,
+            "Failed to create relationship",
+          );
+
+        relationship = myCreated;
+
+        const theirCreated = await execNormalized<APIRelationship | null>(
+          db
+            .insert(relationshipsTable)
+            .values({
+              id: BigInt(Snowflake.generate()),
+              userId: BigInt(targetUser.id),
+              otherUserId: BigInt(user.id),
+              type: RelationshipType.IncomingRequest,
+            })
+            .returning()
+            .then((res) => (res.length ? res[0] : null)),
+        );
+
+        fireAndForgetAll([
+          {
+            label: "event:RelationshipCreate:self",
+            run: () =>
+              emitEvent({
+                event: "RelationshipCreate",
+                user_id: user.id,
+                data: myCreated,
+              }),
+          },
+          {
+            label: "event:RelationshipCreate:other",
+            run: () =>
+              emitEvent({
+                event: "RelationshipCreate",
+                user_id: targetUser.id,
+                data: theirCreated,
+              }),
+          },
+        ]);
+      }
+
+      if (invite.maxUses > 0 && invite.uses + 1 >= invite.maxUses) {
+        await db.delete(invitesTable).where(eq(invitesTable.code, code));
+        await deleteCache("invite", code);
+      } else {
+        await db
+          .update(invitesTable)
+          .set({ uses: invite.uses + 1 })
+          .where(eq(invitesTable.code, code));
+      }
+
+      return res.status(HttpStatusCode.Success).json(relationship);
     } catch (err) {
       next(err);
     }
