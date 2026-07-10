@@ -109,6 +109,7 @@
     "db:migration": "pnpm db:generate && pnpm db:migrate",
     "db:push": "drizzle-kit push",
     "demo:seed": "cross-env NODE_ENV=development tsx ./src/util/scripts/seedDemoEnvironment.ts",
+    "demo:clean": "cross-env NODE_ENV=development tsx ./src/util/scripts/cleanDemoEnvironment.ts",
     "dev": "nodemon",
     "lint": "eslint .",
     "prestart": "pnpm build",

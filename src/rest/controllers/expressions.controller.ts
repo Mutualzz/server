@@ -1,7 +1,12 @@
 import type { NextFunction, Request, Response } from "express";
 import type { APIExpression } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { imageFileValidator, validateExpressionParams, validateExpressionPatchBody, validateExpressionPutBody, } from "@mutualzz/validators";
+import {
+  imageFileValidator,
+  validateExpressionParams,
+  validateExpressionPatchBody,
+  validateExpressionPutBody,
+} from "@mutualzz/validators";
 import { db, expressionsTable } from "@mutualzz/database";
 import {
   bucketName,
@@ -13,10 +18,19 @@ import {
   s3Client,
   Snowflake,
 } from "@mutualzz/util";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { count, eq } from "drizzle-orm";
-import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
+import {
+  deleteCache,
+  getCache,
+  invalidateCache,
+  setCache,
+} from "@mutualzz/cache";
 
 export default class ExpressionsController {
   static async create(req: Request, res: Response, next: NextFunction) {
@@ -126,7 +140,7 @@ export default class ExpressionsController {
             type: parseInt(type),
             authorId: BigInt(user.id),
             spaceId: spaceId ? BigInt(spaceId) : null,
-            name: name ?? id.toString(),
+            name: name || id.toString(),
             assetHash,
           })
           .returning()
@@ -300,9 +314,6 @@ export default class ExpressionsController {
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const { expressionId } = validateExpressionParams.parse(req.params);
 

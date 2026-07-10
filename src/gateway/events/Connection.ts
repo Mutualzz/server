@@ -13,70 +13,67 @@ import Message from "./Message";
 import { PresenceBucket } from "../presence/Presence.bucket.ts";
 
 export default async function Connection(
-    this: WebSocketServer,
-    socket: WebSocket,
-    request: IncomingMessage,
+  this: WebSocketServer,
+  socket: WebSocket,
+  request: IncomingMessage,
 ) {
-    const ipAddress = request.socket.remoteAddress;
+  const ipAddress = request.socket.remoteAddress;
 
-    if (!ipAddress)
-        return socket.close(
-            GatewayCloseCodes.InvalidConnection,
-            "Invalid IP address",
-        );
+  if (!ipAddress)
+    return socket.close(
+      GatewayCloseCodes.InvalidConnection,
+      "Invalid IP address",
+    );
 
-    socket.ipAddress = ipAddress;
-    socket.userAgent = request.headers["user-agent"];
+  socket.ipAddress = ipAddress;
+  socket.userAgent = request.headers["user-agent"];
 
-    if (!socket.userAgent)
-        return socket.close(
-            GatewayCloseCodes.InvalidConnection,
-            "Invalid User-Agent",
-        );
+  if (!socket.userAgent)
+    return socket.close(
+      GatewayCloseCodes.InvalidConnection,
+      "Invalid User-Agent",
+    );
 
-    const rawUrl =
-        request.url ??
-        (process.env.NODE_ENV === "development"
-            ? "ws://localhost:4000/"
-            : "wss://gateway.mutualzz.com/");
+  const rawUrl =
+    request.url ??
+    (process.env.NODE_ENV === "development"
+      ? "ws://localhost:4000/"
+      : "wss://gateway.mutualzz.com/");
 
-    const { encoding, compress } = parseNegotiationParams(rawUrl);
+  const { encoding, compress } = parseNegotiationParams(rawUrl);
 
-    socket.encoding = encoding;
-    socket.compress = compress;
-    socket.codec = await createCodec(encoding);
-    socket.compressor = await createCompressor(compress);
-    socket.rateLimits = new Map();
+  socket.encoding = encoding;
+  socket.compress = compress;
+  socket.codec = await createCodec(encoding);
+  socket.compressor = await createCompressor(compress);
+  socket.rateLimits = new Map();
 
-    try {
-        PresenceBucket.add(socket);
+  try {
+    PresenceBucket.add(socket);
 
-        // @ts-expect-error The types errors do not matter in this case
-        socket.on("close", Close);
-        // @ts-expect-error The types errors do not matter in this case
-        socket.on("message", Message);
-        socket.on("error", logger.error);
+    // @ts-expect-error The types errors do not matter in this case
+    socket.on("close", Close);
+    // @ts-expect-error The types errors do not matter in this case
+    socket.on("message", Message);
+    socket.on("error", logger.error);
 
-        socket.events = {};
-        socket.sequence = 0;
-        socket.memberListSubs = socket.memberListSubs ?? new Map();
-        socket.presences = socket.presences ?? new Map();
+    socket.events = {};
+    socket.sequence = 0;
+    socket.memberListSubs = socket.memberListSubs ?? new Map();
+    socket.presences = socket.presences ?? new Map();
 
-        await Send(socket, {
-            op: "Hello",
-            d: {
-                heartbeatInterval: HEARTBEAT_INTERVAL,
-            },
-        });
+    await Send(socket, {
+      op: "Hello",
+      d: {
+        heartbeatInterval: HEARTBEAT_INTERVAL,
+      },
+    });
 
-        socket.readyTimeout = setTimeout(() => {
-            socket.close(
-                GatewayCloseCodes.InvalidConnection,
-                "Connection timed out",
-            );
-        }, HEARTBEAT_INTERVAL * 2);
-    } catch (err) {
-        logger.error(err);
-        socket.close(GatewayCloseCodes.UnknownError, "Internal Server Error");
-    }
+    socket.readyTimeout = setTimeout(() => {
+      socket.close(GatewayCloseCodes.InvalidConnection, "Connection timed out");
+    }, HEARTBEAT_INTERVAL * 2);
+  } catch (err) {
+    logger.error(err);
+    socket.close(GatewayCloseCodes.UnknownError, "Internal Server Error");
+  }
 }

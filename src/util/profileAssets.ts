@@ -27,20 +27,20 @@ export const LEGACY_PROFILE_IMAGE_KINDS = [
 
 export type ProfileImageKind = (typeof LEGACY_PROFILE_IMAGE_KINDS)[number];
 
-export type ProfileAssetRefs = {
+export interface ProfileAssetRefs {
   images: Set<string>;
   music: Set<string>;
   fonts: Set<string>;
-};
+}
 
-type ProfileAssetSource = {
+interface ProfileAssetSource {
   banner?: string | null;
   backgroundImage?: string | null;
   pageFontFamily?: string | null;
   profileMusic?: APIProfileMusic | null;
   blocks?: APIProfileBlock[] | unknown[];
   mobileBlocks?: APIMobileProfileBlock[] | unknown[];
-};
+}
 
 export const isProfileAssetHash = (
   value: string | null | undefined,

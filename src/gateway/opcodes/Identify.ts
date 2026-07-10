@@ -128,7 +128,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
           spaceId,
           channelId,
         );
-        if (!states || states.length === 0) continue;
+        if (!states.length) continue;
 
         // filter state which sendRejoinIfNeeded handled
         const filtered = states.filter(

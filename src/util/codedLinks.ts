@@ -1,5 +1,9 @@
 import { db, invitesTable, spaceMembersTable } from "@mutualzz/database";
-import type { APICodedLink, APICodedLinkInput, APIInvite } from "@mutualzz/types";
+import type {
+  APICodedLink,
+  APICodedLinkInput,
+  APIInvite,
+} from "@mutualzz/types";
 import { InviteType } from "@mutualzz/types";
 import { execNormalized, publicUserColumns } from "@mutualzz/util";
 import { count, eq } from "drizzle-orm";
@@ -64,7 +68,7 @@ export async function mergeCodedLinksFromContent(
     if (invite.expiresAt && new Date(invite.expiresAt) <= new Date()) continue;
 
     merged.push({
-      type: invite.type as InviteType.Space | InviteType.Friend,
+      type: invite.type,
       code: invite.code,
     });
     seen.add(code);

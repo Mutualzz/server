@@ -25,14 +25,17 @@ import { ChannelType, RelationshipType } from "@mutualzz/types";
 import { genRandColor, Snowflake, syncPostHashtags } from "@mutualzz/util";
 import { faker } from "@faker-js/faker";
 import bcrypt from "bcrypt";
-import { eq, inArray, like, or } from "drizzle-orm";
-
-const DEMO_EMAIL_DOMAIN = "demo.mutualzz.internal";
-const HERO_EMAIL = "screenshots@mutualzz.com";
-const HERO_USERNAME = "mutualzz";
-const HERO_PASSWORD = "ScreenshotDemo2026!";
-const HERO_GLOBAL_NAME = "Mutualzz";
-const FRIEND_COUNT = 10;
+import { eq } from "drizzle-orm";
+import {
+  assertDemoScriptSafeToRun,
+  DEMO_EMAIL_DOMAIN,
+  FRIEND_COUNT,
+  HERO_EMAIL,
+  HERO_GLOBAL_NAME,
+  HERO_PASSWORD,
+  HERO_USERNAME,
+  wipeDemoData,
+} from "./demoEnvironmentShared";
 
 const ACCENT_COLORS = [
   "#5865f2",
@@ -172,56 +175,12 @@ type SeededUser = {
   globalName: string;
 };
 
-function assertSafeToRun() {
-  if (
-    process.env.NODE_ENV === "production" &&
-    process.env.ALLOW_DEMO_SEED_ON_PRODUCTION !== "true"
-  ) {
-    console.error(
-      "Refusing to seed demo data in production. Set ALLOW_DEMO_SEED_ON_PRODUCTION=true to override.",
-    );
-    process.exit(1);
-  }
-
-  if (!process.env.DATABASE) {
-    console.error("DATABASE env var is required.");
-    process.exit(1);
-  }
-}
-
 function hoursAgoDate(hours: number) {
   return new Date(Date.now() - hours * 60 * 60 * 1000);
 }
 
 function minutesAgoDate(minutes: number) {
   return new Date(Date.now() - minutes * 60 * 1000);
-}
-
-async function wipeDemoData() {
-  const demoUsers = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(
-      or(
-        like(usersTable.email, `%@${DEMO_EMAIL_DOMAIN}`),
-        eq(usersTable.email, HERO_EMAIL),
-      ),
-    );
-
-  if (demoUsers.length === 0) {
-    console.log("No existing demo users to remove.");
-    return;
-  }
-
-  const demoUserIds = demoUsers.map((user) => user.id);
-
-  await db
-    .delete(spacesTable)
-    .where(inArray(spacesTable.ownerId, demoUserIds));
-
-  await db.delete(usersTable).where(inArray(usersTable.id, demoUserIds));
-
-  console.log(`Removed ${demoUserIds.length} existing demo user(s).`);
 }
 
 async function createDemoUser(input: {
@@ -603,14 +562,19 @@ async function seedHeroProfile(hero: SeededUser) {
 }
 
 async function main() {
-  assertSafeToRun();
+  assertDemoScriptSafeToRun("seed");
   faker.seed(42);
 
   console.log("Connecting to database...");
   await startDatabase();
 
   console.log("Resetting previous demo data...");
-  await wipeDemoData();
+  const removedUsers = await wipeDemoData();
+  if (removedUsers.length > 0) {
+    console.log(`Removed ${removedUsers.length} existing demo user(s).`);
+  } else {
+    console.log("No existing demo users to remove.");
+  }
 
   console.log("Creating demo users...");
   const hero = await createDemoUser({

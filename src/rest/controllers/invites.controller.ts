@@ -1,5 +1,15 @@
-import { deleteCache, getCache, invalidateCache, setCache, } from "@mutualzz/cache";
-import { db, invitesTable, relationshipsTable, spaceMembersTable } from "@mutualzz/database";
+import {
+  deleteCache,
+  getCache,
+  invalidateCache,
+  setCache,
+} from "@mutualzz/cache";
+import {
+  db,
+  invitesTable,
+  relationshipsTable,
+  spaceMembersTable,
+} from "@mutualzz/database";
 import type { APIInvite, APIRelationship } from "@mutualzz/types";
 import {
   HttpException,
@@ -125,7 +135,7 @@ export default class InvitesController {
         .pick({ code: true })
         .parse(req.params);
 
-      const viewerId = req.user?.id;
+      const viewerId = req.user.id;
 
       const invite = await execNormalized<APIInvite>(
         db.query.invitesTable.findFirst({
@@ -134,10 +144,7 @@ export default class InvitesController {
               ? {
                   with: {
                     members: {
-                      where: eq(
-                        spaceMembersTable.userId,
-                        BigInt(viewerId),
-                      ),
+                      where: eq(spaceMembersTable.userId, BigInt(viewerId)),
                     },
                   },
                 }
@@ -573,10 +580,7 @@ export default class InvitesController {
       const isInviter = BigInt(invite.inviterId) === BigInt(user.id);
 
       if (!canModerate && !isInviter)
-        throw new HttpException(
-          HttpStatusCode.Forbidden,
-          "Missing permission",
-        );
+        throw new HttpException(HttpStatusCode.Forbidden, "Missing permission");
 
       await db
         .delete(invitesTable)
@@ -670,12 +674,13 @@ export default class InvitesController {
     }
   }
 
-  static async getFriendInvite(req: Request, res: Response, next: NextFunction) {
+  static async getFriendInvite(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
     try {
       const { user } = req;
-
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       const invite = await execNormalized<APIInvite>(
         db.query.invitesTable.findFirst({
@@ -695,9 +700,7 @@ export default class InvitesController {
         invite.expiresAt &&
         dayjs().isAfter(dayjs(invite.expiresAt))
       ) {
-        await db
-          .delete(invitesTable)
-          .where(eq(invitesTable.code, invite.code));
+        await db.delete(invitesTable).where(eq(invitesTable.code, invite.code));
         await deleteCache("invite", invite.code);
 
         return res.status(HttpStatusCode.Success).json(null);
@@ -716,9 +719,6 @@ export default class InvitesController {
   ) {
     try {
       const { user } = req;
-
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
 
       requireNotRestricted(user);
 
@@ -792,9 +792,6 @@ export default class InvitesController {
     try {
       const { user } = req;
 
-      if (!user)
-        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
-
       requireNotRestricted(user);
 
       const { code } = validateInviteCodeParam.parse(req.params);
@@ -851,7 +848,7 @@ export default class InvitesController {
         ),
       });
 
-      let relationship: APIRelationship;
+      let relationship: APIRelationship | null = null;
 
       if (myRow) {
         if (myRow.type === RelationshipType.Blocked)

@@ -15,6 +15,7 @@ const italicAsteriskRegex = /(?<!\*)\*([^*]+?)\*(?!\*)/g;
 const italicUnderscoreRegex = /(?<!_)_([^_]+?)_(?!_)/g;
 const strikethroughRegex = /~~([^~]+?)~~/g;
 const unicodeEmojiBetweenColonsRegex =
+  // eslint-disable-next-line no-misleading-character-class
   /:([\p{Extended_Pictographic}\u200d\ufe0f]+):/gu;
 
 function stripFormattingMarkers(text: string): string {
@@ -37,9 +38,7 @@ function stripFormattingMarkers(text: string): string {
     .replace(/@everyone/g, "@everyone")
     .replace(/@here/g, "@here");
 
-  return resolveEmojiShortcodes(stripped)
-    .replace(/\s+/g, " ")
-    .trim();
+  return resolveEmojiShortcodes(stripped).replace(/\s+/g, " ").trim();
 }
 
 export function formatPushNotificationBody(
