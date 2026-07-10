@@ -5,7 +5,7 @@ import { rolesTable } from "./Role";
 import { spacesTable } from "./Space";
 import { spaceMembersTable } from "./SpaceMember";
 import { spaceMemberRolesTable } from "./SpaceMemberRole";
-import { spaceBansTable } from "@mutualzz/database/schemas";
+import { spaceBansTable } from "./SpaceBan";
 
 export const spaceRelations = relations(spacesTable, ({ one, many }) => ({
     owner: one(usersTable, {

@@ -67,11 +67,14 @@ function shouldPushForPresence(status: string): boolean {
 }
 
 function buildNotificationUrl(channel: NotifyChannel): string {
-  if (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM) {
-    return `${APP_SCHEME}://@me/${channel.id}`;
+  const isDm =
+    channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM;
+
+  if (isDm) {
+    return `${APP_SCHEME}:///me/${channel.id}`;
   }
 
-  return `${APP_SCHEME}://spaces/channel/${channel.id}`;
+  return `${APP_SCHEME}:///spaces/channel/${channel.id}`;
 }
 
 async function resolveRecipientIds(
@@ -425,7 +428,7 @@ export async function sendSupportReplyPush(
   const tokens = tokensByUser.get(userId);
   if (!tokens?.length) return;
 
-  const url = `${APP_SCHEME}://support/tickets/${ticketId}`;
+  const url = `${APP_SCHEME}:///support/tickets/${ticketId}`;
   const messages: ExpoPushMessage[] = tokens.map(({ token }) => ({
     to: token,
     sound: "default",
