@@ -151,7 +151,7 @@ export async function setupListener(this: WebSocket) {
           Object.values(this.userSubscriptions ?? {}).forEach((x) => x?.());
         }
 
-        this.memberListSubs.clear();
+        this.memberListSubs?.clear();
       } catch (err) {
         logger.error(
           "[RabbitMQ] setupListener: ",
