@@ -23,7 +23,6 @@ import {
 } from "./pushNotificationAvatar.js";
 import { formatPushNotificationBody } from "./pushNotificationContent.js";
 
-const ANDROID_MESSAGE_CHANNEL_ID = "messages";
 const MESSAGE_PUSH_DISPLAY_MODE = "notifee";
 
 const logger = new Logger({ tag: "PushNotifications" });
@@ -358,10 +357,13 @@ export async function sendMessagePushNotifications(
           continue;
         }
 
+        // Data-only / headless: no title, body, or channelId at the Expo
+        // message root. Those fields would make this a Notification Message,
+        // which Android shows (or silently drops if the channel is missing)
+        // without running our Notifee background task.
         messages.push({
           to: token,
           priority: "high",
-          channelId: ANDROID_MESSAGE_CHANNEL_ID,
           _contentAvailable: true,
           data: sharedData,
         });
