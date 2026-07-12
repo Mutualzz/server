@@ -3,6 +3,7 @@ import { type Client, ChannelType, Collection } from "discord.js";
 import { CronJob } from "cron";
 import ms from "ms";
 import { IDS } from "../../Constants";
+import { DiscordBridgePeer } from "../../bridge/DiscordBridgePeer";
 
 export default class ReadyListener extends Listener {
   constructor(context: Listener.LoaderContext, options: Listener.Options) {
@@ -57,6 +58,8 @@ export default class ReadyListener extends Listener {
         if (smpThread) client.metadata.chats.smpMC = smpThread;
       }
     }
+
+    await DiscordBridgePeer.start(client);
 
     logger.info(`[Client] Started in ${ms(Date.now() - client.startTime)}`);
     logger.info(`[Client] Ready as ${client.user.tag}`);

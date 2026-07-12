@@ -113,6 +113,14 @@ export class VoiceStateService {
 
         const previous = await VoiceStateRedis.getState(userId);
         if (!requestedChannelId) {
+            // App leave must not tear down an active Minecraft voice session.
+            if (previous?.client === "minecraft") {
+                logger.debug(
+                    "Ignoring app voice leave while user is on Minecraft voice",
+                    { userId: String(userId) },
+                );
+                return;
+            }
             if (previous) {
                 try {
                     const payload = JSON.stringify({
@@ -166,6 +174,29 @@ export class VoiceStateService {
             return;
         }
 
+        // App auto-rejoin / refresh must not steal an active Minecraft voice session.
+        const incomingClient = body.client;
+        if (
+            previous?.client === "minecraft" &&
+            previous.channelId &&
+            incomingClient !== "minecraft"
+        ) {
+            logger.debug(
+                "Ignoring app VoiceStateUpdate while user is on Minecraft voice",
+                {
+                    userId: String(userId),
+                    incomingClient: incomingClient ?? null,
+                },
+            );
+            void VoiceStateService.streamStatesToSocket(
+                socket,
+                previous.spaceId ?? spaceId,
+                previous.channelId,
+                socket.userId,
+            );
+            return;
+        }
+
         const isDmVoice = spaceId == null;
 
         if (!isDmVoice) {
@@ -216,6 +247,7 @@ export class VoiceStateService {
             spaceDeaf: moderation.spaceDeaf,
             sessionId,
             updatedAt: Date.now(),
+            client: body.client ?? previous?.client,
         };
 
         const active = await VoiceStateRedis.getActiveSession(userId);
@@ -292,6 +324,17 @@ export class VoiceStateService {
         if (!existing?.channelId) return false;
         if (existing.spaceId !== spaceId) return false;
 
+        if (existing.client === "minecraft") {
+            const { MinecraftVoicePeers } = await import(
+                "../../minecraft/voice/MinecraftVoicePeers.ts"
+            );
+            const { revokeMinecraftAudioTokenForUser } = await import(
+                "../../minecraft/voice/audioTokens.ts"
+            );
+            revokeMinecraftAudioTokenForUser(String(targetUserId));
+            await MinecraftVoicePeers.leave(String(targetUserId), "kicked");
+        }
+
         try {
             const payload = JSON.stringify({
                 userId: String(targetUserId),
@@ -334,6 +377,234 @@ export class VoiceStateService {
         });
 
         void VoiceStateService.emitStatesAsUpdates(spaceId, existing.channelId);
+
+        return true;
+    }
+
+    /**
+     * Socket-free join for Minecraft-linked users (no gateway WebSocket).
+     * Broadcasts VoiceStateUpdate to the app; returns RTC credentials for the hub peer.
+     */
+    static async joinFromMinecraft(params: {
+        userId: Snowflake;
+        spaceId: Snowflake;
+        channelId: Snowflake;
+    }): Promise<
+        | {
+              ok: true;
+              credentials: {
+                  roomId: string;
+                  spaceId: string;
+                  channelId: string;
+                  voiceEndpoint: string;
+                  voiceToken: string;
+                  sessionId: string;
+              };
+          }
+        | { ok: false; code: string; message: string }
+    > {
+        const { userId, spaceId, channelId } = params;
+
+        const hasConnect = await canVoiceConnect({
+            spaceId,
+            channelId,
+            userId,
+        });
+        if (!hasConnect) {
+            return {
+                ok: false,
+                code: "missing_permission",
+                message:
+                    "Missing permission to connect to this voice channel (are you in the space?)",
+            };
+        }
+
+        const previous = await VoiceStateRedis.getState(userId);
+        const sessionId = crypto.randomUUID();
+        const moderation = await this.getMemberVoiceModeration(spaceId, userId);
+        const hasSpeak = await canVoiceSpeak({
+            spaceId,
+            channelId,
+            userId,
+        });
+
+        const next: VoiceState = {
+            userId,
+            spaceId,
+            channelId,
+            selfMute: false,
+            selfDeaf: false,
+            spaceMute: moderation.spaceMute || !hasSpeak,
+            spaceDeaf: moderation.spaceDeaf,
+            sessionId,
+            updatedAt: Date.now(),
+            client: "minecraft",
+        };
+
+        const active = await VoiceStateRedis.getActiveSession(userId);
+        if (active && active.sessionId !== sessionId) {
+            try {
+                await VoiceStateRedis.clearActiveSession(userId, active.tokenId);
+                const payload = JSON.stringify({
+                    userId: String(userId),
+                    spaceId: previous?.spaceId ?? spaceId,
+                    // App only skips auto-rejoin for the exact token "superseded".
+                    reason: "superseded",
+                    instanceId: this.instanceId,
+                });
+                await redis.publish("voice:control:kick", payload);
+            } catch (err) {
+                logger.warn(
+                    "Failed to supersede prior voice session for Minecraft join",
+                    { userId, err },
+                );
+            }
+        }
+
+        if (
+            previous?.channelId &&
+            (previous.spaceId !== spaceId ||
+                String(previous.channelId) !== String(channelId))
+        ) {
+            await VoiceStateRedis.removeState({
+                userId,
+                spaceId: previous.spaceId ?? null,
+                channelId: previous.channelId,
+            });
+            await emitEvent({
+                event: "VoiceStateUpdate",
+                space_id: previous.spaceId ?? null,
+                data: {
+                    userId,
+                    spaceId: previous.spaceId ?? null,
+                    channelId: null,
+                },
+            });
+            if (previous.channelId) {
+                void VoiceStateService.emitStatesAsUpdates(
+                    previous.spaceId ?? null,
+                    previous.channelId,
+                );
+            }
+        }
+
+        await VoiceStateRedis.upsertState(next);
+        await emitEvent({
+            event: "VoiceStateUpdate",
+            space_id: spaceId,
+            data: next,
+        });
+        void VoiceStateService.emitStatesAsUpdates(spaceId, channelId);
+
+        const voiceEndpoint = this.getVoiceEndpoint();
+        if (!voiceEndpoint) {
+            return {
+                ok: false,
+                code: "voice_unavailable",
+                message: "Voice server is not configured",
+            };
+        }
+
+        const roomId = voiceScopeKey(spaceId, channelId);
+        const tokenId = crypto.randomUUID();
+        const voiceToken = generateVoiceToken(
+            userId.toString(),
+            sessionId,
+            roomId,
+            tokenId,
+        );
+
+        await VoiceStateRedis.setActiveSession({
+            userId,
+            sessionId,
+            roomId,
+            tokenId,
+            updatedAt: Date.now(),
+        });
+        await createVoiceSession(voiceToken, userId, sessionId, roomId);
+
+        return {
+            ok: true,
+            credentials: {
+                roomId,
+                spaceId: spaceId.toString(),
+                channelId: channelId.toString(),
+                voiceEndpoint,
+                voiceToken,
+                sessionId,
+            },
+        };
+    }
+
+    /** Leave voice if the active session is a Minecraft client. */
+    static async leaveFromMinecraft(userId: Snowflake): Promise<boolean> {
+        const existing = await VoiceStateRedis.getState(userId);
+        if (!existing?.channelId || !existing.spaceId) {
+            const { MinecraftVoicePeers } = await import(
+                "../../minecraft/voice/MinecraftVoicePeers.ts"
+            );
+            const { revokeMinecraftAudioTokenForUser } = await import(
+                "../../minecraft/voice/audioTokens.ts"
+            );
+            revokeMinecraftAudioTokenForUser(String(userId));
+            await MinecraftVoicePeers.leave(String(userId));
+            return false;
+        }
+        if (existing.client !== "minecraft") return false;
+        // kickMemberFromVoice closes the hub mediasoup peer when client === minecraft
+        return this.kickMemberFromVoice(
+            existing.spaceId,
+            userId,
+            "Left Minecraft voice",
+        );
+    }
+
+    /** Sync mute/deafen from the Minecraft Fabric mod into voice state for the app UI. */
+    static async updateMinecraftSelfState(params: {
+        userId: Snowflake;
+        selfMute: boolean;
+        selfDeaf: boolean;
+    }): Promise<boolean> {
+        const { userId } = params;
+        const selfDeaf = params.selfDeaf === true;
+        // Discord-style: deafen implies mute.
+        const selfMute = selfDeaf || params.selfMute === true;
+
+        const existing = await VoiceStateRedis.getState(userId);
+        if (!existing?.channelId) return false;
+        if (existing.client !== "minecraft") return false;
+
+        const changed =
+            existing.selfMute !== selfMute || existing.selfDeaf !== selfDeaf;
+
+        const next: VoiceState = {
+            ...existing,
+            selfMute,
+            selfDeaf,
+            updatedAt: Date.now(),
+        };
+
+        if (changed) {
+            await VoiceStateRedis.upsertState(next);
+            await emitEvent({
+                event: "VoiceStateUpdate",
+                space_id: existing.spaceId ?? null,
+                data: next,
+            });
+        }
+
+        try {
+            const { MinecraftVoicePeers } = await import(
+                "../../minecraft/voice/MinecraftVoicePeers.ts"
+            );
+            // Always apply — even when Redis already matched — so a stale paused
+            // producer cannot leave the MC peer silently muted.
+            MinecraftVoicePeers.get(String(userId))?.setLocalMuted(
+                selfMute || selfDeaf,
+            );
+        } catch {
+            // ignore
+        }
 
         return true;
     }

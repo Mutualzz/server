@@ -24,6 +24,7 @@ import {
 import { formatPushNotificationBody } from "./pushNotificationContent.js";
 
 const MESSAGE_PUSH_DISPLAY_MODE = "notifee";
+const ANDROID_MESSAGE_CHANNEL_ID = "messages";
 
 const logger = new Logger({ tag: "PushNotifications" });
 
@@ -357,14 +358,17 @@ export async function sendMessagePushNotifications(
           continue;
         }
 
-        // Data-only / headless: no title, body, or channelId at the Expo
-        // message root. Those fields would make this a Notification Message,
-        // which Android shows (or silently drops if the channel is missing)
-        // without running our Notifee background task.
+        // Notification + data so FCM shows a system tray notification when the
+        // app is backgrounded or killed. Foreground still upgrades to Notifee.
         messages.push({
           to: token,
+          sound: "default",
+          title,
+          ...(subtitle ? { subtitle } : {}),
+          body,
           priority: "high",
-          _contentAvailable: true,
+          channelId: ANDROID_MESSAGE_CHANNEL_ID,
+          ...(isDm ? { categoryId: DM_REPLY_CATEGORY_ID } : {}),
           data: sharedData,
         });
       }

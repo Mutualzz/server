@@ -323,4 +323,5 @@ export default class AuthController {
       next(err);
     }
   }
+
 }

@@ -1,4 +1,4 @@
-import type { Snowflake } from "@mutualzz/types";
+import type { Snowflake, VoiceClient } from "@mutualzz/types";
 
 export interface VoiceState {
     userId: Snowflake;
@@ -13,6 +13,8 @@ export interface VoiceState {
 
     sessionId: string;
     updatedAt: number;
+
+    client?: VoiceClient;
 }
 
 export type VoiceStateUpdateBody = {
@@ -22,4 +24,5 @@ export type VoiceStateUpdateBody = {
     selfDeaf?: boolean;
     /** Request fresh voice server credentials (e.g. after RTC disconnect). */
     refreshRtc?: boolean;
+    client?: VoiceClient;
 };

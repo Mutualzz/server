@@ -3,6 +3,7 @@ export * from "./spaces";
 export * from "./users";
 export * from "./discord";
 export * from "./post";
+export * from "./minecraft";
 
 export * from "./Theme";
 export * from "./Invite";

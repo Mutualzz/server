@@ -406,6 +406,41 @@
       "when": 1783642236527,
       "tag": "0057_free_gwen_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1783753141445,
+      "tag": "0058_good_true_believers",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1783758646764,
+      "tag": "0059_wise_scream",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1783759517052,
+      "tag": "0060_serious_xorn",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1783760650690,
+      "tag": "0061_giant_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1783826993453,
+      "tag": "0062_massive_leper_queen",
+      "breakpoints": true
     }
   ],
   "version": "7"

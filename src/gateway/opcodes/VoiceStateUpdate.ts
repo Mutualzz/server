@@ -18,6 +18,14 @@ export async function onVoiceStateUpdate(
     const channelId = body.channelId ?? null;
     const spaceId = body.spaceId ?? null;
 
+    const client =
+        body.client === "desktop" ||
+        body.client === "mobile" ||
+        body.client === "web" ||
+        body.client === "minecraft"
+            ? body.client
+            : undefined;
+
     // leave
     if (!channelId) {
         await VoiceStateService.handleVoiceStateUpdate(this, {
@@ -26,6 +34,7 @@ export async function onVoiceStateUpdate(
             selfMute: body.selfMute === true,
             selfDeaf: body.selfDeaf === true,
             refreshRtc: body.refreshRtc === true,
+            client,
         });
         return;
     }
@@ -37,5 +46,6 @@ export async function onVoiceStateUpdate(
         selfMute: body.selfMute === true,
         selfDeaf: body.selfDeaf === true,
         refreshRtc: body.refreshRtc === true,
+        client,
     });
 }

@@ -45,7 +45,9 @@
             "@mutualzz/util": ["./src/util"],
             "@mutualzz/util/*": ["./src/util/*"],
             "@mutualzz/voice": ["./src/voice"],
-            "@mutualzz/voice/*": ["./src/voice/*"]
+            "@mutualzz/voice/*": ["./src/voice/*"],
+            "@mutualzz/minecraft": ["./src/minecraft"],
+            "@mutualzz/minecraft/*": ["./src/minecraft/*"]
         }
     },
     "include": ["src/**/*"],
