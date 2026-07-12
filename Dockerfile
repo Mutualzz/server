@@ -17,5 +17,5 @@ WORKDIR /app
 COPY --from=build /app /app
 
 WORKDIR /app/apps/server
-EXPOSE 3000 3001 4000
+EXPOSE 3000 3001 4000 3015
 CMD ["pnpm", "start"]
