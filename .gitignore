@@ -169,12 +169,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
-=======
 # caches
 .eslintcache
 .cache
 *.tsbuildinfo
->>>>>>> a061d947ab522e63ec8dfbab13f3ec0d032f604a
+
+assets/app-icons/[0-9]*.png
 
 # IntelliJ based IDEs
 .idea

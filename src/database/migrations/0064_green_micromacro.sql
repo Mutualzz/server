@@ -1,0 +1,1 @@
+ALTER TABLE "user_settings" ADD COLUMN "shareActivity" boolean DEFAULT true NOT NULL;

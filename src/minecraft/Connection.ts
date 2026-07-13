@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "http";
 import type { WebSocket } from "ws";
 import { VoiceStateService } from "../gateway/voice/VoiceState.service";
+import { PresenceService } from "../gateway/presence/Presence.service.ts";
 import { publishBridgeEvent } from "./BridgeBus";
 import { emitMinecraftLinkUpdate } from "./linkEvents";
 import { MinecraftVoicePeers } from "./voice/MinecraftVoicePeers.ts";
@@ -36,6 +37,7 @@ import {
   playerLeft,
   playersForBridge,
 } from "./OnlinePlayers";
+import { ensureMember } from "./BridgeMembers";
 import { generateLinkCode, hashBridgeToken } from "./tokens";
 import type {
   BridgeChatPayload,
@@ -45,6 +47,54 @@ import type {
 } from "./types";
 
 const logger = new Logger({ tag: "MinecraftWS" });
+
+const resolveBridgePresenceLabels = async (
+  bridgeId: string,
+  serverId: string,
+) => {
+  const server = await db.query.bridgeMinecraftServersTable.findFirst({
+    where: and(
+      eq(bridgeMinecraftServersTable.bridgeId, BigInt(bridgeId)),
+      eq(bridgeMinecraftServersTable.serverId, serverId),
+    ),
+    columns: { displayName: true, serverId: true },
+  });
+
+  const rawDisplay = server?.displayName?.trim() || "";
+  const customizedServerName =
+    rawDisplay && rawDisplay.toLowerCase() !== serverId.toLowerCase()
+      ? rawDisplay
+      : null;
+
+  return {
+    serverName: customizedServerName,
+  };
+};
+
+const syncMinecraftPresence = async (
+  uuid: string,
+  bridgeId: string,
+  serverId: string,
+  type: "JOIN" | "LEAVE",
+) => {
+  const link = await db.query.minecraftLinksTable.findFirst({
+    where: eq(minecraftLinksTable.minecraftUuid, uuid),
+  });
+  if (!link) return;
+
+  const userId = link.userId.toString();
+
+  if (type === "LEAVE") {
+    await PresenceService.clearMinecraftBridgeActivity(userId, bridgeId);
+    return;
+  }
+
+  const { serverName } = await resolveBridgePresenceLabels(bridgeId, serverId);
+  await PresenceService.setMinecraftBridgeActivity(userId, {
+    bridgeId,
+    serverName,
+  });
+};
 
 const HEARTBEAT_INTERVAL = 15_000;
 const HEARTBEAT_TIMEOUT = 45_000;
@@ -197,7 +247,17 @@ export const onMinecraftConnection = (
     clearInterval(heartbeatTimer);
     const session = getSession(socket);
     if (session) {
-      clearServerPlayers(session.bridgeId, session.serverId);
+      const removed = clearServerPlayers(session.bridgeId, session.serverId);
+      for (const player of removed) {
+        void syncMinecraftPresence(
+          player.uuid,
+          session.bridgeId,
+          session.serverId,
+          "LEAVE",
+        ).catch((err) =>
+          logger.debug(`presence clear on disconnect failed: ${err}`),
+        );
+      }
       await publishBridgeEvent({
         type: "PRESENCE",
         bridgeId: session.bridgeId,
@@ -359,6 +419,12 @@ const handlePlayerEvent = async (
       name,
       serverId: session.serverId,
     });
+    const link = await db.query.minecraftLinksTable.findFirst({
+      where: eq(minecraftLinksTable.minecraftUuid, uuid),
+    });
+    if (link) {
+      void ensureMember(session.bridgeId, link.userId);
+    }
   } else {
     playerLeft(session.bridgeId, uuid);
     const link = await db.query.minecraftLinksTable.findFirst({
@@ -368,6 +434,13 @@ const handlePlayerEvent = async (
       void VoiceStateService.leaveFromMinecraft(link.userId.toString());
     }
   }
+
+  void syncMinecraftPresence(
+    uuid,
+    session.bridgeId,
+    session.serverId,
+    type,
+  ).catch((err) => logger.debug(`presence sync failed: ${err}`));
 
   const eventId = `${session.sessionId}:${type.toLowerCase()}:${uuid}:${Snowflake.generate()}`;
 
@@ -478,6 +551,8 @@ const handleLink = async (
       discordId: row.discordId,
       createdAt: new Date(),
     });
+
+    void ensureMember(session.bridgeId, row.userId);
 
     await publishBridgeEvent({
       type: "LINK_RESULT",
@@ -636,9 +711,7 @@ const handleVoiceJoin = async (
 
   reply({
     ok: true,
-    message: channelName
-      ? `Joined #${channelName}`
-      : "Joined Mutualzz voice",
+    message: channelName ? `Joined #${channelName}` : "Joined Mutualzz voice",
     userId,
     spaceId: result.credentials.spaceId,
     channelId: result.credentials.channelId,
@@ -711,9 +784,8 @@ const handleVoiceLeave = async (
   let channelId = "";
   let channelName = "";
   try {
-    const { VoiceStateRedis } = await import(
-      "../gateway/voice/VoiceState.redis.ts"
-    );
+    const { VoiceStateRedis } =
+      await import("../gateway/voice/VoiceState.redis.ts");
     const state = await VoiceStateRedis.getState(userId);
     if (state?.client === "minecraft" && state.channelId) {
       channelId = String(state.channelId);

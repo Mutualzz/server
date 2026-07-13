@@ -61,6 +61,11 @@ router.delete(
   createLimiter(60_000, 10),
   MeController.deletePushToken,
 );
+router.delete(
+  "/activity-history",
+  createLimiter(60_000, 10),
+  MeController.clearActivityHistory,
+);
 router.post(
   "/delete",
   createLimiter(60_000, 3),

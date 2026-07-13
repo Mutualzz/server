@@ -172,7 +172,7 @@ export async function getBulkPresences(
 ): Promise<Record<string, PresencePayload>> {
   const results = await Promise.all(
     userIds.map(async (id) => {
-      const presence = await PresenceService.get(id);
+      const presence = await PresenceService.getPublic(id);
       return [id, presence] as const;
     }),
   );

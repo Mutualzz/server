@@ -45,6 +45,7 @@ export const bridgeRelations = relations(bridgesTable, ({ one, many }) => ({
     servers: many(bridgeMinecraftServersTable),
     discordBindings: many(bridgeDiscordBindingsTable),
     voiceBindings: many(bridgeVoiceBindingsTable),
+    members: many(bridgeMembersTable),
 }));
 
 export const bridgeTokensTable = pgTable(
@@ -242,7 +243,7 @@ export const bridgeMessageRelations = relations(
     }),
 );
 
-/** Per-owner read cursor for bridge chat unreads. */
+/** Per-user read cursor for bridge chat unreads. */
 export const bridgeReadStatesTable = pgTable(
     "bridge_read_states",
     {
@@ -274,6 +275,44 @@ export const bridgeReadStateRelations = relations(
         bridge: one(bridgesTable, {
             fields: [bridgeReadStatesTable.bridgeId],
             references: [bridgesTable.id],
+        }),
+    }),
+);
+
+/**
+ * Community members of a bridge (auto-added when a linked MC player joins).
+ * The bridge owner is always treated as a member even without a row.
+ */
+export const bridgeMembersTable = pgTable(
+    "bridge_members",
+    {
+        bridgeId: bigint({ mode: "bigint" })
+            .notNull()
+            .references(() => bridgesTable.id, { onDelete: "cascade" }),
+        userId: bigint({ mode: "bigint" })
+            .notNull()
+            .references(() => usersTable.id, { onDelete: "cascade" }),
+        joinedAt: timestamp({ withTimezone: true, mode: "date" })
+            .notNull()
+            .defaultNow(),
+    },
+    (table) => [
+        primaryKey({ columns: [table.bridgeId, table.userId] }),
+        index("bridge_member_user_id_idx").on(table.userId),
+        index("bridge_member_bridge_id_idx").on(table.bridgeId),
+    ],
+);
+
+export const bridgeMemberRelations = relations(
+    bridgeMembersTable,
+    ({ one }) => ({
+        bridge: one(bridgesTable, {
+            fields: [bridgeMembersTable.bridgeId],
+            references: [bridgesTable.id],
+        }),
+        user: one(usersTable, {
+            fields: [bridgeMembersTable.userId],
+            references: [usersTable.id],
         }),
     }),
 );

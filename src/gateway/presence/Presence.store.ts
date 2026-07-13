@@ -1,21 +1,124 @@
-import type { PresencePayload, Snowflake } from "@mutualzz/types";
+import type {
+    PresenceActivity,
+    PresencePayload,
+    PresenceStatus,
+    Snowflake,
+} from "@mutualzz/types";
 import { redis } from "@mutualzz/util";
+import { MAX_ACTIVITIES } from "./Presence.validator.ts";
 
 interface Entry {
     presence: PresencePayload;
     expiresAt: number;
 }
 
+export type SessionPresence = Omit<PresencePayload, "updatedAt"> & {
+    updatedAt: number;
+};
+
 const presenceKey = (userId: Snowflake) => `presence:${userId}`;
+const sessionsKey = (userId: Snowflake) => `presence:sessions:${userId}`;
+
+const STATUS_RANK: Record<string, number> = {
+    online: 3,
+    idle: 2,
+    dnd: 1,
+};
+
+function mergeSessionPresences(sessions: SessionPresence[]): PresencePayload {
+    const now = Date.now();
+    if (!sessions.length) {
+        return { status: "offline", activities: [], updatedAt: now };
+    }
+
+    const visible = sessions.filter(
+        (s) => s.status !== "invisible" && s.status !== "offline",
+    );
+
+    let status: PresenceStatus;
+    if (visible.length === 0) {
+        status = sessions.some((s) => s.status === "invisible")
+            ? "invisible"
+            : "offline";
+    } else {
+        status = visible.reduce<PresenceStatus>((best, s) => {
+            return (STATUS_RANK[s.status] ?? 0) > (STATUS_RANK[best] ?? 0)
+                ? s.status
+                : best;
+        }, visible[0]!.status);
+    }
+
+    const sorted = [...sessions].sort(
+        (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+    );
+
+    const custom = sorted
+        .flatMap((s) => s.activities ?? [])
+        .find((a) => a.type === "custom");
+
+    const activityRichness = (activity: PresenceActivity) =>
+        (activity.details ? 2 : 0) + (activity.state ? 1 : 0);
+
+    const games = new Map<string, PresenceActivity>();
+    for (const session of sessions) {
+        for (const activity of session.activities ?? []) {
+            if (activity.type === "custom") continue;
+            const key = `${activity.type}:${(activity.name ?? "").toLowerCase()}`;
+            const prev = games.get(key);
+            if (!prev) {
+                games.set(key, activity);
+                continue;
+            }
+
+            const richness = activityRichness(activity);
+            const prevRichness = activityRichness(prev);
+            if (richness > prevRichness) {
+                games.set(key, {
+                    ...activity,
+                    applicationId: activity.applicationId ?? prev.applicationId,
+                    timestamps: activity.timestamps ?? prev.timestamps,
+                });
+                continue;
+            }
+            if (richness < prevRichness) continue;
+
+            if (
+                (activity.timestamps?.start ?? Number.POSITIVE_INFINITY) <
+                (prev.timestamps?.start ?? Number.POSITIVE_INFINITY)
+            ) {
+                games.set(key, activity);
+            }
+        }
+    }
+
+    const activities = [
+        ...(custom ? [custom] : []),
+        ...games.values(),
+    ].slice(0, MAX_ACTIVITIES);
+
+    const device =
+        sessions.find((s) => s.device === "desktop")?.device ??
+        sessions.find((s) => s.device === "mobile")?.device ??
+        sessions.find((s) => s.device === "web")?.device;
+
+    return {
+        status,
+        activities,
+        ...(device ? { device } : {}),
+        updatedAt: now,
+    };
+}
 
 export class PresenceStore {
     private entries = new Map<Snowflake, Entry>();
-
     private ttlMs = 10 * 60_000;
 
-    upsert(userId: string, presence: Omit<PresencePayload, "updatedAt">) {
+    writeMerged(userId: string, presence: PresencePayload) {
         const now = Date.now();
-        const newEntry: PresencePayload = { ...presence, updatedAt: now };
+        const newEntry: PresencePayload = {
+            ...presence,
+            updatedAt: presence.updatedAt || now,
+        };
 
         this.entries.set(userId, {
             presence: newEntry,
@@ -34,10 +137,93 @@ export class PresenceStore {
         return newEntry;
     }
 
+    upsert(userId: string, presence: Omit<PresencePayload, "updatedAt">) {
+        return this.writeMerged(userId, {
+            ...presence,
+            updatedAt: Date.now(),
+        });
+    }
+
+    async upsertSession(
+        userId: string,
+        sessionId: string,
+        presence: Omit<PresencePayload, "updatedAt">,
+    ): Promise<PresencePayload> {
+        const now = Date.now();
+        const session: SessionPresence = { ...presence, updatedAt: now };
+
+        await redis
+            .hset(sessionsKey(userId), sessionId, JSON.stringify(session))
+            .catch(() => null);
+        await redis.pexpire(sessionsKey(userId), this.ttlMs).catch(() => null);
+
+        return this.recomputeMerged(userId);
+    }
+
+    async removeSession(
+        userId: string,
+        sessionId: string,
+    ): Promise<{ merged: PresencePayload; remaining: number }> {
+        await redis.hdel(sessionsKey(userId), sessionId).catch(() => null);
+        const remaining = await redis
+            .hlen(sessionsKey(userId))
+            .catch(() => 0);
+
+        if (!remaining) {
+            const offline = this.setOffline(userId);
+            await redis.del(sessionsKey(userId)).catch(() => null);
+            return { merged: offline, remaining: 0 };
+        }
+
+        await redis.pexpire(sessionsKey(userId), this.ttlMs).catch(() => null);
+        const merged = await this.recomputeMerged(userId);
+        return { merged, remaining };
+    }
+
+    async getSessions(userId: string): Promise<SessionPresence[]> {
+        const raw = await redis.hgetall(sessionsKey(userId)).catch(() => null);
+        if (!raw || !Object.keys(raw).length) return [];
+
+        const out: SessionPresence[] = [];
+        for (const value of Object.values(raw)) {
+            try {
+                out.push(JSON.parse(value) as SessionPresence);
+            } catch {
+                // ignore
+            }
+        }
+        return out;
+    }
+
+    async getSession(
+        userId: string,
+        sessionId: string,
+    ): Promise<SessionPresence | null> {
+        const raw = await redis
+            .hget(sessionsKey(userId), sessionId)
+            .catch(() => null);
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw) as SessionPresence;
+        } catch {
+            return null;
+        }
+    }
+
+    async recomputeMerged(userId: string): Promise<PresencePayload> {
+        const sessions = await this.getSessions(userId);
+        const merged = mergeSessionPresences(sessions);
+        return this.writeMerged(userId, merged);
+    }
+
     touch(userId: Snowflake) {
         const entry = this.entries.get(userId);
         if (!entry) return;
         entry.expiresAt = Date.now() + this.ttlMs;
+
+        const id = String(userId);
+        void redis.pexpire(presenceKey(id), this.ttlMs).catch(() => {});
+        void redis.pexpire(sessionsKey(id), this.ttlMs).catch(() => {});
     }
 
     async warmFromRedis(userId: string): Promise<void> {
@@ -49,16 +235,11 @@ export class PresenceStore {
 
         try {
             const parsed = JSON.parse(raw) as PresencePayload;
-
-            const updatedAt = Number(parsed?.updatedAt ?? 0);
-            if (!updatedAt) return;
-
-            const expiresAt = updatedAt + this.ttlMs;
-            if (expiresAt <= Date.now()) return;
+            if (!parsed) return;
 
             this.entries.set(userId as any, {
                 presence: parsed,
-                expiresAt,
+                expiresAt: Date.now() + this.ttlMs,
             });
         } catch {
             // ignore invalid JSON
@@ -82,14 +263,11 @@ export class PresenceStore {
 
         try {
             const parsed = JSON.parse(raw) as PresencePayload;
-
-            if (!parsed.updatedAt || parsed.updatedAt + this.ttlMs <= now) {
-                return null;
-            }
+            if (!parsed) return null;
 
             this.entries.set(userId, {
                 presence: parsed,
-                expiresAt: parsed.updatedAt + this.ttlMs,
+                expiresAt: now + this.ttlMs,
             });
 
             return parsed;
@@ -99,7 +277,11 @@ export class PresenceStore {
     }
 
     setOffline(userId: string) {
-        return this.upsert(userId, { status: "offline", activities: [] });
+        return this.writeMerged(userId, {
+            status: "offline",
+            activities: [],
+            updatedAt: Date.now(),
+        });
     }
 
     gc() {

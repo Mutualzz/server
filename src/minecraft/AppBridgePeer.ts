@@ -1,7 +1,11 @@
-import { bridgesTable, db } from "@mutualzz/database";
+import {
+  bridgeMembersTable,
+  bridgesTable,
+  db,
+} from "@mutualzz/database";
 import { Logger } from "@mutualzz/logger";
 import { emitEvent, fireAndForget, Snowflake } from "@mutualzz/util";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { subscribeBridge } from "./BridgeBus";
 import type {
   BridgeChatPayload,
@@ -58,7 +62,8 @@ export interface GatewayBridgePresencePayload {
 
 export class AppBridgePeer {
   private static unsubscribers = new Map<string, () => void>();
-  private static ownersByBridge = new Map<string, string>();
+  /** bridgeId → Mutualzz user ids that should receive live events */
+  private static recipientsByBridge = new Map<string, Set<string>>();
   private static refreshTimer: ReturnType<typeof setInterval> | null = null;
   private static started = false;
 
@@ -77,8 +82,21 @@ export class AppBridgePeer {
     this.refreshTimer = null;
     for (const unsub of this.unsubscribers.values()) unsub();
     this.unsubscribers.clear();
-    this.ownersByBridge.clear();
+    this.recipientsByBridge.clear();
     this.started = false;
+  }
+
+  static addRecipient(bridgeId: string, userId: string) {
+    const set = this.recipientsByBridge.get(bridgeId) ?? new Set<string>();
+    set.add(userId);
+    this.recipientsByBridge.set(bridgeId, set);
+  }
+
+  static removeRecipient(bridgeId: string, userId: string) {
+    const set = this.recipientsByBridge.get(bridgeId);
+    if (!set) return;
+    set.delete(userId);
+    if (set.size === 0) this.recipientsByBridge.delete(bridgeId);
   }
 
   static async reloadBridges() {
@@ -86,9 +104,28 @@ export class AppBridgePeer {
       where: eq(bridgesTable.status, 0),
     });
 
-    const next = new Map<string, string>();
+    const bridgeIds = rows.map((r) => r.id);
+    const memberRows =
+      bridgeIds.length === 0
+        ? []
+        : await db.query.bridgeMembersTable.findMany({
+            where: inArray(bridgeMembersTable.bridgeId, bridgeIds),
+          });
+
+    const membersByBridge = new Map<string, Set<string>>();
+    for (const m of memberRows) {
+      const key = m.bridgeId.toString();
+      const set = membersByBridge.get(key) ?? new Set<string>();
+      set.add(m.userId.toString());
+      membersByBridge.set(key, set);
+    }
+
+    const next = new Map<string, Set<string>>();
     for (const row of rows) {
-      next.set(row.id.toString(), row.ownerId.toString());
+      const id = row.id.toString();
+      const set = new Set<string>([row.ownerId.toString()]);
+      for (const uid of membersByBridge.get(id) ?? []) set.add(uid);
+      next.set(id, set);
     }
 
     for (const [bridgeId, unsub] of this.unsubscribers) {
@@ -98,7 +135,7 @@ export class AppBridgePeer {
       }
     }
 
-    this.ownersByBridge = next;
+    this.recipientsByBridge = next;
 
     for (const bridgeId of next.keys()) {
       if (this.unsubscribers.has(bridgeId)) continue;
@@ -109,95 +146,109 @@ export class AppBridgePeer {
     }
   }
 
-  private static onBridgeEvent(event: BridgeEvent) {
-    const ownerId = this.ownersByBridge.get(event.bridgeId);
-    if (!ownerId) return;
+  private static emitToRecipients(
+    bridgeId: string,
+    eventName:
+      | "BridgeChat"
+      | "BridgeJoin"
+      | "BridgeLeave"
+      | "BridgeVoiceJoin"
+      | "BridgeVoiceLeave"
+      | "BridgePresence",
+    data: unknown,
+    skipUserId?: string,
+  ) {
+    const recipients = this.recipientsByBridge.get(bridgeId);
+    if (!recipients || recipients.size === 0) return;
 
-    // Sender already applied the REST response; skip owner echo for app chat
-    // so the feed never shows the same outbound message twice.
-    if (event.type === "CHAT") {
-      const data = event.data as BridgeChatPayload;
-      if (data.source === "app" && data.userId === ownerId) return;
-
+    for (const userId of recipients) {
+      if (skipUserId && userId === skipUserId) continue;
       fireAndForget(() =>
         emitEvent({
-          event: "BridgeChat",
-          user_id: ownerId,
-          data: {
-            id: event.sourceId ?? data.sourceId ?? Snowflake.generate(),
-            bridgeId: data.bridgeId,
-            serverId: data.serverId,
-            source: data.source,
-            name: data.name,
-            content: data.content,
-            uuid: data.uuid,
-            userId: data.userId,
-            avatarUrl: data.avatarUrl,
-            at: new Date().toISOString(),
-          } satisfies GatewayBridgeChatPayload,
+          event: eventName,
+          user_id: userId,
+          data,
         }),
+      );
+    }
+  }
+
+  private static onBridgeEvent(event: BridgeEvent) {
+    if (!this.recipientsByBridge.has(event.bridgeId)) return;
+
+    if (event.type === "CHAT") {
+      const data = event.data as BridgeChatPayload;
+      // Sender already applied the REST response; skip echo for their own app chat.
+      const skipUserId =
+        data.source === "app" && data.userId ? data.userId : undefined;
+
+      this.emitToRecipients(
+        event.bridgeId,
+        "BridgeChat",
+        {
+          id: event.sourceId ?? data.sourceId ?? Snowflake.generate(),
+          bridgeId: data.bridgeId,
+          serverId: data.serverId,
+          source: data.source,
+          name: data.name,
+          content: data.content,
+          uuid: data.uuid,
+          userId: data.userId,
+          avatarUrl: data.avatarUrl,
+          at: new Date().toISOString(),
+        } satisfies GatewayBridgeChatPayload,
+        skipUserId,
       );
       return;
     }
 
     if (event.type === "JOIN" || event.type === "LEAVE") {
       const data = event.data as BridgePlayerPayload;
-      fireAndForget(() =>
-        emitEvent({
-          event: event.type === "JOIN" ? "BridgeJoin" : "BridgeLeave",
-          user_id: ownerId,
-          data: {
-            id: event.sourceId ?? data.sourceId ?? Snowflake.generate(),
-            bridgeId: data.bridgeId,
-            serverId: data.serverId,
-            source: data.source,
-            name: data.name,
-            uuid: data.uuid,
-            userId: data.userId,
-            at: new Date().toISOString(),
-          } satisfies GatewayBridgePlayerPayload,
-        }),
+      this.emitToRecipients(
+        event.bridgeId,
+        event.type === "JOIN" ? "BridgeJoin" : "BridgeLeave",
+        {
+          id: event.sourceId ?? data.sourceId ?? Snowflake.generate(),
+          bridgeId: data.bridgeId,
+          serverId: data.serverId,
+          source: data.source,
+          name: data.name,
+          uuid: data.uuid,
+          userId: data.userId,
+          at: new Date().toISOString(),
+        } satisfies GatewayBridgePlayerPayload,
       );
       return;
     }
 
     if (event.type === "VOICE_JOIN" || event.type === "VOICE_LEAVE") {
       const data = event.data as BridgeVoicePayload;
-      fireAndForget(() =>
-        emitEvent({
-          event:
-            event.type === "VOICE_JOIN" ? "BridgeVoiceJoin" : "BridgeVoiceLeave",
-          user_id: ownerId,
-          data: {
-            id: event.sourceId ?? data.sourceId ?? Snowflake.generate(),
-            bridgeId: data.bridgeId,
-            serverId: data.serverId,
-            source: data.source,
-            name: data.name,
-            uuid: data.uuid,
-            userId: data.userId,
-            channelId: data.channelId,
-            channelName: data.channelName,
-            room: data.room,
-            at: new Date().toISOString(),
-          } satisfies GatewayBridgeVoicePayload,
-        }),
+      this.emitToRecipients(
+        event.bridgeId,
+        event.type === "VOICE_JOIN" ? "BridgeVoiceJoin" : "BridgeVoiceLeave",
+        {
+          id: event.sourceId ?? data.sourceId ?? Snowflake.generate(),
+          bridgeId: data.bridgeId,
+          serverId: data.serverId,
+          source: data.source,
+          name: data.name,
+          uuid: data.uuid,
+          userId: data.userId,
+          channelId: data.channelId,
+          channelName: data.channelName,
+          room: data.room,
+          at: new Date().toISOString(),
+        } satisfies GatewayBridgeVoicePayload,
       );
       return;
     }
 
     if (event.type === "PRESENCE") {
       const data = event.data as GatewayBridgePresencePayload;
-      fireAndForget(() =>
-        emitEvent({
-          event: "BridgePresence",
-          user_id: ownerId,
-          data: {
-            bridgeId: data.bridgeId,
-            players: data.players ?? [],
-          } satisfies GatewayBridgePresencePayload,
-        }),
-      );
+      this.emitToRecipients(event.bridgeId, "BridgePresence", {
+        bridgeId: data.bridgeId,
+        players: data.players ?? [],
+      } satisfies GatewayBridgePresencePayload);
     }
   }
 }

@@ -266,6 +266,20 @@ export async function consume(this: WebSocket, opts: EventOpts) {
       }
       break;
     }
+    case "RelationshipCreate":
+    case "RelationshipUpdate": {
+      this.presenceSubs = this.presenceSubs ?? new Set();
+      const otherId = data?.otherUserId ?? data?.user?.id;
+      if (otherId && String(otherId) !== this.userId) {
+        this.presenceSubs.add(String(otherId));
+      }
+      break;
+    }
+    case "RelationshipDelete": {
+      const otherId = data?.otherUserId ?? data?.user?.id;
+      if (otherId) this.presenceSubs?.delete(String(otherId));
+      break;
+    }
     case "ChannelUpdate": {
       const cancelListener = this.events[id];
       if (cancelListener) {
@@ -338,6 +352,14 @@ export async function consume(this: WebSocket, opts: EventOpts) {
   }
 
   try {
+    if (
+      event === "PresenceUpdate" &&
+      data?.userId &&
+      String(data.userId) === String(this.userId)
+    ) {
+      return;
+    }
+
     await Send(this, {
       op: "Dispatch",
       t: event,

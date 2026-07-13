@@ -8,4 +8,5 @@ services:
             - "6000:3000"
             - "3001:3001"
             - "4000:4000"
+            - "3015:3015"
         restart: unless-stopped

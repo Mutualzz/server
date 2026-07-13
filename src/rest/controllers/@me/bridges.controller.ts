@@ -1,5 +1,6 @@
 import {
   bridgeDiscordBindingsTable,
+  bridgeMembersTable,
   bridgeMinecraftServersTable,
   bridgeReadStatesTable,
   bridgesTable,
@@ -10,12 +11,15 @@ import {
   minecraftLinkCodesTable,
   minecraftLinksTable,
   spaceMembersTable,
+  usersTable,
 } from "@mutualzz/database";
 import {
   AppBridgePeer,
   buildPluginConfig,
   connectedServerIds,
   emitMinecraftLinkUpdate,
+  ensureMember,
+  findOnlineBridgesForUuid,
   generateBridgeToken,
   generateLinkCode,
   isBridgeOnline,
@@ -23,15 +27,28 @@ import {
   listBridgeMessages,
   playersForBridge,
   publishBridgeEvent,
+  removeAllMembershipsForUser,
+  removeMember,
   type BridgeChatPayload,
+  type BridgeRole,
 } from "@mutualzz/minecraft";
 import { DiscordBridgePeer } from "@mutualzz/bot/bridge/DiscordBridgePeer";
+import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
 import { Snowflake } from "@mutualzz/util";
-import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 const MAX_BRIDGES_PER_USER = 5;
+
+const roleForBridge = (
+  bridge: { ownerId: bigint },
+  userId: string | bigint,
+): BridgeRole =>
+  bridge.ownerId ===
+  (typeof userId === "bigint" ? userId : BigInt(userId))
+    ? "owner"
+    : "member";
 
 const serializeBridge = (
   bridge: typeof bridgesTable.$inferSelect,
@@ -56,16 +73,38 @@ export default class BridgesController {
   static async list(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
+      const uid = BigInt(user.id);
       const includeArchived =
         req.query.archived === "1" || req.query.archived === "true";
 
-      const bridges = await db.query.bridgesTable.findMany({
-        where: includeArchived
-          ? eq(bridgesTable.ownerId, BigInt(user.id))
-          : and(
-              eq(bridgesTable.ownerId, BigInt(user.id)),
+      const memberships = await db.query.bridgeMembersTable.findMany({
+        where: eq(bridgeMembersTable.userId, uid),
+      });
+      const memberBridgeIds = memberships.map((m) => m.bridgeId);
+
+      // Owners may include archived; members only ever see active bridges.
+      const listWhere = includeArchived
+        ? memberBridgeIds.length > 0
+          ? or(
+              eq(bridgesTable.ownerId, uid),
+              and(
+                inArray(bridgesTable.id, memberBridgeIds),
+                eq(bridgesTable.status, 0),
+              ),
+            )
+          : eq(bridgesTable.ownerId, uid)
+        : memberBridgeIds.length > 0
+          ? and(
+              or(
+                eq(bridgesTable.ownerId, uid),
+                inArray(bridgesTable.id, memberBridgeIds),
+              ),
               eq(bridgesTable.status, 0),
-            ),
+            )
+          : and(eq(bridgesTable.ownerId, uid), eq(bridgesTable.status, 0));
+
+      const bridges = await db.query.bridgesTable.findMany({
+        where: listWhere,
         orderBy: [desc(bridgesTable.createdAt)],
       });
 
@@ -75,7 +114,7 @@ export default class BridgesController {
           ? []
           : await db.query.bridgeReadStatesTable.findMany({
               where: and(
-                eq(bridgeReadStatesTable.userId, BigInt(user.id)),
+                eq(bridgeReadStatesTable.userId, uid),
                 inArray(bridgeReadStatesTable.bridgeId, bridgeIds),
               ),
             });
@@ -87,6 +126,7 @@ export default class BridgesController {
         bridges.map((bridge) => {
           const lastAckedId = lastAckedByBridge.get(bridge.id.toString()) ?? "";
           return serializeBridge(bridge, {
+            role: roleForBridge(bridge, uid),
             hubConnected: isBridgeOnline(bridge.id.toString()),
             onlineCount: playersForBridge(bridge.id.toString()).length,
             lastAckedId: lastAckedId.length > 0 ? lastAckedId : null,
@@ -169,7 +209,7 @@ export default class BridgesController {
       });
 
       res.status(HttpStatusCode.Created).json({
-        ...serializeBridge(bridge),
+        ...serializeBridge(bridge, { role: "owner" as const }),
         token: token.plaintext,
         pluginConfig: buildPluginConfig(token.plaintext, serverId || undefined),
       });
@@ -183,22 +223,32 @@ export default class BridgesController {
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      const bridge = await BridgesController.requireOwnedBridge(req);
+      const { bridge, role } =
+        await BridgesController.requireAccessibleBridge(req);
       const servers = await db.query.bridgeMinecraftServersTable.findMany({
         where: eq(bridgeMinecraftServersTable.bridgeId, bridge.id),
       });
-      const bindings = await db.query.bridgeDiscordBindingsTable.findMany({
-        where: eq(bridgeDiscordBindingsTable.bridgeId, bridge.id),
-      });
-      const voiceBindings = await db.query.bridgeVoiceBindingsTable.findMany({
-        where: eq(bridgeVoiceBindingsTable.bridgeId, bridge.id),
-      });
-      const tokens = await db.query.bridgeTokensTable.findMany({
-        where: and(
-          eq(bridgeTokensTable.bridgeId, bridge.id),
-          isNull(bridgeTokensTable.revokedAt),
-        ),
-      });
+      const bindings =
+        role === "owner"
+          ? await db.query.bridgeDiscordBindingsTable.findMany({
+              where: eq(bridgeDiscordBindingsTable.bridgeId, bridge.id),
+            })
+          : [];
+      const voiceBindings =
+        role === "owner"
+          ? await db.query.bridgeVoiceBindingsTable.findMany({
+              where: eq(bridgeVoiceBindingsTable.bridgeId, bridge.id),
+            })
+          : [];
+      const tokens =
+        role === "owner"
+          ? await db.query.bridgeTokensTable.findMany({
+              where: and(
+                eq(bridgeTokensTable.bridgeId, bridge.id),
+                isNull(bridgeTokensTable.revokedAt),
+              ),
+            })
+          : [];
 
       const onlinePlayers = playersForBridge(bridge.id.toString());
       const linkedByUuid = await linkedUsersByMinecraftUuids(
@@ -232,6 +282,7 @@ export default class BridgesController {
 
       res.json({
         ...serializeBridge(bridge, {
+          role,
           lastAckedId: lastAckedId.length > 0 ? lastAckedId : null,
           unread: isUnread(bridge.lastMessageId, lastAckedId),
         }),
@@ -331,10 +382,87 @@ export default class BridgesController {
     }
   }
 
+  static async updateServer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const bridge = await BridgesController.requireOwnedBridge(req);
+      const serverId = String(req.params.serverId ?? "").trim();
+      const displayName = String(req.body?.displayName ?? "").trim();
+
+      if (!serverId) {
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "serverId is required",
+        );
+      }
+
+      if (!displayName || displayName.length > 64) {
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "displayName must be 1–64 characters",
+        );
+      }
+
+      const existing = await db.query.bridgeMinecraftServersTable.findFirst({
+        where: and(
+          eq(bridgeMinecraftServersTable.bridgeId, bridge.id),
+          eq(bridgeMinecraftServersTable.serverId, serverId),
+        ),
+      });
+
+      if (!existing) {
+        throw new HttpException(
+          HttpStatusCode.NotFound,
+          "Minecraft server not found on this bridge",
+        );
+      }
+
+      const [updated] = await db
+        .update(bridgeMinecraftServersTable)
+        .set({ displayName })
+        .where(
+          and(
+            eq(bridgeMinecraftServersTable.bridgeId, bridge.id),
+            eq(bridgeMinecraftServersTable.serverId, serverId),
+          ),
+        )
+        .returning();
+
+      const bridgeId = bridge.id.toString();
+      const presenceServerName =
+        displayName.toLowerCase() !== serverId.toLowerCase()
+          ? displayName
+          : null;
+
+      const onlineOnServer = playersForBridge(bridgeId).filter(
+        (p) => p.serverId === serverId,
+      );
+
+      for (const player of onlineOnServer) {
+        const link = await db.query.minecraftLinksTable.findFirst({
+          where: eq(minecraftLinksTable.minecraftUuid, player.uuid),
+        });
+        if (!link) continue;
+        void PresenceService.setMinecraftBridgeActivity(link.userId.toString(), {
+          bridgeId,
+          serverName: presenceServerName,
+        }).catch(() => null);
+      }
+
+      res.json({
+        id: updated.id.toString(),
+        serverId: updated.serverId,
+        displayName: updated.displayName,
+        lastSeenAt: updated.lastSeenAt,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async ack(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      const bridge = await BridgesController.requireOwnedBridge(req);
+      const { bridge } = await BridgesController.requireAccessibleBridge(req);
       const lastAckedId = String(req.body?.lastAckedId ?? "").trim();
       if (!lastAckedId) {
         throw new HttpException(
@@ -374,7 +502,7 @@ export default class BridgesController {
 
   static async listMessages(req: Request, res: Response, next: NextFunction) {
     try {
-      const bridge = await BridgesController.requireOwnedBridge(req);
+      const { bridge } = await BridgesController.requireAccessibleBridge(req);
       const limitRaw = Number(req.query.limit);
       const before =
         typeof req.query.before === "string" ? req.query.before : undefined;
@@ -662,12 +790,13 @@ export default class BridgesController {
   }
 
   /** Create a link code for the current Mutualzz user (redeem with /mzlink in MC).
-   * Linking is account-wide (not per bridge). Any online owned bridge can mint a code. */
+   * Linking is account-wide. Any online owned or member bridge can mint a code. */
   static async createLinkCode(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
+      const uid = BigInt(user.id);
       const existing = await db.query.minecraftLinksTable.findFirst({
-        where: eq(minecraftLinksTable.userId, BigInt(user.id)),
+        where: eq(minecraftLinksTable.userId, uid),
       });
       if (existing) {
         res.json({
@@ -678,13 +807,11 @@ export default class BridgesController {
         return;
       }
 
-      const owned = await db.query.bridgesTable.findMany({
-        where: eq(bridgesTable.ownerId, BigInt(user.id)),
-      });
-      if (owned.length === 0) {
+      const accessible = await BridgesController.listAccessibleBridges(uid);
+      if (accessible.length === 0) {
         throw new HttpException(
           HttpStatusCode.BadRequest,
-          "Create a bridge before linking",
+          "Join a Mutualzz Minecraft server or create a bridge before linking",
         );
       }
 
@@ -694,7 +821,7 @@ export default class BridgesController {
           : null;
 
       const preferred = preferredId
-        ? owned.find((b) => b.id.toString() === preferredId)
+        ? accessible.find((b) => b.id.toString() === preferredId)
         : undefined;
       if (preferredId && !preferred) {
         throw new HttpException(HttpStatusCode.NotFound, "Bridge not found");
@@ -704,7 +831,7 @@ export default class BridgesController {
         (preferred && isBridgeOnline(preferred.id.toString())
           ? preferred
           : null) ??
-        owned.find((b) => isBridgeOnline(b.id.toString())) ??
+        accessible.find((b) => isBridgeOnline(b.id.toString())) ??
         null;
 
       if (!bridge) {
@@ -719,7 +846,7 @@ export default class BridgesController {
       await db.insert(minecraftLinkCodesTable).values({
         id: BigInt(Snowflake.generate()),
         code,
-        userId: BigInt(user.id),
+        userId: uid,
         bridgeId: bridge.id,
         expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       });
@@ -798,10 +925,23 @@ export default class BridgesController {
 
       emitMinecraftLinkUpdate(user.id, linked);
 
+      const bridgeIds = new Set<string>();
+      if (row.bridgeId) bridgeIds.add(row.bridgeId.toString());
+      for (const online of findOnlineBridgesForUuid(row.minecraftUuid)) {
+        bridgeIds.add(online.bridgeId);
+      }
+      const joinedBridgeIds: string[] = [];
+      for (const bridgeId of bridgeIds) {
+        const added = await ensureMember(bridgeId, user.id);
+        if (added) joinedBridgeIds.push(bridgeId);
+      }
+
       res.json({
         ok: true,
         minecraftUuid: row.minecraftUuid,
         minecraftName: row.minecraftName,
+        joinedBridgeIds,
+        joinedCount: joinedBridgeIds.length,
       });
     } catch (error) {
       next(error);
@@ -846,7 +986,156 @@ export default class BridgesController {
         .delete(minecraftLinksTable)
         .where(eq(minecraftLinksTable.userId, BigInt(user.id)));
 
+      await removeAllMembershipsForUser(user.id);
+
       emitMinecraftLinkUpdate(user.id, null);
+
+      res.status(HttpStatusCode.NoContent).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async leave(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const bridgeId = BigInt(String(req.params.bridgeId));
+      const bridge = await db.query.bridgesTable.findFirst({
+        where: eq(bridgesTable.id, bridgeId),
+      });
+      if (!bridge) {
+        throw new HttpException(HttpStatusCode.NotFound, "Bridge not found");
+      }
+      if (bridge.ownerId === BigInt(user.id)) {
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Owners cannot leave their own bridge",
+        );
+      }
+
+      const removed = await removeMember(bridgeId, user.id);
+      if (!removed) {
+        throw new HttpException(
+          HttpStatusCode.NotFound,
+          "Not a member of this bridge",
+        );
+      }
+
+      res.status(HttpStatusCode.NoContent).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async listMembers(req: Request, res: Response, next: NextFunction) {
+    try {
+      const bridge = await BridgesController.requireOwnedBridge(req);
+      const memberRows = await db.query.bridgeMembersTable.findMany({
+        where: eq(bridgeMembersTable.bridgeId, bridge.id),
+      });
+
+      const userIds = [
+        bridge.ownerId,
+        ...memberRows.map((m) => m.userId),
+      ];
+      const uniqueIds = [...new Set(userIds.map((id) => id.toString()))].map(
+        (id) => BigInt(id),
+      );
+
+      const users =
+        uniqueIds.length === 0
+          ? []
+          : await db.query.usersTable.findMany({
+              where: inArray(usersTable.id, uniqueIds),
+            });
+      const usersById = new Map(users.map((u) => [u.id.toString(), u]));
+
+      const links =
+        uniqueIds.length === 0
+          ? []
+          : await db.query.minecraftLinksTable.findMany({
+              where: inArray(minecraftLinksTable.userId, uniqueIds),
+            });
+      const linksByUser = new Map(links.map((l) => [l.userId.toString(), l]));
+
+      const onlinePlayers = playersForBridge(bridge.id.toString());
+      const onlineUuids = new Set(
+        onlinePlayers.map((p) => p.uuid.toLowerCase()),
+      );
+      const onlineUuidsCompact = new Set(
+        onlinePlayers.map((p) => p.uuid.toLowerCase().replace(/-/g, "")),
+      );
+
+      const isOnline = (uuid?: string | null) => {
+        if (!uuid) return false;
+        const lower = uuid.toLowerCase();
+        return (
+          onlineUuids.has(lower) ||
+          onlineUuidsCompact.has(lower.replace(/-/g, ""))
+        );
+      };
+
+      const joinedAtByUser = new Map(
+        memberRows.map((m) => [m.userId.toString(), m.joinedAt]),
+      );
+
+      const serializeMember = (
+        userId: bigint,
+        role: "owner" | "member",
+        joinedAt: Date,
+      ) => {
+        const u = usersById.get(userId.toString());
+        const link = linksByUser.get(userId.toString());
+        return {
+          userId: userId.toString(),
+          role,
+          username: u?.username ?? "Unknown",
+          globalName: u?.globalName ?? null,
+          avatar: u?.avatar ?? null,
+          joinedAt,
+          online: isOnline(link?.minecraftUuid),
+          minecraftUuid: link?.minecraftUuid ?? null,
+          minecraftName: link?.minecraftName ?? null,
+        };
+      };
+
+      res.json({
+        members: [
+          serializeMember(bridge.ownerId, "owner", bridge.createdAt),
+          ...memberRows
+            .filter((m) => m.userId !== bridge.ownerId)
+            .map((m) =>
+              serializeMember(
+                m.userId,
+                "member",
+                joinedAtByUser.get(m.userId.toString()) ?? m.joinedAt,
+              ),
+            ),
+        ],
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async kickMember(req: Request, res: Response, next: NextFunction) {
+    try {
+      const bridge = await BridgesController.requireOwnedBridge(req);
+      const targetUserId = String(req.params.userId);
+      if (targetUserId === bridge.ownerId.toString()) {
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Cannot remove the bridge owner",
+        );
+      }
+
+      const removed = await removeMember(bridge.id, targetUserId);
+      if (!removed) {
+        throw new HttpException(
+          HttpStatusCode.NotFound,
+          "Member not found",
+        );
+      }
 
       res.status(HttpStatusCode.NoContent).send();
     } catch (error) {
@@ -857,7 +1146,7 @@ export default class BridgesController {
   static async sendChat(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      const bridge = await BridgesController.requireOwnedBridge(req);
+      const { bridge } = await BridgesController.requireAccessibleBridge(req);
       const content = String(req.body?.content ?? "").trim();
       if (!content) {
         throw new HttpException(
@@ -971,6 +1260,50 @@ export default class BridgesController {
       throw new HttpException(HttpStatusCode.Forbidden, "Not your bridge");
     }
     return bridge;
+  }
+
+  private static async requireAccessibleBridge(req: Request) {
+    const { user } = req;
+    const uid = BigInt(user.id);
+    const bridgeId = BigInt(String(req.params.bridgeId));
+    const bridge = await db.query.bridgesTable.findFirst({
+      where: eq(bridgesTable.id, bridgeId),
+    });
+    if (!bridge) {
+      throw new HttpException(HttpStatusCode.NotFound, "Bridge not found");
+    }
+    if (bridge.ownerId === uid) {
+      return { bridge, role: "owner" as const };
+    }
+
+    const membership = await db.query.bridgeMembersTable.findFirst({
+      where: and(
+        eq(bridgeMembersTable.bridgeId, bridgeId),
+        eq(bridgeMembersTable.userId, uid),
+      ),
+    });
+    if (!membership) {
+      throw new HttpException(HttpStatusCode.Forbidden, "Not a bridge member");
+    }
+    return { bridge, role: "member" as const };
+  }
+
+  private static async listAccessibleBridges(userId: bigint) {
+    const memberships = await db.query.bridgeMembersTable.findMany({
+      where: eq(bridgeMembersTable.userId, userId),
+    });
+    const memberBridgeIds = memberships.map((m) => m.bridgeId);
+    const ownedOrMember =
+      memberBridgeIds.length > 0
+        ? or(
+            eq(bridgesTable.ownerId, userId),
+            inArray(bridgesTable.id, memberBridgeIds),
+          )
+        : eq(bridgesTable.ownerId, userId);
+
+    return db.query.bridgesTable.findMany({
+      where: and(ownedOrMember, eq(bridgesTable.status, 0)),
+    });
   }
 }
 

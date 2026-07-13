@@ -270,7 +270,7 @@ export async function attachPresenceMember(member: APISpaceMember): Promise<
     presence?: PresencePayload;
   }
 > {
-  const presence = await PresenceService.get(member.userId);
+  const presence = await PresenceService.getPublic(member.userId);
 
   return {
     ...member,
@@ -286,7 +286,7 @@ export async function attachPresenceMember(member: APISpaceMember): Promise<
 }
 
 export async function attachPresenceUser(user: APIUser): Promise<APIUser> {
-  const presence = await PresenceService.get(user.id);
+  const presence = await PresenceService.getPublic(user.id);
 
   return {
     ...user,

@@ -10,6 +10,7 @@ import { MinecraftBridgeServer, AppBridgePeer } from "@mutualzz/minecraft";
 import * as REST from "@mutualzz/rest";
 
 import { RabbitMQ } from "@mutualzz/util";
+import { startGameCatalogSyncSchedule } from "../util/GameCatalogSync.ts";
 import { BotClient } from "../bot/Client";
 
 const logger = new Logger({
@@ -51,6 +52,7 @@ async function main() {
     ]);
 
     await AppBridgePeer.start();
+    startGameCatalogSyncSchedule();
 }
 
 main().catch((error) => {

@@ -30,15 +30,25 @@ export const playerLeft = (bridgeId: string, uuid: string) => {
 export const findOnlinePlayer = (
   uuid: string,
 ): { bridgeId: string; player: OnlineMinecraftPlayer } | null => {
+  const matches = findOnlineBridgesForUuid(uuid);
+  return matches[0] ?? null;
+};
+
+/** All bridges where this Minecraft UUID is currently online. */
+export const findOnlineBridgesForUuid = (
+  uuid: string,
+): { bridgeId: string; player: OnlineMinecraftPlayer }[] => {
   const id = uuid.trim().toLowerCase();
+  const out: { bridgeId: string; player: OnlineMinecraftPlayer }[] = [];
   for (const [bridgeId, map] of byBridge) {
     for (const [key, player] of map) {
       if (key.toLowerCase() === id || player.uuid.toLowerCase() === id) {
-        return { bridgeId, player };
+        out.push({ bridgeId, player });
+        break;
       }
     }
   }
-  return null;
+  return out;
 };
 
 export const clearServerPlayers = (

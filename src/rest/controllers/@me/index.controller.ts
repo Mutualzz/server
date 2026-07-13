@@ -1,3 +1,4 @@
+import { clearActivityHistory } from "@mutualzz/util/ActivityHistory.ts";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -31,6 +32,7 @@ import {
 import { revokeAllSessions } from "@mutualzz/rest/util";
 import type { APIPrivateUser, APIUserSettings, StaffActionType } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import {
   imageFileValidator,
   validateChangePassword,
@@ -366,6 +368,12 @@ export default class MeController {
         );
 
       res.status(HttpStatusCode.Success).json(result);
+
+      if (result.shareActivity === false) {
+        void PresenceService.clearAllMinecraftBridgeActivities(user.id).catch(
+          () => null,
+        );
+      }
 
       fireAndForgetAll([
         {
@@ -1080,6 +1088,23 @@ export default class MeController {
       ]);
 
       res.status(HttpStatusCode.Success).json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async clearActivityHistory(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const user = req.user;
+      if (!user) {
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+      }
+      await clearActivityHistory(user.id);
+      res.status(HttpStatusCode.NoContent).end();
     } catch (err) {
       next(err);
     }

@@ -12,5 +12,5 @@ export async function Close(this: WebSocket, code: number, reason: Buffer) {
 
   PresenceService.onSocketClose(this);
 
-  await PresenceService.onDisconnect(this.userId);
+  await PresenceService.onDisconnect(this.userId, this.sessionId);
 }

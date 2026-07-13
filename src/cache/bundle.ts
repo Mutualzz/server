@@ -9,6 +9,7 @@ import {
   expressionLRU,
   gifSearchLRU,
   gifTagsLRU,
+  gameIconLRU,
   inviteEditLRU,
   inviteLRU,
   invitesLRU,
@@ -35,6 +36,7 @@ import {
   usersLRU,
 } from "./api";
 import {
+  appIconCache,
   avatarCache,
   channelIconCache,
   defaultAvatarCache,
@@ -51,6 +53,7 @@ export const caches = {
   channelIcon: channelIconCache,
   expressions: expressionsCache,
   profileImage: profileImageCache,
+  appIcon: appIconCache,
 
   // REST
   authUser: authUserLRU,
@@ -92,6 +95,7 @@ export const caches = {
   // GIFs
   gifSearch: gifSearchLRU,
   gifTags: gifTagsLRU,
+  gameIcon: gameIconLRU,
 };
 
 export type CacheName = keyof typeof caches;

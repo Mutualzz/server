@@ -13,6 +13,7 @@ import {
 import { canVoiceConnect, canVoiceSpeak } from "../util/VoicePermissions.ts";
 import { logger } from "../Logger.ts";
 import { voiceScopeKey } from "./VoiceState.util";
+import { PresenceBucket } from "../presence/Presence.bucket.ts";
 import { and, eq } from "drizzle-orm";
 import { db, voiceModerationTable } from "@mutualzz/database";
 
@@ -709,6 +710,37 @@ export class VoiceStateService {
         const existing = await VoiceStateRedis.getState(userId);
         if (!existing?.channelId) return;
 
+        if (existing.client === "minecraft") {
+            void VoiceStateService.streamStatesToSocket(
+                socket,
+                existing.spaceId,
+                existing.channelId,
+                socket.userId,
+            );
+            return;
+        }
+
+        const active = await VoiceStateRedis.getActiveSession(userId);
+        if (active && active.sessionId !== sessionId) {
+            const ownerStillConnected = PresenceBucket.socketsByUserId(
+                String(userId),
+            ).some(
+                (ws) =>
+                    ws !== socket &&
+                    ws.sessionId === active.sessionId,
+            );
+
+            if (ownerStillConnected) {
+                void VoiceStateService.streamStatesToSocket(
+                    socket,
+                    existing.spaceId,
+                    existing.channelId,
+                    socket.userId,
+                );
+                return;
+            }
+        }
+
         const moderation = await this.getMemberVoiceModeration(
             existing.spaceId,
             userId,
@@ -730,7 +762,6 @@ export class VoiceStateService {
         existing.sessionId = sessionId;
         existing.updatedAt = Date.now();
 
-        const active = await VoiceStateRedis.getActiveSession(userId);
         if (active && active.sessionId !== sessionId) {
             try {
                 await VoiceStateRedis.clearActiveSession(

@@ -37,6 +37,9 @@ export const userSettingsTable = pgTable("user_settings", {
   pushDirectMessages: boolean().notNull().default(true),
   pushMentions: boolean().notNull().default(true),
 
+  shareActivity: boolean().notNull().default(true),
+  shareRecentActivity: boolean().notNull().default(true),
+
   updatedAt: timestamp()
     .notNull()
     .defaultNow()

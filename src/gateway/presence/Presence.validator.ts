@@ -1,7 +1,13 @@
-import type { PresenceActivity, PresenceActivityEmoji, PresencePayload } from "@mutualzz/types";
+import type {
+    PresenceActivity,
+    PresenceActivityAssets,
+    PresenceActivityEmoji,
+    PresencePayload,
+} from "@mutualzz/types";
 
 export const MAX_ACTIVITIES = 5;
 export const MAX_STR = 128;
+export const MAX_URL = 512;
 
 export function clampStr(str: unknown, max = MAX_STR): string | undefined {
     if (typeof str !== "string") return undefined;
@@ -28,6 +34,38 @@ export function sanitizeActivityEmoji(
     };
 }
 
+function sanitizeHttpsUrl(raw: unknown, max = MAX_URL): string | undefined {
+    const text = clampStr(raw, max);
+    if (!text) return undefined;
+    try {
+        const url = new URL(text);
+        if (url.protocol !== "https:") return undefined;
+        return url.toString();
+    } catch {
+        return undefined;
+    }
+}
+
+export function sanitizeActivityAssets(
+    raw: unknown,
+): PresenceActivityAssets | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const assumed = raw as PresenceActivityAssets;
+    const largeImageUrl = sanitizeHttpsUrl(assumed.largeImageUrl);
+    const smallImageUrl = sanitizeHttpsUrl(assumed.smallImageUrl);
+    const largeText = clampStr(assumed.largeText);
+    const smallText = clampStr(assumed.smallText);
+    if (!largeImageUrl && !smallImageUrl && !largeText && !smallText) {
+        return undefined;
+    }
+    return {
+        ...(largeImageUrl ? { largeImageUrl } : {}),
+        ...(smallImageUrl ? { smallImageUrl } : {}),
+        ...(largeText ? { largeText } : {}),
+        ...(smallText ? { smallText } : {}),
+    };
+}
+
 export function sanitizeActivity(
     activityAssumed: any,
 ): PresenceActivity | null {
@@ -39,6 +77,8 @@ export function sanitizeActivity(
     const name = clampStr(activityAssumed?.name);
     const details = clampStr(activityAssumed?.details);
     const state = clampStr(activityAssumed?.state);
+    const url = sanitizeHttpsUrl(activityAssumed?.url);
+    const assets = sanitizeActivityAssets(activityAssumed?.assets);
 
     const timestamps =
         activityAssumed?.timestamps &&
@@ -71,7 +111,18 @@ export function sanitizeActivity(
 
     if (!name) return null;
 
-    return { type, name, details, state, timestamps };
+    const applicationId = clampStr(activityAssumed?.applicationId, 32);
+
+    return {
+        type,
+        name,
+        ...(applicationId ? { applicationId } : {}),
+        details,
+        state,
+        ...(url ? { url } : {}),
+        ...(assets ? { assets } : {}),
+        timestamps,
+    };
 }
 
 export function sanitizePresence(

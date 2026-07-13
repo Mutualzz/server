@@ -224,6 +224,11 @@ export const gifTagsLRU = new LRUCache<string, any>({
   max: 1,
   ttl: 1000 * 60 * 60, // 1 hour
 });
+
+export const gameIconLRU = new LRUCache<string, { iconImageId: string; iconUrl: string }>({
+  max: 500,
+  ttl: 1000 * 60 * 60 * 24 * 7,
+});
 // [END] GIFs
 
 // [START] Post Caches

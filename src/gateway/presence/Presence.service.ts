@@ -14,18 +14,25 @@ import {
 import {
   sanitizePresence,
   sanitizeActivityEmoji,
-  MAX_ACTIVITIES,
   MAX_STR,
 } from "./Presence.validator.ts";
 import { logger } from "../Logger";
 import { PresenceBucket } from "./Presence.bucket.ts";
 import { resyncMemberListWindows } from "../util/Calculations";
 import { emitEvent, redis } from "@mutualzz/util";
+import { db, userSettingsTable } from "@mutualzz/database";
+import { eq } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { findGameByName } from "../../util/GameCatalog.ts";
+import { recordEndedActivities } from "../../util/ActivityHistory.ts";
+import type Redis from "ioredis";
 
 type ResyncKey = string;
 
 const SCHEDULE_KEY = (userId: string) => `presence:schedule:${userId}`;
 const MANUAL_KEY = (userId: string) => `presence:manual:${userId}`;
+const MANUAL_CUSTOM_KEY = (userId: string) =>
+  `presence:custom-manual:${userId}`;
 
 const SCHEDULE_ZSET = `presence:schedules`; // member=userId score=until(ms)
 const SCHEDULE_LOCK = `presence:schedule:worker-lock`;
@@ -33,6 +40,10 @@ const SCHEDULE_LOCK = `presence:schedule:worker-lock`;
 const CUSTOM_STATUS_SCHEDULE_KEY = (userId: string) =>
   `presence:custom-status:${userId}`;
 const CUSTOM_STATUS_SCHEDULE_ZSET = `presence:custom-status-schedules`;
+
+const PRESENCE_BROADCAST_CHANNEL = "presence:broadcast";
+const INSTANCE_ID = randomUUID();
+const DISCONNECT_GRACE_MS = 1_500;
 
 function buildCustomActivity(
   text: string,
@@ -95,10 +106,7 @@ function applyCustomStatus(
 
   if (!trimmed && !emoji) return withoutCustom;
 
-  return [buildCustomActivity(trimmed, emoji), ...withoutCustom].slice(
-    0,
-    MAX_ACTIVITIES,
-  );
+  return [buildCustomActivity(trimmed, emoji), ...withoutCustom];
 }
 
 function applyCustomStatusSnapshot(
@@ -120,6 +128,20 @@ function removeCustomStatus(
   return activities.filter((activity) => activity.type !== "custom");
 }
 
+export function toPublicPresence(
+  presence: PresencePayload | null,
+): PresencePayload | null {
+  if (!presence) return null;
+  if (presence.status !== "invisible") return presence;
+
+  return {
+    status: "offline",
+    activities: [],
+    updatedAt: presence.updatedAt,
+    ...(presence.device ? { device: presence.device } : {}),
+  };
+}
+
 export class PresenceService {
   private static store = new PresenceStore();
   private static started = false;
@@ -127,11 +149,16 @@ export class PresenceService {
   private static resyncTimers = new Map<ResyncKey, NodeJS.Timeout>();
 
   private static scheduleLoopStarted = false;
+  private static pubsubStarted = false;
+  private static subscriber: Redis | null = null;
 
   static startBackgroundWorkers() {
     this.ensureGcLoop();
     this.ensureScheduleLoop();
+    this.ensurePubSub();
   }
+
+  static toPublicPresence = toPublicPresence;
 
   static async onSocketAuthenticated(ws: WebSocket) {
     this.startBackgroundWorkers();
@@ -141,7 +168,7 @@ export class PresenceService {
     ws.memberListSubs = ws.memberListSubs ?? new Map();
     ws.presences = ws.presences ?? new Map();
 
-    if (!ws.userId) return;
+    if (!ws.userId || !ws.sessionId) return;
 
     await this.store.warmFromRedis(ws.userId).catch(() => null);
 
@@ -150,45 +177,48 @@ export class PresenceService {
       () => null,
     );
     const manual = await this.getManualStatus(ws.userId).catch(() => null);
+    const manualCustom = await this.getManualCustomStatus(ws.userId).catch(
+      () => null,
+    );
 
     let existing = await this.store.get(ws.userId);
     if (existing?.status === "offline") existing = null;
 
-    let presence =
-      existing ??
-      this.store.upsert(ws.userId, {
-        status: "online",
-        activities: [],
-        device: "web",
-      });
-
+    let sessionStatus: PresenceStatus =
+      existing && existing.status !== "offline" ? existing.status : "online";
     if (scheduled && scheduled.until > Date.now())
-      presence = this.store.upsert(ws.userId, {
-        ...(presence ?? { activities: [], device: "web" }),
-        status: scheduled.status,
-      });
-    else if (scheduled)
-      presence = await this.expireSchedule(ws.userId, scheduled);
-    else if (manual)
-      presence = this.store.upsert(ws.userId, {
-        ...(presence ?? { activities: [], device: "web" }),
-        status: manual,
-      });
+      sessionStatus = scheduled.status;
+    else if (manual) sessionStatus = manual;
 
-    if (customScheduled && customScheduled.until > Date.now())
-      presence = this.store.upsert(ws.userId, {
-        ...(presence ?? { activities: [], device: "web" }),
-        activities: applyCustomStatus(
-          presence?.activities ?? [],
-          customScheduled.text,
-          customScheduled.emoji,
-        ),
-      });
-    else if (customScheduled)
-      presence = await this.expireCustomStatusSchedule(
-        ws.userId,
-        customScheduled,
+    let sessionActivities: PresenceActivity[] = [];
+    if (customScheduled && customScheduled.until > Date.now()) {
+      sessionActivities = applyCustomStatus(
+        [],
+        customScheduled.text,
+        customScheduled.emoji,
       );
+    } else if (manualCustom) {
+      sessionActivities = applyCustomStatus(
+        [],
+        manualCustom.text ?? "",
+        manualCustom.emoji,
+      );
+    }
+
+    if (scheduled && scheduled.until <= Date.now()) {
+      await this.expireSchedule(ws.userId, scheduled);
+    }
+    if (customScheduled && customScheduled.until <= Date.now()) {
+      await this.expireCustomStatusSchedule(ws.userId, customScheduled);
+    }
+
+    let presence = await this.store.upsertSession(ws.userId, ws.sessionId, {
+      status: sessionStatus,
+      activities: sessionActivities,
+      device: "web",
+    });
+
+    presence = await this.applyOverlaysAndWrite(ws.userId, presence);
 
     this.store.touch(ws.userId);
 
@@ -227,6 +257,10 @@ export class PresenceService {
     return this.store.get(userId);
   }
 
+  static async getPublic(userId: string) {
+    return toPublicPresence(await this.store.get(userId));
+  }
+
   static async getScheduleForUser(
     userId: string,
   ): Promise<PresenceSchedule | null> {
@@ -245,11 +279,114 @@ export class PresenceService {
     return schedule;
   }
 
+  static minecraftSessionId(bridgeId: string) {
+    return `minecraft:${bridgeId}`;
+  }
+
+  static async clearMinecraftBridgeActivity(userId: string, bridgeId: string) {
+    this.startBackgroundWorkers();
+
+    const sessionId = this.minecraftSessionId(bridgeId);
+    const previous =
+      (await this.store.get(userId).catch(() => null)) ?? null;
+    const { merged, remaining } = await this.store.removeSession(
+      userId,
+      sessionId,
+    );
+
+    if (remaining > 0) {
+      const presence = await this.applyOverlaysAndWrite(userId, merged);
+      void recordEndedActivities(
+        userId,
+        previous?.activities ?? [],
+        presence.activities,
+      ).catch(() => null);
+      await this.broadcast(userId, presence);
+      return;
+    }
+
+    void recordEndedActivities(
+      userId,
+      previous?.activities ?? [],
+      [],
+    ).catch(() => null);
+    await this.broadcast(userId, merged);
+  }
+
+  static async clearAllMinecraftBridgeActivities(userId: string) {
+    this.startBackgroundWorkers();
+
+    const sessions = await redis.hkeys(`presence:sessions:${userId}`).catch(
+      () => [] as string[],
+    );
+    const minecraftSessions = sessions.filter((id) =>
+      id.startsWith("minecraft:"),
+    );
+    if (!minecraftSessions.length) return;
+
+    for (const sessionId of minecraftSessions) {
+      await this.store.removeSession(userId, sessionId);
+    }
+
+    const presence =
+      (await this.store.get(userId)) ?? this.store.setOffline(userId);
+    const withOverlays =
+      presence.status === "offline"
+        ? presence
+        : await this.applyOverlaysAndWrite(userId, presence);
+    await this.broadcast(userId, withOverlays);
+  }
+
+  static async setMinecraftBridgeActivity(
+    userId: string,
+    opts: {
+      bridgeId: string;
+      serverName?: string | null;
+    },
+  ) {
+    this.startBackgroundWorkers();
+
+    const settings = await db.query.userSettingsTable.findFirst({
+      where: eq(userSettingsTable.userId, BigInt(userId)),
+      columns: { shareActivity: true },
+    }).catch(() => null);
+
+    if (settings && settings.shareActivity === false) {
+      await this.clearMinecraftBridgeActivity(userId, opts.bridgeId);
+      return;
+    }
+
+    const sessionId = this.minecraftSessionId(opts.bridgeId);
+    const existing = await this.store.getSession(userId, sessionId);
+    const start =
+      existing?.activities?.find((a) => a.type === "playing")?.timestamps
+        ?.start ?? Date.now();
+
+    const serverName = opts.serverName?.trim().slice(0, MAX_STR) || undefined;
+    const minecraft = await findGameByName("Minecraft").catch(() => null);
+
+    let presence = await this.store.upsertSession(userId, sessionId, {
+      status: "online",
+      activities: [
+        {
+          type: "playing",
+          name: "Minecraft",
+          ...(minecraft ? { applicationId: minecraft.id } : {}),
+          ...(serverName ? { details: serverName } : {}),
+          timestamps: { start },
+        },
+      ],
+    });
+    presence = await this.applyOverlaysAndWrite(userId, presence);
+    await this.broadcast(userId, presence);
+  }
+
   static async handleUpdate(ws: WebSocket, rawPresence: any) {
     this.ensureGcLoop();
     this.ensureScheduleLoop();
+    this.ensurePubSub();
 
-    if (!ws.userId) {
+    if (!ws.userId || !ws.sessionId) {
       ws.close(GatewayCloseCodes.NotAuthenticated, "Not authenticated");
       return;
     }
@@ -261,6 +398,16 @@ export class PresenceService {
 
     if (persist && clean.status === "offline") return;
 
+    const shareActivityRow = await db.query.userSettingsTable
+      .findFirst({
+        where: eq(userSettingsTable.userId, BigInt(ws.userId)),
+        columns: { shareActivity: true },
+      })
+      .catch(() => null);
+    if (shareActivityRow?.shareActivity === false) {
+      clean.activities = clean.activities.filter((a) => a.type === "custom");
+    }
+
     const scheduled = await this.getSchedule(ws.userId).catch(() => null);
     if (scheduled && scheduled.until > Date.now())
       clean.status = scheduled.status;
@@ -270,28 +417,98 @@ export class PresenceService {
     const customScheduled = await this.getCustomStatusSchedule(ws.userId).catch(
       () => null,
     );
-    if (customScheduled && customScheduled.until > Date.now())
+    if (customScheduled && customScheduled.until > Date.now()) {
       clean.activities = applyCustomStatus(
         clean.activities,
         customScheduled.text,
         customScheduled.emoji,
       );
+    } else if (persist) {
+      const custom = getCustomStatusSnapshot(clean.activities);
+      await this.setManualCustomStatus(ws.userId, custom).catch(() => null);
+    }
 
-    const presence = this.store.upsert(ws.userId, clean);
+    const previous =
+      (await this.store.get(ws.userId).catch(() => null)) ?? null;
+
+    let presence = await this.store.upsertSession(
+      ws.userId,
+      ws.sessionId,
+      clean,
+    );
+    presence = await this.applyOverlaysAndWrite(ws.userId, presence);
+
+    if (shareActivityRow?.shareActivity !== false) {
+      void recordEndedActivities(
+        ws.userId,
+        previous?.activities ?? [],
+        presence.activities,
+      ).catch(() => null);
+    }
+
     await this.broadcast(ws.userId, presence);
   }
 
-  static async onDisconnect(userId?: string) {
+  static async onDisconnect(userId?: string, sessionId?: string) {
     if (!userId) return;
     this.ensureGcLoop();
     this.ensureScheduleLoop();
+    this.ensurePubSub();
 
     setTimeout(async () => {
-      if (PresenceBucket.hasAnyAuthenticatedSocket(userId)) return;
+      if (PresenceBucket.hasAnyAuthenticatedSocket(userId)) {
+        if (sessionId) {
+          const previous =
+            (await this.store.get(userId).catch(() => null)) ?? null;
+          const { merged, remaining } = await this.store.removeSession(
+            userId,
+            sessionId,
+          );
+          if (remaining > 0) {
+            const presence = await this.applyOverlaysAndWrite(userId, merged);
+            void recordEndedActivities(
+              userId,
+              previous?.activities ?? [],
+              presence.activities,
+            ).catch(() => null);
+            await this.broadcast(userId, presence);
+          } else {
+            void recordEndedActivities(
+              userId,
+              previous?.activities ?? [],
+              [],
+            ).catch(() => null);
+            await this.broadcast(userId, merged);
+          }
+        }
+        return;
+      }
 
-      const presence = this.store.setOffline(userId);
+      const previous =
+        (await this.store.get(userId).catch(() => null)) ?? null;
+
+      if (sessionId) {
+        await this.store.removeSession(userId, sessionId);
+      } else {
+        const presence = this.store.setOffline(userId);
+        void recordEndedActivities(
+          userId,
+          previous?.activities ?? [],
+          [],
+        ).catch(() => null);
+        await this.broadcast(userId, presence);
+        return;
+      }
+
+      const presence =
+        (await this.store.get(userId)) ?? this.store.setOffline(userId);
+      void recordEndedActivities(
+        userId,
+        previous?.activities ?? [],
+        presence.status === "offline" ? [] : presence.activities,
+      ).catch(() => null);
       await this.broadcast(userId, presence);
-    }, 250).unref?.();
+    }, DISCONNECT_GRACE_MS).unref?.();
   }
 
   static async setScheduledStatus(
@@ -314,17 +531,31 @@ export class PresenceService {
         ? current.status
         : "online");
 
+    if (opts.durationMs <= 0) {
+      await this.clearSchedule(userId);
+      await this.setManualStatus(userId, opts.status).catch(() => null);
+      const applied = this.store.writeMerged(userId, {
+        ...(current ?? { activities: [], device: "web" }),
+        status: opts.status,
+        updatedAt: now,
+      });
+      await this.broadcast(userId, applied);
+      await this.notifyScheduleChanged(userId, null);
+      return;
+    }
+
     const schedule: PresenceSchedule = {
       status: opts.status,
       revertTo,
-      until: now + Math.max(0, opts.durationMs),
+      until: now + opts.durationMs,
     };
 
     await this.setSchedule(userId, schedule);
 
-    const applied = this.store.upsert(userId, {
+    const applied = this.store.writeMerged(userId, {
       ...(current ?? { activities: [], device: "web" }),
       status: schedule.status,
+      updatedAt: now,
     });
 
     await this.broadcast(userId, applied);
@@ -341,9 +572,10 @@ export class PresenceService {
       await this.store.warmFromRedis(userId).catch(() => null);
       const current = await this.store.get(userId);
 
-      const reverted = this.store.upsert(userId, {
+      const reverted = this.store.writeMerged(userId, {
         ...(current ?? { activities: [], device: "web" }),
         status: existing.revertTo ?? "online",
+        updatedAt: Date.now(),
       });
 
       await this.broadcast(userId, reverted);
@@ -379,18 +611,34 @@ export class PresenceService {
         ? normalizeCustomStatusSnapshot(existingCustomSchedule.revertTo)
         : getCustomStatusSnapshot(current?.activities);
 
+    if (opts.durationMs <= 0) {
+      await this.clearCustomStatusSchedule(userId);
+      await this.setManualCustomStatus(userId, { text, emoji }).catch(
+        () => null,
+      );
+      const applied = this.store.writeMerged(userId, {
+        ...(current ?? { activities: [], device: "web", status: "online" }),
+        activities: applyCustomStatus(current?.activities ?? [], text, emoji),
+        updatedAt: now,
+      });
+      await this.broadcast(userId, applied);
+      await this.notifyCustomStatusScheduleChanged(userId, null);
+      return;
+    }
+
     const schedule: CustomStatusSchedule = {
       text,
       emoji,
       revertTo,
-      until: now + Math.max(0, opts.durationMs),
+      until: now + opts.durationMs,
     };
 
     await this.setCustomStatusSchedule(userId, schedule);
 
-    const applied = this.store.upsert(userId, {
+    const applied = this.store.writeMerged(userId, {
       ...(current ?? { activities: [], device: "web", status: "online" }),
       activities: applyCustomStatus(current?.activities ?? [], text, emoji),
+      updatedAt: now,
     });
 
     await this.broadcast(userId, applied);
@@ -413,15 +661,58 @@ export class PresenceService {
         normalizeCustomStatusSnapshot(existing.revertTo),
       );
 
-      const reverted = this.store.upsert(userId, {
+      const reverted = this.store.writeMerged(userId, {
         ...(current ?? { activities: [], device: "web", status: "online" }),
         activities,
+        updatedAt: Date.now(),
       });
 
       await this.broadcast(userId, reverted);
     }
 
     await this.notifyCustomStatusScheduleChanged(userId, null);
+  }
+
+  private static async applyOverlaysAndWrite(
+    userId: string,
+    base: PresencePayload,
+  ): Promise<PresencePayload> {
+    let presence = { ...base, activities: [...(base.activities ?? [])] };
+
+    const scheduled = await this.getSchedule(userId).catch(() => null);
+    if (scheduled && scheduled.until > Date.now()) {
+      presence.status = scheduled.status;
+    }
+
+    const customScheduled = await this.getCustomStatusSchedule(userId).catch(
+      () => null,
+    );
+    if (customScheduled && customScheduled.until > Date.now()) {
+      presence.activities = applyCustomStatus(
+        presence.activities,
+        customScheduled.text,
+        customScheduled.emoji,
+      );
+    } else {
+      const hasCustom = presence.activities.some((a) => a.type === "custom");
+      if (!hasCustom) {
+        const manualCustom = await this.getManualCustomStatus(userId).catch(
+          () => null,
+        );
+        if (manualCustom) {
+          presence.activities = applyCustomStatus(
+            presence.activities,
+            manualCustom.text ?? "",
+            manualCustom.emoji,
+          );
+        }
+      }
+    }
+
+    return this.store.writeMerged(userId, {
+      ...presence,
+      updatedAt: Date.now(),
+    });
   }
 
   private static async getManualStatus(
@@ -442,6 +733,29 @@ export class PresenceService {
     await redis.set(MANUAL_KEY(userId), JSON.stringify({ status }));
   }
 
+  private static async getManualCustomStatus(
+    userId: string,
+  ): Promise<CustomStatusSnapshot | null> {
+    const raw = await redis.get(MANUAL_CUSTOM_KEY(userId));
+    if (!raw) return null;
+    try {
+      return normalizeCustomStatusSnapshot(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  private static async setManualCustomStatus(
+    userId: string,
+    snapshot: CustomStatusSnapshot | null,
+  ) {
+    if (!snapshot || (!snapshot.text?.trim() && !snapshot.emoji)) {
+      await redis.del(MANUAL_CUSTOM_KEY(userId));
+      return;
+    }
+    await redis.set(MANUAL_CUSTOM_KEY(userId), JSON.stringify(snapshot));
+  }
+
   private static ensureGcLoop() {
     if (this.started) return;
 
@@ -453,6 +767,41 @@ export class PresenceService {
 
       this.store.gc();
     }, 30_000).unref?.();
+  }
+
+  private static ensurePubSub() {
+    if (this.pubsubStarted) return;
+    this.pubsubStarted = true;
+
+    try {
+      this.subscriber = redis.duplicate();
+      void this.subscriber
+        .subscribe(PRESENCE_BROADCAST_CHANNEL)
+        .catch((error) => {
+          logger.debug("[Presence] pubsub subscribe failed:", error);
+        });
+
+      this.subscriber.on("message", (channel, message) => {
+        if (channel !== PRESENCE_BROADCAST_CHANNEL) return;
+        try {
+          const parsed = JSON.parse(message) as {
+            userId: string;
+            presence: PresencePayload;
+            origin?: string;
+          };
+          if (!parsed?.userId || !parsed?.presence) return;
+          if (parsed.origin === INSTANCE_ID) return;
+
+          void this.fanoutLocal(parsed.userId, parsed.presence, {
+            publish: false,
+          });
+        } catch (error) {
+          logger.debug("[Presence] pubsub message error:", error);
+        }
+      });
+    } catch (error) {
+      logger.debug("[Presence] pubsub init failed:", error);
+    }
   }
 
   private static scheduleResyncForTargets(
@@ -485,34 +834,62 @@ export class PresenceService {
     }
   }
 
-  private static async broadcast(userId: string, presence: PresencePayload) {
+  private static async fanoutLocal(
+    userId: string,
+    presence: PresencePayload,
+    opts?: { publish?: boolean },
+  ) {
     const seenBy = PresenceBucket.socketsSeeingUser(userId);
     const own = PresenceBucket.socketsByUserId(userId);
     const targets = new Set([...seenBy, ...own]);
-    const payload = { userId, presence };
+    const publicPresence = toPublicPresence(presence) ?? presence;
 
-    await Promise.allSettled([
-      ...[...targets].map((socket) =>
-        Send(socket, {
+    await Promise.allSettled(
+      [...targets].map((socket) => {
+        const forSelf = socket.userId === userId;
+        return Send(socket, {
           op: "Dispatch",
           t: "PresenceUpdate",
-          d: payload,
+          d: {
+            userId,
+            presence: forSelf ? presence : publicPresence,
+          },
           s: socket.sequence++,
         }).catch((error) => {
           logger.debug("[Presence] send fail:", error);
-        }),
-      ),
-      // Publish to the user's exchange so SubscribeUser listeners receive it
-      emitEvent({
-        event: "PresenceUpdate",
-        user_id: userId,
-        data: payload,
-      }).catch((error) => {
-        logger.debug("[Presence] emit fail:", error);
+        });
       }),
-    ]);
+    );
+
+    if (opts?.publish !== false) {
+      await Promise.allSettled([
+        emitEvent({
+          event: "PresenceUpdate",
+          user_id: userId,
+          data: { userId, presence: publicPresence },
+        }).catch((error) => {
+          logger.debug("[Presence] emit fail:", error);
+        }),
+        redis
+          .publish(
+            PRESENCE_BROADCAST_CHANNEL,
+            JSON.stringify({
+              userId,
+              presence,
+              origin: INSTANCE_ID,
+            }),
+          )
+          .catch((error) => {
+            logger.debug("[Presence] publish fail:", error);
+          }),
+      ]);
+    }
 
     this.scheduleResyncForTargets(userId, seenBy);
+  }
+
+  private static async broadcast(userId: string, presence: PresencePayload) {
+    await this.fanoutLocal(userId, presence, { publish: true });
   }
 
   private static async notifyScheduleChanged(
@@ -599,9 +976,10 @@ export class PresenceService {
     await this.store.warmFromRedis(userId).catch(() => null);
     const current = await this.store.get(userId);
 
-    const reverted = this.store.upsert(userId, {
+    const reverted = this.store.writeMerged(userId, {
       ...(current ?? { activities: [], device: "web" }),
       status: schedule.revertTo ?? "online",
+      updatedAt: Date.now(),
     });
 
     await this.clearSchedule(userId);
@@ -669,9 +1047,10 @@ export class PresenceService {
       normalizeCustomStatusSnapshot(schedule.revertTo),
     );
 
-    const reverted = this.store.upsert(userId, {
+    const reverted = this.store.writeMerged(userId, {
       ...(current ?? { activities: [], device: "web", status: "online" }),
       activities,
+      updatedAt: Date.now(),
     });
 
     await this.clearCustomStatusSchedule(userId);
@@ -716,9 +1095,10 @@ export class PresenceService {
     if (!current || current.status === "offline") return;
 
     const manual = await this.getManualStatus(userId).catch(() => null);
-    const reverted = this.store.upsert(userId, {
+    const reverted = this.store.writeMerged(userId, {
       ...(current ?? { activities: [], device: "web" }),
       status: manual ?? "online",
+      updatedAt: Date.now(),
     });
 
     await this.broadcast(userId, reverted);
@@ -767,9 +1147,21 @@ export class PresenceService {
     const current = await this.store.get(userId);
     if (!current || current.status === "offline") return;
 
-    const reverted = this.store.upsert(userId, {
+    const manualCustom = await this.getManualCustomStatus(userId).catch(
+      () => null,
+    );
+    const activities = manualCustom
+      ? applyCustomStatus(
+          removeCustomStatus(current.activities ?? []),
+          manualCustom.text ?? "",
+          manualCustom.emoji,
+        )
+      : removeCustomStatus(current.activities ?? []);
+
+    const reverted = this.store.writeMerged(userId, {
       ...current,
-      activities: removeCustomStatus(current.activities ?? []),
+      activities,
+      updatedAt: Date.now(),
     });
 
     await this.broadcast(userId, reverted);
