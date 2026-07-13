@@ -1,5 +1,6 @@
 export const VOICE_STATE_TTL_SECONDS = 90;
 export const VOICE_LAST_TTL_SECONDS = 10 * 60;
+export const VOICE_ACTIVE_SESSION_TTL_SECONDS = 28_800;
 
 export const VOICE_EXP_ZSET_KEY = "voice:exp";
 export const VOICE_SWEEP_LOCK_KEY = "voice:sweeper:lock";

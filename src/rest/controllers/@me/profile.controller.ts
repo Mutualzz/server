@@ -16,6 +16,8 @@ import {
   generateHash,
   resolveUserIdentifier,
   s3Client,
+  hydrateUserProfileMusicPreviews,
+  resolveSearchTrackPreviewUrl,
   searchDeezerTracks,
   searchItunesTracks,
   toDeezerMusicSearchTrack,
@@ -31,6 +33,7 @@ import {
   profileMusicFileValidator,
   validateProfileAssetUpload,
   validateProfileGet,
+  validateProfileMusicPreview,
   validateProfileMusicSearch,
   validateProfileUpdate,
 } from "@mutualzz/validators";
@@ -174,7 +177,10 @@ export default class ProfileController {
       if (!profile)
         return res.status(HttpStatusCode.Success).json(emptyProfile(userId));
 
-      return res.status(HttpStatusCode.Success).json(toAPIUserProfile(profile));
+      const apiProfile = await hydrateUserProfileMusicPreviews(
+        toAPIUserProfile(profile),
+      );
+      return res.status(HttpStatusCode.Success).json(apiProfile);
     } catch (err) {
       next(err);
     }
@@ -280,7 +286,9 @@ export default class ProfileController {
         );
       }
 
-      const apiProfile = toAPIUserProfile(updated);
+      const apiProfile = await hydrateUserProfileMusicPreviews(
+        toAPIUserProfile(updated),
+      );
 
       res.status(HttpStatusCode.Success).json(apiProfile);
 
@@ -325,6 +333,22 @@ export default class ProfileController {
       const tracks = merged.slice(0, searchLimit);
 
       return res.status(HttpStatusCode.Success).json({ tracks });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async previewMusic(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { source, id } = validateProfileMusicPreview.parse(req.query);
+      const previewUrl = await resolveSearchTrackPreviewUrl(source, id);
+      if (!previewUrl) {
+        throw new HttpException(
+          HttpStatusCode.NotFound,
+          "Preview not available for this track",
+        );
+      }
+      return res.status(HttpStatusCode.Success).json({ previewUrl });
     } catch (err) {
       next(err);
     }

@@ -17,5 +17,10 @@ router.get(
   createLimiter(60_000, 30),
   ProfileController.searchMusic,
 );
+router.get(
+  "/music/preview",
+  createLimiter(60_000, 60),
+  ProfileController.previewMusic,
+);
 
 export default router;

@@ -40,6 +40,12 @@ export function getDispatchesSince(
     return events.filter((event) => event.s > afterSeq);
 }
 
+export function getBufferedMaxSeq(sessionId: string): number | null {
+    const events = buffers.get(sessionId) ?? [];
+    if (events.length === 0) return null;
+    return events[events.length - 1]?.s ?? null;
+}
+
 export function clearSessionBuffer(sessionId: string) {
     buffers.delete(sessionId);
 }
@@ -49,10 +55,13 @@ export function canResumeFromSeq(
     clientSeq: number,
     serverSeq: number,
 ): boolean {
-    if (clientSeq > serverSeq) return false;
+    const bufferedMax = getBufferedMaxSeq(sessionId);
+    const effectiveServerSeq = Math.max(serverSeq, bufferedMax ?? serverSeq);
+
+    if (clientSeq > effectiveServerSeq) return false;
 
     const events = buffers.get(sessionId) ?? [];
-    if (events.length === 0) return clientSeq === serverSeq;
+    if (events.length === 0) return clientSeq === effectiveServerSeq;
 
     const oldest = events[0]?.s ?? 0;
     return clientSeq >= oldest - 1;

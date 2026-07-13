@@ -160,6 +160,55 @@ export class PresenceStore {
         return this.recomputeMerged(userId);
     }
 
+    async setAllSessionsStatus(
+        userId: string,
+        sessionId: string,
+        presence: Omit<PresencePayload, "updatedAt">,
+    ): Promise<PresencePayload> {
+        const now = Date.now();
+        const raw = await redis.hgetall(sessionsKey(userId)).catch(() => null);
+        const next: Record<string, string> = {};
+
+        if (raw && Object.keys(raw).length) {
+            for (const [id, value] of Object.entries(raw)) {
+                try {
+                    const existing = JSON.parse(value) as SessionPresence;
+                    next[id] = JSON.stringify({
+                        ...existing,
+                        status: presence.status,
+                        updatedAt: now,
+                        ...(id === sessionId
+                            ? {
+                                  activities: presence.activities,
+                                  ...(presence.device
+                                      ? { device: presence.device }
+                                      : {}),
+                              }
+                            : {}),
+                    } satisfies SessionPresence);
+                } catch {
+                }
+            }
+        }
+
+        next[sessionId] = JSON.stringify({
+            ...presence,
+            updatedAt: now,
+        } satisfies SessionPresence);
+
+        const entries = Object.entries(next);
+        if (entries.length) {
+            const pipeline = redis.pipeline();
+            for (const [id, value] of entries) {
+                pipeline.hset(sessionsKey(userId), id, value);
+            }
+            pipeline.pexpire(sessionsKey(userId), this.ttlMs);
+            await pipeline.exec().catch(() => null);
+        }
+
+        return this.recomputeMerged(userId);
+    }
+
     async removeSession(
         userId: string,
         sessionId: string,

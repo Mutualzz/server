@@ -151,7 +151,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       const changes: {
         username?: string;
@@ -320,7 +320,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       await db.insert(staffActionsTable).values({
         id: BigInt(Snowflake.generate()),
@@ -374,7 +374,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
@@ -472,7 +472,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
@@ -563,7 +563,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       await db
         .update(usersTable)
@@ -624,7 +624,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       const newFlags = BitField.fromString(userFlags, target.flags.toString())
         .set(flag, enabled)
@@ -689,7 +689,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
@@ -869,7 +869,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
@@ -941,7 +941,7 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      assertNotFounderTarget(target);
+      assertNotFounderTarget(actor, target);
 
       const sessions = await listSessions(target.id);
       const match = sessions.find((s) => s.sessionId === sessionId);

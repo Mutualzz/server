@@ -1,5 +1,7 @@
+import { GatewayCloseCodes } from "@mutualzz/types";
 import { logger } from "../Logger";
 import type { WebSocket } from "../util/WebSocket";
+import { SessionRuntime } from "../util/SessionRuntime";
 import { PresenceService } from "../presence/Presence.service.ts";
 
 export async function Close(this: WebSocket, code: number, reason: Buffer) {
@@ -13,4 +15,16 @@ export async function Close(this: WebSocket, code: number, reason: Buffer) {
   PresenceService.onSocketClose(this);
 
   await PresenceService.onDisconnect(this.userId, this.sessionId);
+
+  if (
+    !this.sessionId ||
+    !this.userId ||
+    code === GatewayCloseCodes.ForceLogout ||
+    code === GatewayCloseCodes.InvalidSession
+  ) {
+    await SessionRuntime.destroy(this.sessionId);
+    return;
+  }
+
+  await SessionRuntime.detach(this, code);
 }

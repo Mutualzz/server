@@ -693,7 +693,7 @@ const handleVoiceJoin = async (
     return;
   }
 
-  const audio = mintMinecraftAudioToken({
+  const audio = await mintMinecraftAudioToken({
     userId,
     sessionId: result.credentials.sessionId,
     minecraftUuid: uuid,
@@ -798,7 +798,7 @@ const handleVoiceLeave = async (
     // ignore — announce without channel name
   }
 
-  revokeMinecraftAudioTokenForUser(userId);
+  await revokeMinecraftAudioTokenForUser(userId);
   const left = await VoiceStateService.leaveFromMinecraft(userId);
   reply({
     ok: true,

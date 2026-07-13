@@ -336,7 +336,14 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     presenceUserIds.add(r.otherUserId);
   }
 
-  const mergedPresences = await getBulkPresences([...presenceUserIds]);
+  const [mergedPresences, selfPresence] = await Promise.all([
+    getBulkPresences([...presenceUserIds]),
+    PresenceService.get(user.id),
+  ]);
+
+  if (selfPresence) {
+    mergedPresences[user.id] = selfPresence;
+  }
 
   const channels: APIChannel[] = (await Promise.all(
     dmChannels.map(async (row) => ({

@@ -38,7 +38,17 @@ export const saveSession = async ({
     });
 
     await redis.expire(`gateway:sessions:${sessionId}`, SESSION_EXPIRY);
+    await redis.sadd(`users:${userId}:gatewaySessions`, sessionId);
 
+    sessionLRU.set(sessionId, session);
+};
+
+export const touchSessionSeq = (sessionId: string, seq: number) => {
+    const session = sessionLRU.get(sessionId);
+    if (!session) return;
+
+    session.seq = seq;
+    session.lastUsedAt = Date.now();
     sessionLRU.set(sessionId, session);
 };
 

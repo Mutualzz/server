@@ -40,6 +40,8 @@ export const userSettingsTable = pgTable("user_settings", {
   shareActivity: boolean().notNull().default(true),
   shareRecentActivity: boolean().notNull().default(true),
 
+  lastSeenChangelogId: bigint({ mode: "bigint" }),
+
   updatedAt: timestamp()
     .notNull()
     .defaultNow()

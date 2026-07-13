@@ -136,31 +136,6 @@ export async function setupListener(this: WebSocket) {
       }
     }
 
-    this.once("close", () => {
-      try {
-        logger.debug(
-          `[RabbitMQ] setupListener: close for ${this.userId} =`,
-          typeof opts.channel,
-          "with channel id",
-          opts.channel?.ch,
-        );
-        if (opts.channel) opts.channel.close();
-        else {
-          Object.values(this.events).forEach((x) => x?.());
-          Object.values(this.memberEvents).forEach((x) => x?.());
-          Object.values(this.userSubscriptions ?? {}).forEach((x) => x?.());
-        }
-
-        this.memberListSubs?.clear();
-      } catch (err) {
-        logger.error(
-          "[RabbitMQ] setupListener: ",
-          err,
-          "with channel id",
-          opts.channel?.ch,
-        );
-      }
-    });
   } catch (err) {
     logger.error(`[RabbitMQ] setupListener: `, err);
   }

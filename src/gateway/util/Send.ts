@@ -5,6 +5,8 @@ import {
 } from "@mutualzz/types";
 import { JSONReplacer } from "@mutualzz/util";
 import { bufferDispatchFromPayload } from "./SessionEventBuffer";
+import { SessionRuntime } from "./SessionRuntime";
+import { touchSessionSeq } from "./Session";
 import type { WebSocket } from "./WebSocket";
 
 export function Send(socket: WebSocket, data: GatewayPayload) {
@@ -27,23 +29,32 @@ export function Send(socket: WebSocket, data: GatewayPayload) {
             d: data.d,
             s: data.s,
         });
+
+        touchSessionSeq(socket.sessionId, payload.s);
+        SessionRuntime.noteSequence(socket.sessionId, payload.s + 1);
     }
 
     return new Promise((resolve, reject) => {
-        if (socket.readyState !== socket.OPEN)
-            return reject(new Error("WebSocket is not open"));
+        const live =
+            SessionRuntime.getLiveSocket(socket.sessionId) ?? socket;
 
-        if (!socket.codec || !socket.compressor || socket.compress === "none") {
+        if (live.readyState !== live.OPEN) {
+            if (SessionRuntime.isDetached(socket.sessionId)) {
+                return resolve(null);
+            }
+            return reject(new Error("WebSocket is not open"));
+        }
+
+        if (!live.codec || !live.compressor || live.compress === "none") {
             const json = JSON.stringify(payload, JSONReplacer);
-            socket.send(json, (err) => (err ? reject(err) : resolve(null)));
+            live.send(json, (err) => (err ? reject(err) : resolve(null)));
             return;
         }
 
         try {
-            const encoded = socket.codec.encode(payload);
-            // NOTE: with "as any" it works, lets keep it for now
-            const compressed = socket.compressor.compress(encoded as any);
-            socket.send(Buffer.from(compressed), { binary: true }, (err) =>
+            const encoded = live.codec.encode(payload);
+            const compressed = live.compressor.compress(encoded as any);
+            live.send(Buffer.from(compressed), { binary: true }, (err) =>
                 err ? reject(err) : resolve(null),
             );
         } catch (err) {

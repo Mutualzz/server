@@ -567,7 +567,6 @@ export class VoicePeerSession {
     if (this.closed) throw new Error("session closed");
 
     const url = new URL(payload.voiceEndpoint);
-    url.searchParams.set("token", payload.voiceToken);
 
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(url.toString());
@@ -580,6 +579,10 @@ export class VoicePeerSession {
       socket.on("close", () => {
         this.rejectAll(new Error("voice socket closed"));
       });
+    });
+
+    await this.rpc(VoiceOpcodes.VoiceAuthenticate, {
+      token: payload.voiceToken,
     });
 
     const { rtpCapabilities } = (await this.rpc(

@@ -8,13 +8,23 @@ import { setupListener } from "../Listener";
 import { logger } from "../Logger";
 import {
     canResumeFromSeq,
+    getBufferedMaxSeq,
     getDispatchesSince,
 } from "../util/SessionEventBuffer";
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
+import { SessionRuntime } from "../util/SessionRuntime";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "../presence/Presence.service.ts";
 import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
+
+async function failResume(socket: WebSocket, reason: string) {
+    await Send(socket, {
+        op: "InvalidSession",
+        d: false,
+    });
+    return socket.close(GatewayCloseCodes.InvalidSession, reason);
+}
 
 export async function onResume(this: WebSocket, data: GatewayPayload) {
     const resume = data.d;
@@ -22,11 +32,7 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
 
     const rawSession = await redis.get(`rest:sessions:${resume.token}`);
     if (!rawSession) {
-        await Send(this, {
-            op: "InvalidSession",
-            d: false,
-        });
-        return this.close(GatewayCloseCodes.InvalidSession, "Invalid token");
+        return failResume(this, "Invalid token");
     }
 
     const restSession: RESTSession = JSON.parse(rawSession);
@@ -34,46 +40,48 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
 
     if (!session || session.userId !== restSession.userId.toString()) {
         logger.error(`Session not found for resume: ${resume.sessionId}`);
-        await Send(this, {
-            op: "InvalidSession",
-            d: false,
-        });
-
-        return this.close(GatewayCloseCodes.InvalidSession, "Invalid session");
+        return failResume(this, "Invalid session");
     }
 
-    if (!canResumeFromSeq(resume.sessionId, clientSeq, session.seq)) {
+    const runtimeSeq = SessionRuntime.getSequence(resume.sessionId);
+    const bufferedMax = getBufferedMaxSeq(resume.sessionId);
+    const serverSeq = Math.max(
+        session.seq,
+        runtimeSeq ?? 0,
+        bufferedMax ?? 0,
+    );
+
+    if (!canResumeFromSeq(resume.sessionId, clientSeq, serverSeq)) {
         logger.warn(
-            `Resume buffer miss for session ${resume.sessionId} (client seq ${clientSeq}, server seq ${session.seq})`,
+            `Resume buffer miss for session ${resume.sessionId} (client seq ${clientSeq}, server seq ${serverSeq})`,
         );
-        await Send(this, {
-            op: "InvalidSession",
-            d: false,
-        });
-        return this.close(GatewayCloseCodes.InvalidSession, "Resume buffer miss");
+        await SessionRuntime.destroy(resume.sessionId);
+        return failResume(this, "Resume buffer miss");
     }
 
     this.sessionId = resume.sessionId;
     this.userId = session.userId;
-    this.sequence = session.seq;
+
+    const claimed = SessionRuntime.claim(resume.sessionId, this);
+    if (!claimed) {
+        this.sequence = serverSeq;
+    }
 
     const user = await getUser(this.userId, true);
     if (!user) {
         logger.error(`User not found for resume: ${this.userId}`);
-        await Send(this, {
-            op: "InvalidSession",
-            d: false,
-        });
-
-        return this.close(GatewayCloseCodes.InvalidSession, "Invalid session");
+        await SessionRuntime.destroy(resume.sessionId);
+        return failResume(this, "Invalid session");
     }
 
     this.memberListSubs = this.memberListSubs ?? new Map();
     this.presences = this.presences ?? new Map();
     this.presenceSubs = this.presenceSubs ?? new Set();
 
-    await PresenceService.onSocketAuthenticated(this);
-    await setupListener.call(this);
+    if (!claimed) {
+        await setupListener.call(this);
+        SessionRuntime.register(this);
+    }
 
     const missed = getDispatchesSince(resume.sessionId, clientSeq);
 
@@ -84,8 +92,11 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
             d: event.d,
             s: event.s,
         });
-        this.sequence = Math.max(this.sequence, event.s);
+        this.sequence = Math.max(this.sequence, event.s + 1);
+        SessionRuntime.noteSequence(this.sessionId, this.sequence);
     }
+
+    await PresenceService.onSocketAuthenticated(this);
 
     await saveSession({
         sessionId: this.sessionId,

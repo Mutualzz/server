@@ -18,7 +18,7 @@ import {
 } from "./Presence.validator.ts";
 import { logger } from "../Logger";
 import { PresenceBucket } from "./Presence.bucket.ts";
-import { resyncMemberListWindows } from "../util/Calculations";
+import { offlineLike, resyncMemberListWindows } from "../util/Calculations";
 import { emitEvent, redis } from "@mutualzz/util";
 import { db, userSettingsTable } from "@mutualzz/database";
 import { eq } from "drizzle-orm";
@@ -287,8 +287,7 @@ export class PresenceService {
     this.startBackgroundWorkers();
 
     const sessionId = this.minecraftSessionId(bridgeId);
-    const previous =
-      (await this.store.get(userId).catch(() => null)) ?? null;
+    const previous = (await this.store.get(userId).catch(() => null)) ?? null;
     const { merged, remaining } = await this.store.removeSession(
       userId,
       sessionId,
@@ -305,20 +304,18 @@ export class PresenceService {
       return;
     }
 
-    void recordEndedActivities(
-      userId,
-      previous?.activities ?? [],
-      [],
-    ).catch(() => null);
+    void recordEndedActivities(userId, previous?.activities ?? [], []).catch(
+      () => null,
+    );
     await this.broadcast(userId, merged);
   }
 
   static async clearAllMinecraftBridgeActivities(userId: string) {
     this.startBackgroundWorkers();
 
-    const sessions = await redis.hkeys(`presence:sessions:${userId}`).catch(
-      () => [] as string[],
-    );
+    const sessions = await redis
+      .hkeys(`presence:sessions:${userId}`)
+      .catch(() => [] as string[]);
     const minecraftSessions = sessions.filter((id) =>
       id.startsWith("minecraft:"),
     );
@@ -346,13 +343,15 @@ export class PresenceService {
   ) {
     this.startBackgroundWorkers();
 
-    const settings = await db.query.userSettingsTable.findFirst({
-      where: eq(userSettingsTable.userId, BigInt(userId)),
-      columns: { shareActivity: true },
-    }).catch(() => null);
+    const settings = await db.query.userSettingsTable
+      .findFirst({
+        where: eq(userSettingsTable.userId, BigInt(userId)),
+        columns: { shareActivity: true },
+      })
+      .catch(() => null);
 
-    if (settings && settings.shareActivity === false) {
-      await this.clearMinecraftBridgeActivity(userId, opts.bridgeId);
+    if (settings && !settings.shareActivity) {
+      await this.clearAllMinecraftBridgeActivities(userId);
       return;
     }
 
@@ -431,11 +430,16 @@ export class PresenceService {
     const previous =
       (await this.store.get(ws.userId).catch(() => null)) ?? null;
 
-    let presence = await this.store.upsertSession(
-      ws.userId,
-      ws.sessionId,
-      clean,
-    );
+    let presence: PresencePayload;
+    if (persist && !(scheduled && scheduled.until > Date.now())) {
+      presence = await this.store.setAllSessionsStatus(
+        ws.userId,
+        ws.sessionId,
+        clean,
+      );
+    } else {
+      presence = await this.store.upsertSession(ws.userId, ws.sessionId, clean);
+    }
     presence = await this.applyOverlaysAndWrite(ws.userId, presence);
 
     if (shareActivityRow?.shareActivity !== false) {
@@ -446,7 +450,7 @@ export class PresenceService {
       ).catch(() => null);
     }
 
-    await this.broadcast(ws.userId, presence);
+    await this.broadcast(ws.userId, presence, previous);
   }
 
   static async onDisconnect(userId?: string, sessionId?: string) {
@@ -456,6 +460,13 @@ export class PresenceService {
     this.ensurePubSub();
 
     setTimeout(async () => {
+      if (sessionId) {
+        const sessionStillConnected = PresenceBucket.socketsByUserId(
+          userId,
+        ).some((ws) => ws.sessionId === sessionId);
+        if (sessionStillConnected) return;
+      }
+
       if (PresenceBucket.hasAnyAuthenticatedSocket(userId)) {
         if (sessionId) {
           const previous =
@@ -471,21 +482,20 @@ export class PresenceService {
               previous?.activities ?? [],
               presence.activities,
             ).catch(() => null);
-            await this.broadcast(userId, presence);
+            await this.broadcast(userId, presence, previous);
           } else {
             void recordEndedActivities(
               userId,
               previous?.activities ?? [],
               [],
             ).catch(() => null);
-            await this.broadcast(userId, merged);
+            await this.broadcast(userId, merged, previous);
           }
         }
         return;
       }
 
-      const previous =
-        (await this.store.get(userId).catch(() => null)) ?? null;
+      const previous = (await this.store.get(userId).catch(() => null)) ?? null;
 
       if (sessionId) {
         await this.store.removeSession(userId, sessionId);
@@ -496,7 +506,7 @@ export class PresenceService {
           previous?.activities ?? [],
           [],
         ).catch(() => null);
-        await this.broadcast(userId, presence);
+        await this.broadcast(userId, presence, previous);
         return;
       }
 
@@ -507,7 +517,7 @@ export class PresenceService {
         previous?.activities ?? [],
         presence.status === "offline" ? [] : presence.activities,
       ).catch(() => null);
-      await this.broadcast(userId, presence);
+      await this.broadcast(userId, presence, previous);
     }, DISCONNECT_GRACE_MS).unref?.();
   }
 
@@ -677,7 +687,7 @@ export class PresenceService {
     userId: string,
     base: PresencePayload,
   ): Promise<PresencePayload> {
-    let presence = { ...base, activities: [...(base.activities ?? [])] };
+    const presence = { ...base, activities: [...(base.activities ?? [])] };
 
     const scheduled = await this.getSchedule(userId).catch(() => null);
     if (scheduled && scheduled.until > Date.now()) {
@@ -807,14 +817,26 @@ export class PresenceService {
   private static scheduleResyncForTargets(
     userId: string,
     targets: WebSocket[],
+    opts?: { forceAllSubs?: boolean },
   ) {
     for (const socket of targets) {
       const presencesBySubKey = socket.presences;
-      if (!presencesBySubKey || presencesBySubKey.size === 0) continue;
+      const subKeys = new Set<string>();
 
-      for (const [subKey, visibleUserIds] of presencesBySubKey) {
-        if (!visibleUserIds?.has(userId)) continue;
+      if (presencesBySubKey) {
+        for (const [subKey, visibleUserIds] of presencesBySubKey) {
+          if (!opts?.forceAllSubs && !visibleUserIds?.has(userId)) continue;
+          subKeys.add(subKey);
+        }
+      }
 
+      if (opts?.forceAllSubs && socket.memberListSubs?.size) {
+        for (const sub of socket.memberListSubs.values()) {
+          subKeys.add(`${sub.spaceId}:${sub.channelId}:${sub.listId}`);
+        }
+      }
+
+      for (const subKey of subKeys) {
         const resyncKey: ResyncKey = `${socket.sessionId}:${subKey}`;
 
         const existingTimer = this.resyncTimers.get(resyncKey);
@@ -837,12 +859,14 @@ export class PresenceService {
   private static async fanoutLocal(
     userId: string,
     presence: PresencePayload,
-    opts?: { publish?: boolean },
+    opts?: { publish?: boolean; previous?: PresencePayload | null },
   ) {
     const seenBy = PresenceBucket.socketsSeeingUser(userId);
     const own = PresenceBucket.socketsByUserId(userId);
     const targets = new Set([...seenBy, ...own]);
     const publicPresence = toPublicPresence(presence) ?? presence;
+    const offlineFlipped =
+      offlineLike(opts?.previous ?? null) !== offlineLike(presence);
 
     await Promise.allSettled(
       [...targets].map((socket) => {
@@ -885,11 +909,25 @@ export class PresenceService {
       ]);
     }
 
-    this.scheduleResyncForTargets(userId, seenBy);
+    let resyncTargets = seenBy;
+    if (offlineFlipped) {
+      const memberListWatchers = PresenceBucket.authenticatedSockets().filter(
+        (ws) => (ws.memberListSubs?.size ?? 0) > 0,
+      );
+      resyncTargets = [...new Set([...seenBy, ...memberListWatchers])];
+    }
+
+    this.scheduleResyncForTargets(userId, resyncTargets, {
+      forceAllSubs: offlineFlipped,
+    });
   }
 
-  private static async broadcast(userId: string, presence: PresencePayload) {
-    await this.fanoutLocal(userId, presence, { publish: true });
+  private static async broadcast(
+    userId: string,
+    presence: PresencePayload,
+    previous?: PresencePayload | null,
+  ) {
+    await this.fanoutLocal(userId, presence, { publish: true, previous });
   }
 
   private static async notifyScheduleChanged(

@@ -1,6 +1,7 @@
 import { GatewayOpcodes } from "@mutualzz/types";
 
-export const HEARTBEAT_INTERVAL = 45000; // 45 seconds
+export const HEARTBEAT_INTERVAL = 45000;
+export const RESUME_WINDOW_MS = 120_000;
 export const DEFAULT_PORT = 4000;
 
 export const OPCODE_LIMITS: Record<number, { limit: number; window: number }> =

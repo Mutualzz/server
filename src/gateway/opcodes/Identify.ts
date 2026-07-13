@@ -5,9 +5,12 @@ import {
   type RESTSession,
 } from "@mutualzz/types";
 import { getUser, prepareReadyData, redis } from "@mutualzz/util";
+import { randomUUID } from "crypto";
 import { setupListener } from "../Listener";
 import { logger } from "../Logger";
 import { saveSession } from "../util";
+import { clearSessionBuffer } from "../util/SessionEventBuffer";
+import { SessionRuntime } from "../util/SessionRuntime";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "../presence/Presence.service.ts";
@@ -28,25 +31,21 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     );
     await Send(this, {
       op: "InvalidSession",
-      d: {
-        reason: "Invalid token",
-      },
+      d: false,
     });
     return this.close(GatewayCloseCodes.InvalidSession, "Invalid token");
   }
 
   const session: RESTSession = JSON.parse(rawSession);
 
-  this.sessionId = session.sessionId;
+  this.sessionId = randomUUID();
 
   const user = await getUser(session.userId, true);
   if (!user) {
     logger.error(`User not found for session ${this.sessionId}`);
     await Send(this, {
       op: "InvalidSession",
-      d: {
-        reason: "Invalid user",
-      },
+      d: false,
     });
     return this.close(GatewayCloseCodes.InvalidSession, "Invalid user");
   }
@@ -58,13 +57,17 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   this.presences = this.presences ?? new Map();
   this.presenceSubs = new Set();
 
-  await PresenceService.onSocketAuthenticated(this);
+  clearSessionBuffer(this.sessionId);
 
   await saveSession({
     sessionId: this.sessionId,
     userId: user.id,
     seq: this.sequence,
   });
+
+  SessionRuntime.register(this);
+
+  await PresenceService.onSocketAuthenticated(this);
 
   const readyData = await prepareReadyData(user);
 
@@ -106,8 +109,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
   await VoiceStateService.sendRejoinIfNeeded(this);
 
-  // Send voice states
-
   (async () => {
     try {
       const CHUNK_SIZE = 25;
@@ -130,7 +131,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
         );
         if (!states.length) continue;
 
-        // filter state which sendRejoinIfNeeded handled
         const filtered = states.filter(
           (st) => st.userId.toString() !== this.userId?.toString(),
         );
@@ -147,7 +147,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
             });
           }
 
-          // small pause to avoid blocking the identify path and spike load
           await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
         }
       }

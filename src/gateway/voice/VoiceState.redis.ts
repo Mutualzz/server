@@ -1,6 +1,7 @@
 import type { Snowflake } from "@mutualzz/types";
 import { redis } from "@mutualzz/util";
 import {
+  VOICE_ACTIVE_SESSION_TTL_SECONDS,
   VOICE_EXP_ZSET_KEY,
   VOICE_LAST_TTL_SECONDS,
   VOICE_STATE_TTL_SECONDS,
@@ -43,13 +44,27 @@ export class VoiceStateRedis {
     }
   }
 
-  static async setActiveSession(session: ActiveVoiceSession, ttlSeconds = 300) {
+  static async setActiveSession(
+    session: ActiveVoiceSession,
+    ttlSeconds = VOICE_ACTIVE_SESSION_TTL_SECONDS,
+  ) {
     await redis.set(
       this.activeSessionKey(session.userId),
       JSON.stringify(session),
       "EX",
       ttlSeconds,
     );
+  }
+
+  static async touchActiveSession(
+    userId: Snowflake,
+    ttlSeconds = VOICE_ACTIVE_SESSION_TTL_SECONDS,
+  ) {
+    const key = this.activeSessionKey(userId);
+    const exists = await redis.exists(key);
+    if (!exists) return false;
+    await redis.expire(key, ttlSeconds);
+    return true;
   }
 
   static async clearActiveSession(userId: Snowflake, tokenId?: string) {

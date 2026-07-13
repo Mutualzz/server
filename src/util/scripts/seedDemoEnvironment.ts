@@ -328,6 +328,7 @@ async function seedSpace(hero: SeededUser, members: SeededUser[]) {
         permissionFlags.CreateInvites |
         permissionFlags.Connect |
         permissionFlags.Speak |
+        permissionFlags.UseVAD |
         permissionFlags.AttachFiles |
         permissionFlags.ReadMessageHistory |
         permissionFlags.UseExternalEmojis |

@@ -1,5 +1,6 @@
 export * from "./itunesMusic";
 export * from "./deezerMusic";
+export * from "./hydrateProfileMusicPreviews";
 export * from "./Common";
 export * from "./Constants";
 export * from "./dbHelpers";
@@ -23,3 +24,4 @@ export * from "./Appeals";
 export * from "./spaceLockdown";
 export * from "./reportReason";
 export * from "./PushNotifications";
+export * from "./semver";

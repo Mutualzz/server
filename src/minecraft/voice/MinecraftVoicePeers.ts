@@ -3,6 +3,10 @@ import {
   VoicePeerSession,
   type MinecraftVoiceJoinPayload,
 } from "./VoicePeerSession.ts";
+import {
+  clearMinecraftVoicePeerLocation,
+  registerMinecraftVoicePeerLocation,
+} from "./audioTokens.ts";
 
 const logger = new Logger({
   tag: "MinecraftVoicePeers",
@@ -43,6 +47,7 @@ const notifyMinecraftClientLeave = async (
     logger.debug(`notifyMinecraftClientLeave failed: ${err}`);
   }
 };
+
 class MinecraftVoicePeersRegistry {
   private readonly byUserId = new Map<string, VoicePeerSession>();
 
@@ -62,12 +67,18 @@ class MinecraftVoicePeersRegistry {
 
     try {
       await session.join(payload);
-            logger.debug(
-                `Minecraft voice peer joined userId=${payload.userId} uuid=${payload.minecraftUuid}`,
-            );
+      await registerMinecraftVoicePeerLocation({
+        userId: payload.userId,
+        sessionId: payload.sessionId,
+        minecraftUuid: payload.minecraftUuid,
+      });
+      logger.debug(
+        `Minecraft voice peer joined userId=${payload.userId} uuid=${payload.minecraftUuid}`,
+      );
       return session;
     } catch (err) {
       this.byUserId.delete(payload.userId);
+      await clearMinecraftVoicePeerLocation(payload.userId).catch(() => undefined);
       session.close();
       throw err;
     }
@@ -78,12 +89,15 @@ class MinecraftVoicePeersRegistry {
     reason: "leave" | "kicked" = "leave",
   ): Promise<boolean> {
     const session = this.byUserId.get(userId);
-    if (!session) return false;
+    if (!session) {
+      await clearMinecraftVoicePeerLocation(userId).catch(() => undefined);
+      return false;
+    }
     const minecraftUuid = session.minecraftUuid;
     this.byUserId.delete(userId);
+    await clearMinecraftVoicePeerLocation(userId).catch(() => undefined);
     await session.leave(reason).catch(() => undefined);
     logger.debug(`Minecraft voice peer left userId=${userId} reason=${reason}`);
-    // Tell Paper → Fabric mod so it clears sessionWanted (no reconnect loop).
     void notifyMinecraftClientLeave(minecraftUuid, reason);
     return true;
   }

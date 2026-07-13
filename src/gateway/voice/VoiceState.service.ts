@@ -9,6 +9,7 @@ import {
   emitEvent,
   generateVoiceToken,
   redis,
+  touchVoiceSessionTtls,
 } from "@mutualzz/util";
 import { canVoiceConnect, canVoiceSpeak } from "../util/VoicePermissions.ts";
 import { logger } from "../Logger.ts";
@@ -16,10 +17,10 @@ import { voiceScopeKey } from "./VoiceState.util";
 import { PresenceBucket } from "../presence/Presence.bucket.ts";
 import { and, eq } from "drizzle-orm";
 import { db, voiceModerationTable } from "@mutualzz/database";
+import { INSTANCE_ID } from "../../util/InstanceId.ts";
 
 export class VoiceStateService {
-  static readonly instanceId: string =
-    process.env.INSTANCE_ID ?? crypto.randomUUID();
+  static readonly instanceId: string = INSTANCE_ID;
 
   private static readonly STREAM_CHUNK_SIZE = 25;
   private static readonly STREAM_PAUSE_MS = 10;
@@ -77,6 +78,8 @@ export class VoiceStateService {
       params.userId,
       params.sessionId,
       params.roomId,
+      undefined,
+      tokenId,
     );
 
     await Send(socket, {
@@ -258,6 +261,16 @@ export class VoiceStateService {
         );
         return;
       }
+    } else if (
+      !active &&
+      previous?.channelId != null &&
+      previous.sessionId !== sessionId
+    ) {
+      shouldSupersede = true;
+      logger.debug("Superseding expired active voice session", {
+        userId: String(userId),
+        oldSessionId: previous.sessionId,
+      });
     }
 
     const now = Date.now();
@@ -306,6 +319,9 @@ export class VoiceStateService {
       );
 
       void VoiceStateService.emitStatesAsUpdates(spaceId, requestedChannelId);
+    } else {
+      await VoiceStateRedis.touchActiveSession(userId);
+      await touchVoiceSessionTtls(userId);
     }
   }
 
@@ -323,7 +339,7 @@ export class VoiceStateService {
         await import("../../minecraft/voice/MinecraftVoicePeers.ts");
       const { revokeMinecraftAudioTokenForUser } =
         await import("../../minecraft/voice/audioTokens.ts");
-      revokeMinecraftAudioTokenForUser(String(targetUserId));
+      await revokeMinecraftAudioTokenForUser(String(targetUserId));
       await MinecraftVoicePeers.leave(String(targetUserId), "kicked");
     }
 
@@ -512,7 +528,14 @@ export class VoiceStateService {
       tokenId,
       updatedAt: Date.now(),
     });
-    await createVoiceSession(voiceToken, userId, sessionId, roomId);
+    await createVoiceSession(
+      voiceToken,
+      userId,
+      sessionId,
+      roomId,
+      undefined,
+      tokenId,
+    );
 
     return {
       ok: true,
@@ -535,7 +558,7 @@ export class VoiceStateService {
         await import("../../minecraft/voice/MinecraftVoicePeers.ts");
       const { revokeMinecraftAudioTokenForUser } =
         await import("../../minecraft/voice/audioTokens.ts");
-      revokeMinecraftAudioTokenForUser(String(userId));
+      await revokeMinecraftAudioTokenForUser(String(userId));
       await MinecraftVoicePeers.leave(String(userId));
       return false;
     }
@@ -654,6 +677,20 @@ export class VoiceStateService {
     const voiceEndpoint = this.getVoiceEndpoint();
     if (!voiceEndpoint) return false;
 
+    const oldRoomId = voiceScopeKey(spaceId, oldChannelId);
+    try {
+      const payload = JSON.stringify({
+        userId: String(targetUserId),
+        spaceId,
+        roomId: oldRoomId,
+        reason: "Moved to another voice channel",
+        instanceId: this.instanceId,
+      });
+      await redis.publish("voice:control:kick", payload);
+    } catch (err) {
+      logger.error("Failed to publish voice move kick control event", err);
+    }
+
     const tokenId = crypto.randomUUID();
     const voiceToken = generateVoiceToken(
       targetUserId.toString(),
@@ -670,7 +707,14 @@ export class VoiceStateService {
       updatedAt: Date.now(),
     });
 
-    await createVoiceSession(voiceToken, targetUserId, sessionId, roomId);
+    await createVoiceSession(
+      voiceToken,
+      targetUserId,
+      sessionId,
+      roomId,
+      undefined,
+      tokenId,
+    );
 
     await emitEvent({
       event: "VoiceServerUpdate",

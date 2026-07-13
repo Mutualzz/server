@@ -21,8 +21,10 @@ import {
   validateSupportTicketParams,
   validateSupportTicketsQuery,
 } from "@mutualzz/validators";
-import { and, asc, desc, eq, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
+
+const PENDING_TICKET_STATUSES = ["open", "awaiting_reply"] as const;
 
 const supportUserColumns = {
   id: true,
@@ -128,6 +130,20 @@ export default class SupportController {
 
       const { category, subject, message, platform, appVersion } =
         validateCreateSupportTicketBody.parse(req.body);
+
+      const pendingTicket = await db.query.supportTicketsTable.findFirst({
+        where: and(
+          eq(supportTicketsTable.userId, BigInt(user.id)),
+          inArray(supportTicketsTable.status, [...PENDING_TICKET_STATUSES]),
+        ),
+        columns: { id: true },
+      });
+
+      if (pendingTicket)
+        throw new HttpException(
+          HttpStatusCode.Conflict,
+          "You already have a pending support ticket",
+        );
 
       const ticketId = BigInt(Snowflake.generate());
       const messageId = BigInt(Snowflake.generate());
