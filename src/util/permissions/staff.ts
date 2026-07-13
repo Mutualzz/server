@@ -1,11 +1,11 @@
 import { BitField, userFlags } from "@mutualzz/bitfield";
 import { HttpException, HttpStatusCode, type APIPrivateUser } from "@mutualzz/types";
 
-export const isFounder = (user: APIPrivateUser) =>
+type UserWithFlags = { flags: string | number | bigint };
+
+export const isFounder = (user: UserWithFlags) =>
     BitField.fromString(userFlags, user.flags.toString()).has("Founder");
 
-// Founders are implicitly staff — they can do everything Staff can, plus
-// grant/revoke flags (see requireFounder).
 export const isStaff = (user: APIPrivateUser) =>
     BitField.fromString(userFlags, user.flags.toString()).has("Staff") ||
     isFounder(user);
@@ -28,4 +28,12 @@ export const requireFounder = (user?: APIPrivateUser | null) => {
         throw new HttpException(HttpStatusCode.Forbidden, "Missing access");
 
     return user;
+};
+
+export const assertNotFounderTarget = (user: UserWithFlags) => {
+    if (isFounder(user))
+        throw new HttpException(
+            HttpStatusCode.Forbidden,
+            "Cannot perform this action on a founder account",
+        );
 };

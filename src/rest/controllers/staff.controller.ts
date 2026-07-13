@@ -36,6 +36,7 @@ import {
   postmark,
   publicUserColumns,
   redis,
+  assertNotFounderTarget,
   requireFounder,
   requireStaff,
   resolveUserIdentifier,
@@ -149,6 +150,8 @@ export default class StaffController {
       const target = await resolveUserIdentifier(userId, true);
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      assertNotFounderTarget(target);
 
       const changes: {
         username?: string;
@@ -317,6 +320,8 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
+      assertNotFounderTarget(target);
+
       await db.insert(staffActionsTable).values({
         id: BigInt(Snowflake.generate()),
         actorId: BigInt(actor.id),
@@ -368,6 +373,8 @@ export default class StaffController {
       )) as APIPrivateUser | null;
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      assertNotFounderTarget(target);
 
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
@@ -465,6 +472,8 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
+      assertNotFounderTarget(target);
+
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
           HttpStatusCode.BadRequest,
@@ -554,6 +563,8 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
+      assertNotFounderTarget(target);
+
       await db
         .update(usersTable)
         .set({ restrictedUntil: null, restrictionReason: null })
@@ -612,6 +623,8 @@ export default class StaffController {
       const target = await resolveUserIdentifier(userId, true);
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      assertNotFounderTarget(target);
 
       const newFlags = BitField.fromString(userFlags, target.flags.toString())
         .set(flag, enabled)
@@ -676,6 +689,8 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
+      assertNotFounderTarget(target);
+
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
           HttpStatusCode.BadRequest,
@@ -695,12 +710,6 @@ export default class StaffController {
 
       if (mode === "hard") {
         requireFounder(actor);
-
-        if (targetFlags.has("Founder"))
-          throw new HttpException(
-            HttpStatusCode.BadRequest,
-            "Cannot hard delete a founder account",
-          );
 
         const ownedSpaces = await db.query.spacesTable.findMany({
           columns: { id: true, icon: true },
@@ -860,6 +869,8 @@ export default class StaffController {
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
+      assertNotFounderTarget(target);
+
       if (BigInt(target.id) === BigInt(actor.id))
         throw new HttpException(
           HttpStatusCode.BadRequest,
@@ -929,6 +940,8 @@ export default class StaffController {
       const target = await resolveUserIdentifier(userId, true);
       if (!target)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      assertNotFounderTarget(target);
 
       const sessions = await listSessions(target.id);
       const match = sessions.find((s) => s.sessionId === sessionId);

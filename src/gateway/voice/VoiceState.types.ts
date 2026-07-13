@@ -13,6 +13,7 @@ export interface VoiceState {
 
     sessionId: string;
     updatedAt: number;
+    joinedAt: number;
 
     client?: VoiceClient;
 }
