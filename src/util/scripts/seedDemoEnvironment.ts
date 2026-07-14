@@ -301,10 +301,14 @@ async function seedPosts(users: SeededUser[]) {
   }
 
   console.log(`Seeded ${createdPostIds.length} posts with likes and comments.`);
+  return createdPostIds.map((id) => id.toString());
 }
 
 async function seedSpace(hero: SeededUser, members: SeededUser[]) {
   const spaceId = BigInt(Snowflake.generate());
+  const everyoneRoleId = spaceId;
+  const generalChannelId = BigInt(Snowflake.generate());
+  const voiceChannelId = BigInt(Snowflake.generate());
 
   await db.transaction(async (tx) => {
     await tx.insert(spacesTable).values({
@@ -314,8 +318,6 @@ async function seedSpace(hero: SeededUser, members: SeededUser[]) {
       ownerId: hero.id,
       memberCount: members.length + 1,
     });
-
-    const everyoneRoleId = spaceId;
 
     await tx.insert(rolesTable).values({
       id: everyoneRoleId,
@@ -365,7 +367,6 @@ async function seedSpace(hero: SeededUser, members: SeededUser[]) {
       position: 0,
     });
 
-    const generalChannelId = BigInt(Snowflake.generate());
     await tx.insert(channelsTable).values({
       id: generalChannelId,
       type: ChannelType.Text,
@@ -394,7 +395,6 @@ async function seedSpace(hero: SeededUser, members: SeededUser[]) {
       position: 1,
     });
 
-    const voiceChannelId = BigInt(Snowflake.generate());
     await tx.insert(channelsTable).values({
       id: voiceChannelId,
       type: ChannelType.Voice,
@@ -430,6 +430,13 @@ async function seedSpace(hero: SeededUser, members: SeededUser[]) {
   });
 
   console.log('Seeded space "Alt Creators" with channels and messages.');
+
+  return {
+    spaceId: spaceId.toString(),
+    channelId: generalChannelId.toString(),
+    voiceChannelId: voiceChannelId.toString(),
+    roleId: everyoneRoleId.toString(),
+  };
 }
 
 async function seedDirectMessages(hero: SeededUser, friend: SeededUser) {
@@ -465,6 +472,8 @@ async function seedDirectMessages(hero: SeededUser, friend: SeededUser) {
   });
 
   console.log(`Seeded DM thread between ${hero.username} and ${friend.username}.`);
+
+  return channelId.toString();
 }
 
 async function seedHeroProfile(hero: SeededUser) {
@@ -612,13 +621,13 @@ async function main() {
   await makeFriends(hero.id, friends.map((friend) => friend.id));
 
   console.log("Seeding feed content...");
-  await seedPosts(allUsers);
+  const postIds = await seedPosts(allUsers);
 
   console.log("Seeding space...");
-  await seedSpace(hero, friends);
+  const space = await seedSpace(hero, friends);
 
   console.log("Seeding direct messages...");
-  await seedDirectMessages(hero, friends[0]);
+  const dmChannelId = await seedDirectMessages(hero, friends[0]);
 
   console.log("Seeding hero profile...");
   await seedHeroProfile(hero);
@@ -628,8 +637,14 @@ async function main() {
   console.log(`  Email:    ${HERO_EMAIL}`);
   console.log(`  Username: ${HERO_USERNAME}`);
   console.log(`  Password: ${HERO_PASSWORD}`);
-  console.log("\nLog in with this account to capture App Store screenshots.");
-  console.log("Re-run `pnpm demo:seed` anytime to reset demo data.\n");
+  console.log(`\nSpace: ${space.spaceId}`);
+  console.log(`Text channel: ${space.channelId}`);
+  console.log(`Voice channel: ${space.voiceChannelId}`);
+  console.log(`DM channel: ${dmChannelId}`);
+  console.log(`Role: ${space.roleId}`);
+  console.log(`Post: ${postIds[0]}`);
+  console.log(`Profile username: ${friends[0].username}`);
+  console.log("\nRe-run `pnpm demo:seed` anytime to reset demo data.\n");
 }
 
 main()

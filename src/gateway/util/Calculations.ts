@@ -489,6 +489,7 @@ export async function subscribeToMemberEvents(
   if (this.events?.[userId]) return false;
   if (this.memberEvents?.[userId]) return false;
 
+  this.memberEvents = this.memberEvents ?? {};
   this.memberEvents[userId] = await listenEvent(
     userId,
     (opts) => opts?.acknowledge?.(),

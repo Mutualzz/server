@@ -58,6 +58,7 @@ export default async function Connection(
     socket.on("error", logger.error);
 
     socket.events = {};
+    socket.memberEvents = {};
     socket.sequence = 0;
     socket.memberListSubs = socket.memberListSubs ?? new Map();
     socket.presences = socket.presences ?? new Map();

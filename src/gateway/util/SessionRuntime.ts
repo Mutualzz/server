@@ -40,6 +40,9 @@ function copyAppState(from: WebSocket, to: WebSocket) {
     to.presences = from.presences ?? new Map();
     to.presenceSubs = from.presenceSubs ?? new Set();
     to.userSubscriptions = from.userSubscriptions ?? {};
+    to.events = from.events ?? {};
+    to.memberEvents = from.memberEvents ?? {};
+    to.listenOptions = from.listenOptions;
     to.sequence = from.sequence;
 }
 
