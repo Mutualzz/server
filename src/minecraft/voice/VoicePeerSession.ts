@@ -60,7 +60,7 @@ export interface MinecraftVoiceJoinPayload {
   minecraftUuid: string;
   voiceEndpoint: string;
   voiceToken: string;
-  sessionId?: string;
+  sessionId: string;
   roomId?: string;
   spaceId?: string;
   channelId?: string;
