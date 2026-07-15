@@ -7,9 +7,9 @@ import WebSocket from "ws";
 import { encodeDownlinkFrame } from "./AudioConnection.ts";
 
 const logger = new Logger({
-    tag: "MinecraftVoicePeer",
-    // Verbose uplink diagnostics stay on debug; default info keeps chatty ops quiet.
-    level: (process.env.LOG_LEVEL as "debug" | "info" | undefined) ?? "info",
+  tag: "MinecraftVoicePeer",
+  // Verbose uplink diagnostics stay on debug; default info keeps chatty ops quiet.
+  level: (process.env.LOG_LEVEL as "debug" | "info" | undefined) ?? "info",
 });
 
 const g = globalThis as any;
@@ -308,12 +308,12 @@ export class VoicePeerSession {
       }
 
       this.lastUplinkAt = Date.now();
-            if (!this.uplinkBytesLogged) {
-                this.uplinkBytesLogged = true;
-                logger.debug(
-                    `First mic uplink frame userId=${this.userId} bytes=${pcm.byteLength}`,
-                );
-            }
+      if (!this.uplinkBytesLogged) {
+        this.uplinkBytesLogged = true;
+        logger.debug(
+          `First mic uplink frame userId=${this.userId} bytes=${pcm.byteLength}`,
+        );
+      }
       // Never undo a hub-side mute just because late PCM arrived — but if the
       // producer was paused by an older code path, resume so audio can flow.
       if (!this.localMuted && this.micProducer) {
@@ -410,35 +410,35 @@ export class VoicePeerSession {
       return;
     }
 
-        if (peak > 500 && !this.uplinkAudioLogged) {
-            this.uplinkAudioLogged = true;
-            logger.debug(
-                `Non-silent mic into WebRTC track userId=${this.userId} peak=${peak} gain=${this.uplinkGain.toFixed(1)}`,
-            );
-            this.sendControl({ t: "uplink_ok", peak });
-            if (logger.has("debug")) {
-                setTimeout(() => {
-                    if (this.closed || !this.micProducer) return;
-                    void this.micProducer
-                        .getStats()
-                        .then((stats) => {
-                            let bytesSent = 0;
-                            let packetsSent = 0;
-                            stats.forEach((report) => {
-                                const r = report as Record<string, unknown>;
-                                if (r.type === "outbound-rtp") {
-                                    bytesSent = Number(r.bytesSent ?? 0);
-                                    packetsSent = Number(r.packetsSent ?? 0);
-                                }
-                            });
-                            logger.debug(
-                                `MC uplink RTP check userId=${this.userId} bytesSent=${bytesSent} packetsSent=${packetsSent} sendTransport=${this.sendTransport?.connectionState}`,
-                            );
-                        })
-                        .catch(() => undefined);
-                }, 2000);
-            }
-        }
+    if (peak > 500 && !this.uplinkAudioLogged) {
+      this.uplinkAudioLogged = true;
+      logger.debug(
+        `Non-silent mic into WebRTC track userId=${this.userId} peak=${peak} gain=${this.uplinkGain.toFixed(1)}`,
+      );
+      this.sendControl({ t: "uplink_ok", peak });
+      if (logger.has("debug")) {
+        setTimeout(() => {
+          if (this.closed || !this.micProducer) return;
+          void this.micProducer
+            .getStats()
+            .then((stats) => {
+              let bytesSent = 0;
+              let packetsSent = 0;
+              stats.forEach((report) => {
+                const r = report as Record<string, unknown>;
+                if (r.type === "outbound-rtp") {
+                  bytesSent = Number(r.bytesSent ?? 0);
+                  packetsSent = Number(r.packetsSent ?? 0);
+                }
+              });
+              logger.debug(
+                `MC uplink RTP check userId=${this.userId} bytesSent=${bytesSent} packetsSent=${packetsSent} sendTransport=${this.sendTransport?.connectionState}`,
+              );
+            })
+            .catch(() => undefined);
+        }, 2000);
+      }
+    }
   }
 
   private fadeUnderrun(samples: Int16Array) {
@@ -516,51 +516,51 @@ export class VoicePeerSession {
     this.uplinkPumpNextAt = Date.now();
     this.scheduleUplinkPump();
 
-        this.sendTransport.on("connectionstatechange", () => {
-            logger.debug(
-                `MC send transport state=${this.sendTransport?.connectionState} userId=${this.userId}`,
-            );
-        });
+    this.sendTransport.on("connectionstatechange", () => {
+      logger.debug(
+        `MC send transport state=${this.sendTransport?.connectionState} userId=${this.userId}`,
+      );
+    });
 
-        logger.debug(
-            `Mic producer live userId=${this.userId} producerId=${this.micProducer.id} paused=${this.micProducer.paused} trackEnabled=${track.enabled} readyState=${track.readyState}`,
+    logger.debug(
+      `Mic producer live userId=${this.userId} producerId=${this.micProducer.id} paused=${this.micProducer.paused} trackEnabled=${track.enabled} readyState=${track.readyState}`,
+    );
+
+    if (logger.has("debug")) {
+      this.uplinkStatsTimer = setInterval(() => {
+        if (this.closed || !this.micProducer) return;
+        const queueMs = Math.round(
+          (this.uplinkPcmQueue.length / SAMPLE_RATE) * 1000,
         );
-
-        if (logger.has("debug")) {
-            this.uplinkStatsTimer = setInterval(() => {
-                if (this.closed || !this.micProducer) return;
-                const queueMs = Math.round(
-                    (this.uplinkPcmQueue.length / SAMPLE_RATE) * 1000,
+        logger.debug(
+          `MC uplink pulse userId=${this.userId} muted=${this.localMuted} gain=${this.uplinkGain.toFixed(1)} peak=${this.lastUplinkPeak} queueMs=${queueMs} producerPaused=${this.micProducer.paused} lastUplinkAgoMs=${this.lastUplinkAt ? Date.now() - this.lastUplinkAt : -1}`,
+        );
+        this.lastUplinkPeak = 0;
+        void this.micProducer
+          .getStats()
+          .then((stats) => {
+            const lines: string[] = [];
+            stats.forEach((report) => {
+              const r = report as Record<string, unknown>;
+              if (
+                r.type === "outbound-rtp" ||
+                r.type === "remote-inbound-rtp" ||
+                r.type === "transport"
+              ) {
+                lines.push(
+                  `${r.type} bytesSent=${r.bytesSent ?? "-"} packetsSent=${r.packetsSent ?? "-"} bytesReceived=${r.bytesReceived ?? "-"}`,
                 );
-                logger.debug(
-                    `MC uplink pulse userId=${this.userId} muted=${this.localMuted} gain=${this.uplinkGain.toFixed(1)} peak=${this.lastUplinkPeak} queueMs=${queueMs} producerPaused=${this.micProducer.paused} lastUplinkAgoMs=${this.lastUplinkAt ? Date.now() - this.lastUplinkAt : -1}`,
-                );
-                this.lastUplinkPeak = 0;
-                void this.micProducer
-                    .getStats()
-                    .then((stats) => {
-                        const lines: string[] = [];
-                        stats.forEach((report) => {
-                            const r = report as Record<string, unknown>;
-                            if (
-                                r.type === "outbound-rtp" ||
-                                r.type === "remote-inbound-rtp" ||
-                                r.type === "transport"
-                            ) {
-                                lines.push(
-                                    `${r.type} bytesSent=${r.bytesSent ?? "-"} packetsSent=${r.packetsSent ?? "-"} bytesReceived=${r.bytesReceived ?? "-"}`,
-                                );
-                            }
-                        });
-                        if (lines.length) {
-                            logger.debug(
-                                `MC uplink stats userId=${this.userId} ${lines.join(" | ")}`,
-                            );
-                        }
-                    })
-                    .catch(() => undefined);
-            }, 8000);
-        }
+              }
+            });
+            if (lines.length) {
+              logger.debug(
+                `MC uplink stats userId=${this.userId} ${lines.join(" | ")}`,
+              );
+            }
+          })
+          .catch(() => undefined);
+      }, 8000);
+    }
   }
 
   async join(payload: MinecraftVoiceJoinPayload) {

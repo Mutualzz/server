@@ -13,7 +13,7 @@ import { and, desc, eq, gt, lt, notInArray } from "drizzle-orm";
 export const ACTIVITY_HISTORY_MAX = 5;
 export const ACTIVITY_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const ACTIVITY_HISTORY_MIN_DURATION_MS = 60_000;
-export const ACTIVITY_HISTORY_DEDUPE_MS = 5 * 60_000;
+export const ACTIVITY_HISTORY_DEDUPE_MS = ACTIVITY_HISTORY_RETENTION_MS;
 
 export type RecentActivityView = {
   type: Exclude<PresenceActivityType, "custom">;
@@ -93,6 +93,16 @@ export async function recordEndedActivities(
     );
 
     if (match) {
+      const nextStartedAt =
+        typeof startedAt === "number" && Number.isFinite(startedAt)
+          ? startedAt
+          : null;
+      const existingStartedAt = match.startedAt?.getTime() ?? null;
+      const mergedStartedAt =
+        existingStartedAt != null && nextStartedAt != null
+          ? Math.min(existingStartedAt, nextStartedAt)
+          : (existingStartedAt ?? nextStartedAt);
+
       await db
         .update(userActivityHistoryTable)
         .set({
@@ -102,10 +112,7 @@ export async function recordEndedActivities(
           url: activity.url ?? match.url,
           assets: activity.assets ?? match.assets,
           startedAt:
-            match.startedAt ??
-            (typeof startedAt === "number" && Number.isFinite(startedAt)
-              ? new Date(startedAt)
-              : null),
+            mergedStartedAt != null ? new Date(mergedStartedAt) : null,
         })
         .where(eq(userActivityHistoryTable.id, match.id));
       continue;
@@ -200,13 +207,23 @@ export async function listRecentActivities(
       gt(userActivityHistoryTable.endedAt, cutoff),
     ),
     orderBy: [desc(userActivityHistoryTable.endedAt)],
-    limit: ACTIVITY_HISTORY_MAX,
+    limit: ACTIVITY_HISTORY_MAX * 4,
   });
 
-  return rows
-    .filter((row) => row.type === "playing" || row.type === "listening")
-    .map((row) => ({
-      type: row.type as Exclude<PresenceActivityType, "custom">,
+  const seen = new Set<string>();
+  const activities: RecentActivityView[] = [];
+
+  for (const row of rows) {
+    if (row.type !== "playing" && row.type !== "listening") continue;
+    const key = activityIdentity({
+      type: row.type,
+      name: row.name,
+      applicationId: row.applicationId,
+    });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    activities.push({
+      type: row.type,
       name: row.name,
       ...(row.applicationId ? { applicationId: row.applicationId } : {}),
       ...(row.details ? { details: row.details } : {}),
@@ -215,5 +232,9 @@ export async function listRecentActivities(
       ...(row.assets ? { assets: row.assets } : {}),
       startedAt: row.startedAt ? row.startedAt.getTime() : null,
       endedAt: row.endedAt.getTime(),
-    }));
+    });
+    if (activities.length >= ACTIVITY_HISTORY_MAX) break;
+  }
+
+  return activities;
 }

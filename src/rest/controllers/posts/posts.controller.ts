@@ -110,7 +110,16 @@ export default class PostsController {
       const allUploaded: APIAttachment[] = await Promise.all(
         uploadedFiles.map(async (file) => {
           const attachmentId = Snowflake.generate();
-          const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const originalName =
+            typeof file.originalname === "string"
+              ? file.originalname.trim()
+              : "";
+          const fallbackExt =
+            file.mimetype.split("/")[1]?.split(";")[0]?.replace("jpeg", "jpg") ||
+            "bin";
+          const safeName = (
+            originalName || `attachment.${fallbackExt}`
+          ).replace(/[^a-zA-Z0-9._-]/g, "_");
           const key = `attachments/${postId}/${attachmentId}_${safeName}`;
 
           await s3Client.send(
@@ -137,7 +146,7 @@ export default class PostsController {
           const cdnBase = process.env.CDN_URL ?? "";
           return {
             id: attachmentId,
-            filename: file.originalname,
+            filename: originalName || `attachment.${fallbackExt}`,
             size: file.size,
             contentType: file.mimetype,
             url: `${cdnBase}/${key}`,
