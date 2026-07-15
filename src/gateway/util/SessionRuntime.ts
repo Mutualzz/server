@@ -46,7 +46,13 @@ function copyAppState(from: WebSocket, to: WebSocket) {
     to.sequence = from.sequence;
 }
 
-async function destroyEntry(entry: SessionEntry, revoke = true) {
+async function destroyEntry(
+    entry: SessionEntry,
+    options: { revoke?: boolean; leaveVoice?: boolean } = {},
+) {
+    const revoke = options.revoke ?? true;
+    const leaveVoice = options.leaveVoice ?? revoke;
+
     if (entry.expireTimer) {
         clearTimeout(entry.expireTimer);
         entry.expireTimer = null;
@@ -59,6 +65,22 @@ async function destroyEntry(entry: SessionEntry, revoke = true) {
     if (revoke) {
         await revokeSession(entry.sessionId).catch(() => null);
     }
+
+    if (!leaveVoice) return;
+
+    try {
+        const { VoiceStateService } =
+            await import("../voice/VoiceState.service.ts");
+        await VoiceStateService.leaveForExpiredGatewaySession(
+            entry.userId,
+            entry.sessionId,
+        );
+    } catch (err) {
+        logger.error(
+            `[SessionRuntime] Failed to leave voice for expired session ${entry.sessionId}:`,
+            err,
+        );
+    }
 }
 
 export const SessionRuntime = {
@@ -67,7 +89,7 @@ export const SessionRuntime = {
 
         const existing = sessions.get(ws.sessionId);
         if (existing) {
-            void destroyEntry(existing, false);
+            void destroyEntry(existing, { revoke: false, leaveVoice: false });
         }
 
         sessions.set(ws.sessionId, {
@@ -194,7 +216,7 @@ export const SessionRuntime = {
         logger.info(
             `[SessionRuntime] Resume window expired for session ${sessionId}`,
         );
-        await destroyEntry(entry, true);
+        await destroyEntry(entry, { revoke: true, leaveVoice: true });
     },
 
     async destroy(sessionId: string | undefined) {
@@ -205,6 +227,6 @@ export const SessionRuntime = {
             await revokeSession(sessionId).catch(() => null);
             return;
         }
-        await destroyEntry(entry, true);
+        await destroyEntry(entry, { revoke: true, leaveVoice: true });
     },
 };

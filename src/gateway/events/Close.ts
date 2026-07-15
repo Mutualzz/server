@@ -3,6 +3,7 @@ import { logger } from "../Logger";
 import type { WebSocket } from "../util/WebSocket";
 import { SessionRuntime } from "../util/SessionRuntime";
 import { PresenceService } from "../presence/Presence.service.ts";
+import { VoiceStateService } from "../voice/VoiceState.service.ts";
 
 export async function Close(this: WebSocket, code: number, reason: Buffer) {
   logger.info(
@@ -27,4 +28,8 @@ export async function Close(this: WebSocket, code: number, reason: Buffer) {
   }
 
   await SessionRuntime.detach(this, code);
+  VoiceStateService.scheduleLeaveIfSessionStillDetached(
+    this.userId,
+    this.sessionId,
+  );
 }

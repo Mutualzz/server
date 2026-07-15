@@ -24,6 +24,11 @@ export class VoiceStateService {
 
   private static readonly STREAM_CHUNK_SIZE = 25;
   private static readonly STREAM_PAUSE_MS = 10;
+  private static readonly DETACHED_VOICE_LEAVE_MS = 10_000;
+  private static readonly detachedLeaveTimers = new Map<
+    string,
+    NodeJS.Timeout
+  >();
 
   private static getVoiceEndpoint() {
     const endpoint = process.env.VOICE_ENDPOINT?.trim();
@@ -326,7 +331,7 @@ export class VoiceStateService {
   }
 
   static async kickMemberFromVoice(
-    spaceId: Snowflake,
+    spaceId: Snowflake | null,
     targetUserId: Snowflake,
     reason = "Kicked from voice",
   ) {
@@ -548,6 +553,55 @@ export class VoiceStateService {
         sessionId,
       },
     };
+  }
+
+  static scheduleLeaveIfSessionStillDetached(
+    userId: Snowflake,
+    sessionId: string,
+    delayMs = this.DETACHED_VOICE_LEAVE_MS,
+  ) {
+    const key = `${String(userId)}:${sessionId}`;
+    const existingTimer = this.detachedLeaveTimers.get(key);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(() => {
+      this.detachedLeaveTimers.delete(key);
+      void this.leaveIfGatewaySessionDetached(userId, sessionId);
+    }, delayMs);
+    timer.unref?.();
+    this.detachedLeaveTimers.set(key, timer);
+  }
+
+  static async leaveIfGatewaySessionDetached(
+    userId: Snowflake,
+    sessionId: string,
+  ) {
+    const { SessionRuntime } = await import("../util/SessionRuntime.ts");
+    if (SessionRuntime.getLiveSocket(sessionId)) return;
+    await this.leaveForExpiredGatewaySession(userId, sessionId);
+  }
+
+  static async leaveForExpiredGatewaySession(
+    userId: Snowflake,
+    sessionId: string,
+  ): Promise<boolean> {
+    const key = `${String(userId)}:${sessionId}`;
+    const pending = this.detachedLeaveTimers.get(key);
+    if (pending) {
+      clearTimeout(pending);
+      this.detachedLeaveTimers.delete(key);
+    }
+
+    const existing = await VoiceStateRedis.getState(userId);
+    if (!existing?.channelId) return false;
+    if (existing.client === "minecraft") return false;
+    if (existing.sessionId !== sessionId) return false;
+
+    return this.kickMemberFromVoice(
+      existing.spaceId,
+      userId,
+      "Gateway session ended",
+    );
   }
 
   /** Leave voice if the active session is a Minecraft client. */
