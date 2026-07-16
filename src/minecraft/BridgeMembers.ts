@@ -2,34 +2,61 @@ import {
   bridgeMembersTable,
   bridgesTable,
   db,
+  spaceMembersTable,
 } from "@mutualzz/database";
-import { emitEvent, fireAndForget } from "@mutualzz/util";
+import { emitEvent, fireAndForget, requireSpacePermissions } from "@mutualzz/util";
 import { and, eq } from "drizzle-orm";
 import { AppBridgePeer } from "./AppBridgePeer";
 
-export type BridgeRole = "owner" | "member";
+export type BridgeRole = "admin" | "member";
 
-export const userCanAccessBridge = (
+export const userCanManageBridge = async (
   userId: string | bigint,
-  bridge: { ownerId: bigint },
-  isMember: boolean,
+  bridge: { spaceId: bigint },
 ) => {
-  const uid = typeof userId === "bigint" ? userId : BigInt(userId);
-  return bridge.ownerId === uid || isMember;
+  try {
+    await requireSpacePermissions({
+      spaceId: bridge.spaceId.toString(),
+      userId: typeof userId === "bigint" ? userId.toString() : userId,
+      needed: ["ManageSpace"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 };
 
-export const bridgeRoleForUser = (
+export const userIsSpaceMember = async (
   userId: string | bigint,
-  bridge: { ownerId: bigint },
-  isMember: boolean,
-): BridgeRole | null => {
+  spaceId: bigint,
+) => {
   const uid = typeof userId === "bigint" ? userId : BigInt(userId);
-  if (bridge.ownerId === uid) return "owner";
-  if (isMember) return "member";
+  const row = await db.query.spaceMembersTable.findFirst({
+    where: and(
+      eq(spaceMembersTable.spaceId, spaceId),
+      eq(spaceMembersTable.userId, uid),
+    ),
+  });
+  return Boolean(row);
+};
+
+export const bridgeRoleForUser = async (
+  userId: string | bigint,
+  bridge: { spaceId: bigint },
+  isBridgeMember: boolean,
+): Promise<BridgeRole | null> => {
+  if (await userCanManageBridge(userId, bridge)) return "admin";
+  if (isBridgeMember) return "member";
+  if (await userIsSpaceMember(userId, bridge.spaceId)) return "member";
   return null;
 };
 
-/** Insert membership if missing. Returns true when a new row was created. */
+export const userCanAccessBridge = async (
+  userId: string | bigint,
+  bridge: { spaceId: bigint },
+  isBridgeMember: boolean,
+) => Boolean(await bridgeRoleForUser(userId, bridge, isBridgeMember));
+
 export const ensureMember = async (
   bridgeId: string | bigint,
   userId: string | bigint,
@@ -41,8 +68,8 @@ export const ensureMember = async (
     where: eq(bridgesTable.id, bid),
   });
   if (!bridge) return false;
-  // Owner is always treated as a member; no row needed.
-  if (bridge.ownerId === uid) return false;
+
+  if (await userIsSpaceMember(uid, bridge.spaceId)) return false;
 
   const existing = await db.query.bridgeMembersTable.findFirst({
     where: and(
@@ -65,6 +92,7 @@ export const ensureMember = async (
       user_id: uid.toString(),
       data: {
         bridgeId: bid.toString(),
+        spaceId: bridge.spaceId.toString(),
         name: bridge.name,
         role: "member" as const,
       },
@@ -74,18 +102,12 @@ export const ensureMember = async (
   return true;
 };
 
-/** Remove membership. Owners cannot be removed this way. */
 export const removeMember = async (
   bridgeId: string | bigint,
   userId: string | bigint,
 ): Promise<boolean> => {
   const bid = typeof bridgeId === "bigint" ? bridgeId : BigInt(bridgeId);
   const uid = typeof userId === "bigint" ? userId : BigInt(userId);
-
-  const bridge = await db.query.bridgesTable.findFirst({
-    where: eq(bridgesTable.id, bid),
-  });
-  if (!bridge || bridge.ownerId === uid) return false;
 
   const deleted = await db
     .delete(bridgeMembersTable)
@@ -133,7 +155,6 @@ export const removeAllMembershipsForUser = async (
   }
 };
 
-/** Owner + explicit member rows, deduped. */
 export const listMemberUserIds = async (
   bridgeId: string | bigint,
 ): Promise<string[]> => {
@@ -143,12 +164,18 @@ export const listMemberUserIds = async (
   });
   if (!bridge) return [];
 
-  const members = await db.query.bridgeMembersTable.findMany({
-    where: eq(bridgeMembersTable.bridgeId, bid),
-  });
+  const [spaceMembers, bridgeMembers] = await Promise.all([
+    db.query.spaceMembersTable.findMany({
+      where: eq(spaceMembersTable.spaceId, bridge.spaceId),
+    }),
+    db.query.bridgeMembersTable.findMany({
+      where: eq(bridgeMembersTable.bridgeId, bid),
+    }),
+  ]);
 
-  const ids = new Set<string>([bridge.ownerId.toString()]);
-  for (const m of members) ids.add(m.userId.toString());
+  const ids = new Set<string>();
+  for (const m of spaceMembers) ids.add(m.userId.toString());
+  for (const m of bridgeMembers) ids.add(m.userId.toString());
   return [...ids];
 };
 

@@ -1,4 +1,5 @@
 import { scanUploads, upload } from "@mutualzz/rest";
+import { SpaceBridgeController } from "@mutualzz/rest/controllers/@me/bridges.controller.ts";
 import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts";
 import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller.ts";
 import MembersController from "@mutualzz/rest/controllers/spaces/members.controller.ts";
@@ -158,6 +159,67 @@ router.get(
   "/:spaceId/roles/:roleId",
   createLimiter(60_000, 60),
   RolesController.getOne,
+);
+
+router.get(
+  "/:spaceId/bridge",
+  createLimiter(60_000, 60),
+  SpaceBridgeController.get,
+);
+router.post(
+  "/:spaceId/bridge",
+  createLimiter(60_000, 10),
+  SpaceBridgeController.create,
+);
+router.patch(
+  "/:spaceId/bridge",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.update,
+);
+router.delete(
+  "/:spaceId/bridge",
+  createLimiter(60_000, 10),
+  SpaceBridgeController.delete,
+);
+router.post(
+  "/:spaceId/bridge/token",
+  createLimiter(60_000, 5),
+  SpaceBridgeController.rotateToken,
+);
+router.patch(
+  "/:spaceId/bridge/servers/:serverId",
+  createLimiter(60_000, 30),
+  SpaceBridgeController.updateServer,
+);
+router.put(
+  "/:spaceId/bridge/discord",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.bindDiscord,
+);
+router.delete(
+  "/:spaceId/bridge/discord/:bindingId",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.unbindDiscord,
+);
+router.put(
+  "/:spaceId/bridge/voice",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.bindVoice,
+);
+router.delete(
+  "/:spaceId/bridge/voice/:bindingId",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.unbindVoice,
+);
+router.get(
+  "/:spaceId/bridge/members",
+  createLimiter(60_000, 60),
+  SpaceBridgeController.listMembers,
+);
+router.delete(
+  "/:spaceId/bridge/members/:userId",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.kickMember,
 );
 
 export default router;

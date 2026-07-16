@@ -6,6 +6,7 @@ import { spacesTable } from "./Space";
 import { spaceMembersTable } from "./SpaceMember";
 import { spaceMemberRolesTable } from "./SpaceMemberRole";
 import { spaceBansTable } from "./SpaceBan";
+import { bridgesTable } from "../minecraft/Bridge";
 
 export const spaceRelations = relations(spacesTable, ({ one, many }) => ({
     owner: one(usersTable, {
@@ -15,6 +16,10 @@ export const spaceRelations = relations(spacesTable, ({ one, many }) => ({
     members: many(spaceMembersTable),
     channels: many(channelsTable),
     roles: many(rolesTable),
+    bridge: one(bridgesTable, {
+        fields: [spacesTable.id],
+        references: [bridgesTable.spaceId],
+    }),
 }));
 
 export const spaceMemberRoleRelations = relations(

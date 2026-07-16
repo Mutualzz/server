@@ -2,6 +2,7 @@ import {
   bridgeMembersTable,
   bridgesTable,
   db,
+  spaceMembersTable,
 } from "@mutualzz/database";
 import { Logger } from "@mutualzz/logger";
 import { emitEvent, fireAndForget, Snowflake } from "@mutualzz/util";
@@ -105,26 +106,44 @@ export class AppBridgePeer {
     });
 
     const bridgeIds = rows.map((r) => r.id);
-    const memberRows =
-      bridgeIds.length === 0
-        ? []
-        : await db.query.bridgeMembersTable.findMany({
-            where: inArray(bridgeMembersTable.bridgeId, bridgeIds),
-          });
+    const spaceIds = [...new Set(rows.map((r) => r.spaceId))];
 
-    const membersByBridge = new Map<string, Set<string>>();
+    const [memberRows, spaceMemberRows] = await Promise.all([
+      bridgeIds.length === 0
+        ? Promise.resolve([])
+        : db.query.bridgeMembersTable.findMany({
+            where: inArray(bridgeMembersTable.bridgeId, bridgeIds),
+          }),
+      spaceIds.length === 0
+        ? Promise.resolve([])
+        : db.query.spaceMembersTable.findMany({
+            where: inArray(spaceMembersTable.spaceId, spaceIds),
+          }),
+    ]);
+
+    const bridgeMembersByBridge = new Map<string, Set<string>>();
     for (const m of memberRows) {
       const key = m.bridgeId.toString();
-      const set = membersByBridge.get(key) ?? new Set<string>();
+      const set = bridgeMembersByBridge.get(key) ?? new Set<string>();
       set.add(m.userId.toString());
-      membersByBridge.set(key, set);
+      bridgeMembersByBridge.set(key, set);
+    }
+
+    const spaceMembersBySpace = new Map<string, Set<string>>();
+    for (const m of spaceMemberRows) {
+      const key = m.spaceId.toString();
+      const set = spaceMembersBySpace.get(key) ?? new Set<string>();
+      set.add(m.userId.toString());
+      spaceMembersBySpace.set(key, set);
     }
 
     const next = new Map<string, Set<string>>();
     for (const row of rows) {
       const id = row.id.toString();
-      const set = new Set<string>([row.ownerId.toString()]);
-      for (const uid of membersByBridge.get(id) ?? []) set.add(uid);
+      const set = new Set<string>();
+      for (const uid of spaceMembersBySpace.get(row.spaceId.toString()) ?? [])
+        set.add(uid);
+      for (const uid of bridgeMembersByBridge.get(id) ?? []) set.add(uid);
       next.set(id, set);
     }
 

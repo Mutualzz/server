@@ -655,10 +655,22 @@ const handleVoiceJoin = async (
     return;
   }
 
+  const bridge = await db.query.bridgesTable.findFirst({
+    where: eq(bridgesTable.id, BigInt(session.bridgeId)),
+  });
+  if (!bridge) {
+    reply({
+      ok: false,
+      code: "no_bridge",
+      message: "Bridge not found",
+    });
+    return;
+  }
+
   const userId = link.userId.toString();
   const result = await VoiceStateService.joinFromMinecraft({
     userId,
-    spaceId: binding.spaceId.toString(),
+    spaceId: bridge.spaceId.toString(),
     channelId: binding.channelId.toString(),
   });
 
