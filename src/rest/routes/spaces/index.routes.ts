@@ -4,6 +4,7 @@ import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts"
 import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller.ts";
 import MembersController from "@mutualzz/rest/controllers/spaces/members.controller.ts";
 import RolesController from "@mutualzz/rest/controllers/spaces/roles.controllers.ts";
+import SpaceThemesController from "@mutualzz/rest/controllers/spaces/themes.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
@@ -220,6 +221,39 @@ router.delete(
   "/:spaceId/bridge/members/:userId",
   createLimiter(60_000, 20),
   SpaceBridgeController.kickMember,
+);
+
+router.get(
+  "/:spaceId/themes",
+  createLimiter(60_000, 60),
+  SpaceThemesController.getAll,
+);
+router.post(
+  "/:spaceId/themes",
+  createLimiter(60_000, 30),
+  SpaceThemesController.create,
+);
+router.patch(
+  "/:spaceId/themes/:themeId",
+  createLimiter(60_000, 30),
+  SpaceThemesController.update,
+);
+router.put(
+  "/:spaceId/themes/:themeId/background",
+  createLimiter(60_000, 20),
+  upload.single("backgroundImage"),
+  scanUploads,
+  SpaceThemesController.putBackground,
+);
+router.delete(
+  "/:spaceId/themes/:themeId/background",
+  createLimiter(60_000, 20),
+  SpaceThemesController.deleteBackground,
+);
+router.delete(
+  "/:spaceId/themes/:themeId",
+  createLimiter(60_000, 20),
+  SpaceThemesController.delete,
 );
 
 export default router;

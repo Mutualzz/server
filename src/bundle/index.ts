@@ -33,7 +33,7 @@ process.on("SIGTERM", async () => {
         cdn.stop(),
         minecraftBridge.stop(),
         botClient.destroy(),
-        RabbitMQ.connection.close(),
+        RabbitMQ.close(),
         closeDatabase(),
     ]);
 });

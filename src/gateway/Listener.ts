@@ -89,15 +89,21 @@ export async function setupListener(this: WebSocket) {
         "with channel id",
         opts.channel?.ch,
       );
-      opts.channel = await RabbitMQ.connection.createChannel();
-      RabbitMQ.attachChannelHandlers(opts.channel, `gateway:${this.userId}`);
-      opts.channel.queues = {};
-      logger.debug(
-        "[RabbitMQ] channel created:",
-        typeof opts.channel,
-        "with channel id",
-        opts.channel?.ch,
-      );
+      try {
+        opts.channel = await RabbitMQ.connection.createChannel();
+        RabbitMQ.attachChannelHandlers(opts.channel, `gateway:${this.userId}`);
+        opts.channel.queues = {};
+        logger.debug(
+          "[RabbitMQ] channel created:",
+          typeof opts.channel,
+          "with channel id",
+          opts.channel?.ch,
+        );
+      } catch (error) {
+        logger.error(
+          `[RabbitMQ] setupListener: failed to create channel: ${error}`,
+        );
+      }
     }
 
     const uid = this.userId.toString();

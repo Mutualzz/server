@@ -43,6 +43,7 @@ import {
   expressionsCache,
   profileImageCache,
   spaceIconCache,
+  themeBackgroundCache,
 } from "./cdn";
 
 export const caches = {
@@ -53,6 +54,7 @@ export const caches = {
   channelIcon: channelIconCache,
   expressions: expressionsCache,
   profileImage: profileImageCache,
+  themeBackground: themeBackgroundCache,
   appIcon: appIconCache,
 
   // REST

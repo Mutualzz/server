@@ -24,4 +24,5 @@ export * from "./Appeals";
 export * from "./spaceLockdown";
 export * from "./reportReason";
 export * from "./PushNotifications";
+export * from "./themeBackground";
 export * from "./semver";

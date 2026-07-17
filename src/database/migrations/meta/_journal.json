@@ -497,6 +497,27 @@
       "when": 1784152554827,
       "tag": "0070_space_minecraft_bridge",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1784176747134,
+      "tag": "0071_colorful_stephen_strange",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1784177517948,
+      "tag": "0072_theme_background_image",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1784245531919,
+      "tag": "0073_colossal_vulcan",
+      "breakpoints": true
     }
   ],
   "version": "7"

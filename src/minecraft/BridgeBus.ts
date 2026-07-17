@@ -38,14 +38,15 @@ export const publishBridgeEvent = async (
     }
   }
 
-  if (!RabbitMQ.connection || !RabbitMQ.channel) return;
+  if (!RabbitMQ.isEnabled()) return;
 
   const exchange = exchangeFor(event.bridgeId);
   try {
-    await RabbitMQ.channel.assertExchange(exchange, "fanout", {
+    const channel = await RabbitMQ.ensureChannel();
+    await channel.assertExchange(exchange, "fanout", {
       durable: false,
     });
-    const ok = RabbitMQ.channel.publish(
+    const ok = channel.publish(
       exchange,
       "",
       Buffer.from(JSON.stringify(event)),
@@ -56,6 +57,7 @@ export const publishBridgeEvent = async (
     }
   } catch (error) {
     logger.error(`publishBridgeEvent failed: ${error}`);
+    RabbitMQ.channel = null;
   }
 };
 

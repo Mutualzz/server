@@ -38,7 +38,7 @@ import {
   type Snowflake,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
@@ -197,7 +197,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     presenceSchedule,
     customStatusSchedule,
   ] = await Promise.all([
-    // Get all themes owned by the user
+    // Get all personal themes owned by the user (exclude space-owned)
     execNormalizedMany<APITheme>(
       db.query.themesTable.findMany({
         with: {
@@ -205,7 +205,10 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
             columns: publicUserColumns,
           },
         },
-        where: eq(themesTable.authorId, BigInt(user.id)),
+        where: and(
+          eq(themesTable.authorId, BigInt(user.id)),
+          isNull(themesTable.spaceId),
+        ),
       }),
     ),
 
@@ -357,10 +360,14 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     })),
   )) satisfies APIChannel[];
 
+  const spacesWithThemes = await Promise.all(
+    spaces.map((space) => attachSpaceTheme(space)),
+  );
+
   return {
     user,
     themes,
-    spaces,
+    spaces: spacesWithThemes,
     channels,
     relationships,
     expressions,
@@ -596,9 +603,45 @@ export async function getUser(
   return user;
 }
 
+export const isThemeSnowflakeId = (themeId: string) => /^\d+$/.test(themeId);
+
+export const getTheme = async (id: string) => {
+  let theme = await getCache("theme", id);
+  if (theme) return theme;
+
+  theme = await execNormalized<APITheme>(
+    db.query.themesTable.findFirst({
+      where: eq(themesTable.id, BigInt(id)),
+      with: {
+        author: {
+          columns: publicUserColumns,
+        },
+      },
+    }),
+  );
+
+  if (!theme) return null;
+
+  await setCache("theme", id, theme);
+  return theme;
+};
+
+export const attachSpaceTheme = async (space: APISpace): Promise<APISpace> => {
+  if (!space.themeId || !isThemeSnowflakeId(space.themeId)) {
+    return { ...space, theme: null };
+  }
+
+  const theme = await getTheme(space.themeId);
+  if (!theme || (theme.spaceId && theme.spaceId !== space.id)) {
+    return { ...space, theme: null };
+  }
+
+  return { ...space, theme };
+};
+
 export const getSpace = async (id: string) => {
   let space = await getCache("space", id);
-  if (space) return space;
+  if (space) return attachSpaceTheme(space);
 
   space = await execNormalized<APISpace>(
     db.query.spacesTable.findFirst({
@@ -609,7 +652,7 @@ export const getSpace = async (id: string) => {
   if (!space) return null;
 
   await setCache("space", id, space);
-  return space;
+  return attachSpaceTheme(space);
 };
 
 export const getSpaceHydrated = async (id: string) => {
@@ -667,7 +710,7 @@ export const getSpaceHydrated = async (id: string) => {
   if (!space) return null;
 
   await setCache("spaceHydrated", id, space);
-  return space;
+  return attachSpaceTheme(space);
 };
 
 export const getChannel = async (id: string) => {

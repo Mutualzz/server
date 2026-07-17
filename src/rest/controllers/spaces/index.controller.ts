@@ -20,6 +20,9 @@ import {
   getMember,
   getSpace,
   assertSpaceNotInLockdown,
+  attachSpaceTheme,
+  getTheme,
+  isThemeSnowflakeId,
   requireSpacePermissions,
   s3Client,
   Snowflake,
@@ -382,7 +385,7 @@ export default class SpacesController {
 
       let rawCrop;
       if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
-      const { name, description, crop } = validateSpaceUpdate.parse({
+      const { name, description, crop, themeId } = validateSpaceUpdate.parse({
         ...req.body,
         crop: rawCrop,
       });
@@ -394,6 +397,22 @@ export default class SpacesController {
 
       if (name !== undefined) updates.name = name;
       if (description !== undefined) updates.description = description;
+
+      if (themeId !== undefined) {
+        if (themeId === null) {
+          updates.themeId = null;
+        } else if (isThemeSnowflakeId(themeId)) {
+          const theme = await getTheme(themeId);
+          if (!theme || theme.spaceId !== spaceId)
+            throw new HttpException(
+              HttpStatusCode.BadRequest,
+              "Invalid space theme",
+            );
+          updates.themeId = themeId;
+        } else {
+          updates.themeId = themeId;
+        }
+      }
 
       if (removeIcon) {
         if (space.icon) {
@@ -454,7 +473,7 @@ export default class SpacesController {
       }
 
       if (Object.keys(updates).length === 0) {
-        res.status(HttpStatusCode.Success).json(space);
+        res.status(HttpStatusCode.Success).json(await attachSpaceTheme(space));
         return;
       }
 
@@ -473,15 +492,17 @@ export default class SpacesController {
           "Failed to update space",
         );
 
+      const spaceWithTheme = await attachSpaceTheme(updatedSpace);
+
       void setCache("space", updatedSpace.id, updatedSpace);
       void invalidateCache("spaceHydrated", updatedSpace.id);
 
-      res.status(HttpStatusCode.Success).json(updatedSpace);
+      res.status(HttpStatusCode.Success).json(spaceWithTheme);
 
       void emitEvent({
         event: "SpaceUpdate",
         space_id: updatedSpace.id,
-        data: updatedSpace,
+        data: spaceWithTheme,
       });
     } catch (error) {
       next(error);
