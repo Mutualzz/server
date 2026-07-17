@@ -20,6 +20,7 @@ export const spacesTable = pgTable(
 
         description: text(),
         icon: text(),
+        themeId: text(),
 
         vanityCode: text().unique(),
 

@@ -10,10 +10,16 @@ const logger = new Logger({
 });
 
 const URI = `amqp://${process.env.RABBIT_USERNAME}:${process.env.RABBIT_PASSWORD}@${process.env.RABBIT_HOSTNAME}:${process.env.RABBIT_PORT}/%2f`;
+const RECONNECT_DELAY_MS = 3000;
 
 export class RabbitMQ {
-  static connection: ChannelModel;
-  static channel: Channel;
+  static connection: ChannelModel | null = null;
+  static channel: Channel | null = null;
+
+  private static connecting: Promise<void> | null = null;
+  private static reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private static shuttingDown = false;
+  private static enabled = false;
 
   static attachChannelHandlers(channel: Channel, label: string) {
     channel.on("error", (error) => {
@@ -22,26 +28,113 @@ export class RabbitMQ {
 
     channel.on("close", () => {
       logger.warn(`RabbitMQ channel closed (${label})`);
+      if (label === "publish" && this.channel === channel) {
+        this.channel = null;
+        if (this.connection && !this.shuttingDown) {
+          void this.ensureChannel().catch((error) => {
+            logger.error(`Failed to recreate publish channel: ${error}`);
+          });
+        }
+      }
     });
   }
 
   static async init() {
-    try {
-      this.connection = await amqplib.connect(URI, {
-        timeout: 10000,
-      });
-      logger.info("Connected to RabbitMQ");
+    this.shuttingDown = false;
+    await this.connect();
+  }
 
-      this.connection.on("error", (error) => {
-        logger.error("RabbitMQ connection error", error);
-      });
+  static async close() {
+    this.shuttingDown = true;
+    this.enabled = false;
 
-      this.channel = await this.connection.createChannel();
-      this.attachChannelHandlers(this.channel, "publish");
-      logger.info("Channel created");
-    } catch (error) {
-      logger.error(`Failed to connect to RabbitMQ: ${error}`);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+
+    const channel = this.channel;
+    const connection = this.connection;
+    this.channel = null;
+    this.connection = null;
+
+    try {
+      await channel?.close();
+    } catch {
+    }
+
+    try {
+      await connection?.close();
+    } catch {
+    }
+  }
+
+  static async ensureChannel(): Promise<Channel> {
+    if (this.channel) return this.channel;
+    await this.connect();
+    if (!this.channel) {
+      throw new Error("RabbitMQ channel unavailable");
+    }
+    return this.channel;
+  }
+
+  static isEnabled() {
+    return this.enabled && !this.shuttingDown;
+  }
+
+  private static scheduleReconnect() {
+    if (this.shuttingDown || this.reconnectTimer || this.connecting) return;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect().catch((error) => {
+        logger.error(`RabbitMQ reconnect failed: ${error}`);
+        this.scheduleReconnect();
+      });
+    }, RECONNECT_DELAY_MS);
+  }
+
+  private static async connect() {
+    if (this.shuttingDown) return;
+    if (this.channel) return;
+    if (this.connecting) return this.connecting;
+
+    this.connecting = (async () => {
+      try {
+        if (!this.connection) {
+          this.connection = await amqplib.connect(URI, {
+            timeout: 10000,
+          });
+          logger.info("Connected to RabbitMQ");
+
+          this.connection.on("error", (error) => {
+            logger.error("RabbitMQ connection error", error);
+          });
+
+          this.connection.on("close", () => {
+            logger.warn("RabbitMQ connection closed");
+            this.connection = null;
+            this.channel = null;
+            this.scheduleReconnect();
+          });
+        }
+
+        this.channel = await this.connection.createChannel();
+        this.attachChannelHandlers(this.channel, "publish");
+        this.enabled = true;
+        logger.info("Channel created");
+      } catch (error) {
+        this.connection = null;
+        this.channel = null;
+        logger.error(`Failed to connect to RabbitMQ: ${error}`);
+        this.scheduleReconnect();
+        throw error;
+      } finally {
+        this.connecting = null;
+      }
+    })();
+
+    return this.connecting;
   }
 }
 
@@ -69,17 +162,23 @@ export const emitEvent = async (payload: BaseEvent) => {
     return;
   }
 
-  if (RabbitMQ.connection) {
+  if (!RabbitMQ.isEnabled()) {
+    events.emit(id, payload);
+    return;
+  }
+
+  try {
+    const channel = await RabbitMQ.ensureChannel();
     const data =
       typeof payload.data === "object"
         ? JSON.stringify(payload.data, JSONReplacer)
         : payload.data;
 
-    await RabbitMQ.channel.assertExchange(id, "fanout", {
+    await channel.assertExchange(id, "fanout", {
       durable: false,
     });
 
-    const success = RabbitMQ.channel.publish(id, "", Buffer.from(`${data}`), {
+    const success = channel.publish(id, "", Buffer.from(`${data}`), {
       type: payload.event,
     });
 
@@ -88,11 +187,10 @@ export const emitEvent = async (payload: BaseEvent) => {
     } else {
       logger.debug(`Published event ${payload.event} to ${id}`);
     }
-
-    return;
+  } catch (error) {
+    logger.error(`Failed to emit event ${payload.event} to ${id}: ${error}`);
+    RabbitMQ.channel = null;
   }
-
-  events.emit(id, payload);
 };
 
 const rabbitListen = async (
@@ -108,8 +206,12 @@ const rabbitListen = async (
   });
 
   const cancel = async () => {
-    await channel.cancel(q.queue);
-    await channel.unbindQueue(q.queue, id, "");
+    try {
+      await channel.cancel(q.queue);
+      await channel.unbindQueue(q.queue, id, "");
+    } catch (error) {
+      logger.warn(`Failed to cancel listener on ${id}: ${error}`);
+    }
   };
 
   await channel.bindQueue(q.queue, id, "");
