@@ -37,6 +37,8 @@ function toUint8Array(buffer: Data): Uint8Array | null {
 }
 
 export default async function Message(this: WebSocket, buffer: Data) {
+  this.isAlive = true;
+
   if (!checkGlobalRateLimit(this)) {
     logger.warn(`Rate limit exceeded ${this.sessionId}`);
     return this.close(GatewayCloseCodes.RateLimit, "Rate limit exceeded");

@@ -14,6 +14,8 @@ import {
     onSubscribeUser,
     onUnsubscribeUser,
 } from "@mutualzz/gateway/opcodes/SubscribeUser.ts";
+import { onCallCreate } from "./CallCreate";
+import { onCallRespond } from "./CallRespond";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -30,4 +32,6 @@ export default {
     [GatewayOpcodes.VoiceStateUpdate]: onVoiceStateUpdate,
     [GatewayOpcodes.SubscribeUser]: onSubscribeUser,
     [GatewayOpcodes.UnsubscribeUser]: onUnsubscribeUser,
+    [GatewayOpcodes.CallCreate]: onCallCreate,
+    [GatewayOpcodes.CallRespond]: onCallRespond,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

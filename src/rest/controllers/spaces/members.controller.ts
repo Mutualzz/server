@@ -484,6 +484,15 @@ export default class MembersController {
 
       fireAndForgetAll([
         {
+          label: "voice:kickMemberFromVoice",
+          run: () =>
+            VoiceStateService.kickMemberFromVoice(
+              space.id,
+              member.userId,
+              "Left space",
+            ),
+        },
+        {
           label: "event:SpaceMemberRemove",
           run: () =>
             emitEvent({
@@ -1001,6 +1010,15 @@ export default class MembersController {
 
       fireAndForgetAll([
         {
+          label: "voice:kickMemberFromVoice",
+          run: () =>
+            VoiceStateService.kickMemberFromVoice(
+              space.id,
+              member.userId,
+              "Kicked from space",
+            ),
+        },
+        {
           label: "event:SpaceMemberRemove",
           run: () =>
             emitEvent({
@@ -1186,6 +1204,15 @@ export default class MembersController {
 
       fireAndForgetAll([
         {
+          label: "voice:kickMemberFromVoice",
+          run: () =>
+            VoiceStateService.kickMemberFromVoice(
+              space.id,
+              member.userId,
+              "Banned from space",
+            ),
+        },
+        {
           label: "event:SpaceMemberRemove",
           run: () =>
             emitEvent({
@@ -1259,15 +1286,6 @@ export default class MembersController {
         validateMemberVoiceModerationBody.parse(req.body);
 
       if (channelId) {
-        if (
-          BigInt(member.userId) === BigInt(space.ownerId) &&
-          BigInt(user.id) !== BigInt(space.ownerId)
-        )
-          throw new HttpException(
-            HttpStatusCode.BadRequest,
-            "Cannot move the space owner",
-          );
-
         const { permissions } = await requireSpacePermissions({
           spaceId,
           userId: user.id,
@@ -1398,51 +1416,66 @@ export default class MembersController {
         return;
       }
 
-      if (spaceMute != null)
-        await requireSpacePermissions({
+      if (spaceMute != null || spaceDeaf != null) {
+        const needed =
+          spaceMute != null && spaceDeaf != null
+            ? (["MuteMembers", "DeafenMembers"] as const)
+            : spaceMute != null
+              ? (["MuteMembers"] as const)
+              : (["DeafenMembers"] as const);
+
+        const { permissions } = await requireSpacePermissions({
           spaceId,
           userId: user.id,
-          needed: ["MuteMembers"],
+          needed: [...needed],
         });
 
-      if (spaceDeaf != null)
-        await requireSpacePermissions({
-          spaceId,
-          userId: user.id,
-          needed: ["DeafenMembers"],
-        });
+        const isAdmin =
+          (permissions.bits & permissionFlags.Administrator) ===
+          permissionFlags.Administrator;
 
-      try {
-        const current = await db.query.voiceModerationTable.findFirst({
-          where: and(
-            eq(voiceModerationTable.spaceId, BigInt(space.id)),
-            eq(voiceModerationTable.userId, BigInt(userId)),
-          ),
-        });
+        if (!isAdmin) {
+          const actorRoles = await getMemberRoles(space.id, user.id);
+          const targetRoles = await getMemberRoles(space.id, member.userId);
 
-        if (current) {
-          await db
-            .update(voiceModerationTable)
-            .set({
-              spaceMute: spaceMute ?? current.spaceMute,
-              spaceDeaf: spaceDeaf ?? current.spaceDeaf,
-            })
-            .where(
-              and(
-                eq(voiceModerationTable.spaceId, BigInt(space.id)),
-                eq(voiceModerationTable.userId, BigInt(userId)),
-              ),
+          const actorTop = topPos(actorRoles);
+          const targetTop = topPos(targetRoles);
+
+          if (actorTop <= targetTop)
+            throw new HttpException(
+              HttpStatusCode.Forbidden,
+              "Role hierarchy prevents moderating this member",
             );
-        } else if (spaceMute || spaceDeaf) {
-          await db.insert(voiceModerationTable).values({
-            spaceId: BigInt(space.id),
-            userId: BigInt(userId),
-            spaceMute: spaceMute ?? false,
-            spaceDeaf: spaceDeaf ?? false,
-          });
         }
-      } catch {
-        /** empty **/
+      }
+
+      const current = await db.query.voiceModerationTable.findFirst({
+        where: and(
+          eq(voiceModerationTable.spaceId, BigInt(space.id)),
+          eq(voiceModerationTable.userId, BigInt(userId)),
+        ),
+      });
+
+      if (current) {
+        await db
+          .update(voiceModerationTable)
+          .set({
+            spaceMute: spaceMute ?? current.spaceMute,
+            spaceDeaf: spaceDeaf ?? current.spaceDeaf,
+          })
+          .where(
+            and(
+              eq(voiceModerationTable.spaceId, BigInt(space.id)),
+              eq(voiceModerationTable.userId, BigInt(userId)),
+            ),
+          );
+      } else if (spaceMute || spaceDeaf) {
+        await db.insert(voiceModerationTable).values({
+          spaceId: BigInt(space.id),
+          userId: BigInt(userId),
+          spaceMute: spaceMute ?? false,
+          spaceDeaf: spaceDeaf ?? false,
+        });
       }
 
       res.status(HttpStatusCode.Success).json(member);

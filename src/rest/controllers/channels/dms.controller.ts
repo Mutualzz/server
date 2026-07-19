@@ -17,6 +17,8 @@ import { imageFileValidator, validateChannelParamsDelete, validateDmChannelCreat
 import { BitField, channelFlags } from "@mutualzz/bitfield";
 import sharp from "sharp";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { VoiceStateService } from "../../../gateway/voice/VoiceState.service.ts";
+import { CallService } from "../../../gateway/call/Call.service.ts";
 
 export default class DMsController {
   static async createDM(req: Request, res: Response, next: NextFunction) {
@@ -360,6 +362,18 @@ export default class DMsController {
           label: "cache:delete:channel",
           run: () => deleteCache("channel", channelId),
         },
+        {
+          label: "voice+call:closeDM",
+          run: async () => {
+            await CallService.endCallForChannel(channelId, "dm_closed");
+            await VoiceStateService.kickMemberFromVoice(
+              null,
+              user.id,
+              "DM channel closed",
+              channelId,
+            );
+          },
+        },
       ]);
     } catch (err) {
       next(err);
@@ -436,6 +450,19 @@ export default class DMsController {
               label: "cache:delete:channel",
               run: () => deleteCache("channel", channelId),
             },
+            {
+              label: "voice:kickChannelFromVoice:deleteGroupDM",
+              run: () =>
+                VoiceStateService.kickChannelFromVoice(
+                  null,
+                  channelId,
+                  "Group DM deleted",
+                ),
+            },
+            {
+              label: "call:endCallForChannel:deleteGroupDM",
+              run: () => CallService.endCallForChannel(channelId),
+            },
           ]);
 
           return;
@@ -469,6 +496,18 @@ export default class DMsController {
         {
           label: "cache:delete:channel",
           run: () => deleteCache("channel", channelId),
+        },
+        {
+          label: "voice+call:leaveGroupDM",
+          run: async () => {
+            await VoiceStateService.kickMemberFromVoice(
+              null,
+              user.id,
+              "Left group DM",
+              channelId,
+            );
+            await CallService.detachUserFromCall(channelId, user.id);
+          },
         },
       ]);
     } catch (err) {
@@ -512,6 +551,19 @@ export default class DMsController {
         {
           label: "cache:delete:channel",
           run: () => deleteCache("channel", channelId),
+        },
+        {
+          label: "voice:kickChannelFromVoice:deleteGroupDM",
+          run: () =>
+            VoiceStateService.kickChannelFromVoice(
+              null,
+              channelId,
+              "Group DM deleted",
+            ),
+        },
+        {
+          label: "call:endCallForChannel:deleteGroupDM",
+          run: () => CallService.endCallForChannel(channelId),
         },
         ...recipients.map(({ userId }) => ({
           label: `event:ChannelDelete:${userId}`,
@@ -631,6 +683,11 @@ export default class DMsController {
               data: fresh,
             }),
         },
+        {
+          label: "call:notifyActiveCall:recipient",
+          run: () =>
+            CallService.notifyUserOfActiveCall(channelId, recipientId),
+        },
       ]);
     } catch (err) {
       next(err);
@@ -719,6 +776,18 @@ export default class DMsController {
         {
           label: "cache:delete:channel",
           run: () => deleteCache("channel", channelId),
+        },
+        {
+          label: "voice+call:removeRecipient",
+          run: async () => {
+            await VoiceStateService.kickMemberFromVoice(
+              null,
+              recipientId,
+              "Removed from group DM",
+              channelId,
+            );
+            await CallService.detachUserFromCall(channelId, recipientId);
+          },
         },
       ]);
     } catch (err) {

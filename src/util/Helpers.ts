@@ -6,6 +6,7 @@ import {
   channelsTable,
   db,
   expressionsTable,
+  minecraftLinksTable,
   relationshipsTable,
   rolesTable,
   spaceMemberRolesTable,
@@ -20,6 +21,7 @@ import {
 import {
   type APIChannel,
   type APIExpression,
+  type APIMinecraftLink,
   type APIPrivateUser,
   type APIReadState,
   type APIRelationship,
@@ -29,6 +31,7 @@ import {
   type APIUser,
   type APIUserProfile,
   type APIUserSettings,
+  ChannelType,
   ExpressionType,
   HttpException,
   HttpStatusCode,
@@ -36,13 +39,87 @@ import {
   ReadStateType,
   RelationshipType,
   type Snowflake,
+  type VoiceState,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
+import { VoiceStateRedis } from "@mutualzz/gateway/voice/VoiceState.redis.ts";
+
+export async function collectVisibleVoiceStates(userId: string): Promise<
+  VoiceState[]
+> {
+  const [spaces, dmRecipients] = await Promise.all([
+    db.query.spaceMembersTable.findMany({
+      where: eq(spaceMembersTable.userId, BigInt(userId)),
+      columns: { spaceId: true },
+      with: {
+        space: {
+          columns: { id: true },
+          with: {
+            channels: {
+              columns: { id: true, type: true },
+            },
+          },
+        },
+      },
+    }),
+    db.query.channelRecipientsTable.findMany({
+      where: and(
+        eq(channelRecipientsTable.userId, BigInt(userId)),
+        eq(channelRecipientsTable.closed, false),
+      ),
+      columns: { channelId: true },
+      with: {
+        channel: {
+          columns: { id: true, type: true },
+        },
+      },
+    }),
+  ]);
+
+  const voiceChannelList: { spaceId: string | null; channelId: string }[] = [];
+
+  for (const membership of spaces) {
+    const spaceId = membership.space?.id?.toString();
+    if (!spaceId) continue;
+    for (const channel of membership.space?.channels ?? []) {
+      if (channel.type !== ChannelType.Voice) continue;
+      voiceChannelList.push({
+        spaceId,
+        channelId: channel.id.toString(),
+      });
+    }
+  }
+
+  for (const recipient of dmRecipients) {
+    const channel = recipient.channel;
+    if (!channel) continue;
+    if (
+      channel.type !== ChannelType.DM &&
+      channel.type !== ChannelType.GroupDM
+    ) {
+      continue;
+    }
+    voiceChannelList.push({
+      spaceId: null,
+      channelId: channel.id.toString(),
+    });
+  }
+
+  if (voiceChannelList.length === 0) return [];
+
+  const nested = await Promise.all(
+    voiceChannelList.map(({ spaceId, channelId }) =>
+      VoiceStateRedis.listChannelStates(spaceId, channelId),
+    ),
+  );
+
+  return nested.flat();
+}
 
 function normalizeOverwrite(ow: any, extra: Record<string, any> = {}) {
   return {
@@ -196,6 +273,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     profile,
     presenceSchedule,
     customStatusSchedule,
+    minecraftLinkRow,
   ] = await Promise.all([
     // Get all personal themes owned by the user (exclude space-owned)
     execNormalizedMany<APITheme>(
@@ -325,6 +403,10 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     // Get presence schedule and custom status schedule
     PresenceService.getScheduleForUser(user.id),
     PresenceService.getCustomStatusScheduleForUser(user.id),
+
+    db.query.minecraftLinksTable.findFirst({
+      where: eq(minecraftLinksTable.userId, BigInt(user.id)),
+    }),
   ]);
 
   const presenceUserIds = new Set<string>();
@@ -339,9 +421,24 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     presenceUserIds.add(r.otherUserId);
   }
 
-  const [mergedPresences, selfPresence] = await Promise.all([
+  const relationshipUserIds = [
+    ...new Set(relationships.map((r) => String(r.otherUserId))),
+  ];
+
+  const [mergedPresences, selfPresence, users] = await Promise.all([
     getBulkPresences([...presenceUserIds]),
     PresenceService.get(user.id),
+    relationshipUserIds.length === 0
+      ? Promise.resolve([] as APIUser[])
+      : execNormalizedMany<APIUser>(
+          db.query.usersTable.findMany({
+            columns: publicUserColumns,
+            where: inArray(
+              usersTable.id,
+              relationshipUserIds.map((id) => BigInt(id)),
+            ),
+          }),
+        ),
   ]);
 
   if (selfPresence) {
@@ -364,6 +461,42 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     spaces.map((space) => attachSpaceTheme(space)),
   );
 
+  const minecraftLink: APIMinecraftLink | null = minecraftLinkRow
+    ? {
+        minecraftUuid: minecraftLinkRow.minecraftUuid,
+        minecraftName: minecraftLinkRow.minecraftName,
+        discordId: minecraftLinkRow.discordId ?? null,
+        createdAt: minecraftLinkRow.createdAt,
+      }
+    : null;
+
+  const voiceChannelList: { spaceId: string | null; channelId: string }[] = [
+    ...spacesWithThemes.flatMap((space) =>
+      (space.channels ?? [])
+        .filter((ch) => ch.type === ChannelType.Voice)
+        .map((ch) => ({
+          channelId: ch.id.toString(),
+          spaceId: space.id.toString(),
+        })),
+    ),
+    ...(channels ?? [])
+      .filter(
+        (ch) => ch.type === ChannelType.DM || ch.type === ChannelType.GroupDM,
+      )
+      .map((ch) => ({
+        channelId: ch.id.toString(),
+        spaceId: null as string | null,
+      })),
+  ];
+
+  const voiceStatesNested = await Promise.all(
+    voiceChannelList.map(({ spaceId, channelId }) =>
+      VoiceStateRedis.listChannelStates(spaceId, channelId),
+    ),
+  );
+
+  const voiceStates: VoiceState[] = voiceStatesNested.flat();
+
   return {
     user,
     themes,
@@ -377,8 +510,23 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     profile,
     presenceSchedule,
     customStatusSchedule,
+    users,
+    minecraftLink,
+    voiceStates,
   };
 };
+
+export async function setChannelLastMessageId(
+  channelId: string,
+  messageId: string,
+) {
+  await db
+    .update(channelsTable)
+    .set({
+      lastMessageId: sql`GREATEST(COALESCE(channels."lastMessageId", 0), ${BigInt(messageId)})`,
+    })
+    .where(eq(channelsTable.id, BigInt(channelId)));
+}
 
 export async function getReadStates(userId: string): Promise<APIReadState[]> {
   const rows = await db

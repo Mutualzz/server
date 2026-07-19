@@ -39,7 +39,11 @@ export function Send(socket: WebSocket, data: GatewayPayload) {
             SessionRuntime.getLiveSocket(socket.sessionId) ?? socket;
 
         if (live.readyState !== live.OPEN) {
-            if (SessionRuntime.isDetached(socket.sessionId)) {
+            if (
+                SessionRuntime.isDetached(socket.sessionId) ||
+                live.readyState === live.CLOSING ||
+                live.readyState === live.CLOSED
+            ) {
                 return resolve(null);
             }
             return reject(new Error("WebSocket is not open"));

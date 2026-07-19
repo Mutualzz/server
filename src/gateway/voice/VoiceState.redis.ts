@@ -72,12 +72,28 @@ export class VoiceStateRedis {
     if (!current) return;
     if (tokenId && current.tokenId !== tokenId) return;
 
-    const transaction = redis.multi();
+    const activeKey = this.activeSessionKey(userId);
+    const currentTokenKey = `voice:currentToken:${userId}`;
+    const expectedActive = JSON.stringify(current);
 
-    transaction.del(this.activeSessionKey(userId));
-    transaction.del(`voice:currentToken:${userId}`);
-
-    await transaction.exec();
+    await redis.eval(
+      `
+      if redis.call("GET", KEYS[1]) ~= ARGV[1] then
+        return 0
+      end
+      local currentToken = redis.call("GET", KEYS[2])
+      redis.call("DEL", KEYS[1])
+      redis.call("DEL", KEYS[2])
+      if currentToken then
+        redis.call("DEL", "voice:sessions:" .. currentToken)
+      end
+      return 1
+      `,
+      2,
+      activeKey,
+      currentTokenKey,
+      expectedActive,
+    );
   }
 
   static async listChannelStates(
@@ -101,7 +117,9 @@ export class VoiceStateRedis {
         const parsed = JSON.parse(raw as string) as VoiceState;
         if (
           String(parsed.channelId) === String(channelId) &&
-          (spaceId == null || String(parsed.spaceId) === String(spaceId))
+          (spaceId == null
+            ? parsed.spaceId == null
+            : String(parsed.spaceId) === String(spaceId))
         ) {
           out.push(parsed);
         }
@@ -114,13 +132,6 @@ export class VoiceStateRedis {
   }
 
   static async upsertState(state: VoiceState) {
-    const previous = await this.getState(state.userId);
-
-    const previousScopeKey =
-      previous?.channelId != null
-        ? voiceScopeKey(previous.spaceId, previous.channelId)
-        : null;
-
     const nextScopeKey =
       state.channelId != null
         ? voiceScopeKey(state.spaceId, state.channelId)
@@ -134,58 +145,177 @@ export class VoiceStateRedis {
       updatedAt: state.updatedAt,
     });
 
-    const transaction = redis.multi();
-
-    if (previousScopeKey) transaction.srem(previousScopeKey, state.userId);
-    if (nextScopeKey) transaction.sadd(nextScopeKey, state.userId);
-
-    transaction.set(
+    await redis.eval(
+      `
+      local raw = redis.call("GET", KEYS[1])
+      if raw then
+        local ok, previous = pcall(cjson.decode, raw)
+        if ok and previous and previous.channelId ~= nil and type(previous.channelId) ~= "userdata" then
+          local previousScope
+          if previous.spaceId ~= nil and type(previous.spaceId) ~= "userdata" then
+            previousScope = "voice:space:" .. tostring(previous.spaceId) .. ":channel:" .. tostring(previous.channelId)
+          else
+            previousScope = "voice:channel:" .. tostring(previous.channelId)
+          end
+          redis.call("SREM", previousScope, ARGV[1])
+        end
+      end
+      if ARGV[2] ~= "" then
+        redis.call("SADD", ARGV[2], ARGV[1])
+      end
+      redis.call("SET", KEYS[1], ARGV[3], "EX", ARGV[4])
+      redis.call("SET", KEYS[2], ARGV[5], "EX", ARGV[6])
+      redis.call("ZADD", KEYS[3], ARGV[7], ARGV[1])
+      return 1
+      `,
+      3,
       stateKey(state.userId),
-      JSON.stringify(state),
-      "EX",
-      VOICE_STATE_TTL_SECONDS,
-    );
-    transaction.set(
       lastKey(state.userId),
+      VOICE_EXP_ZSET_KEY,
+      String(state.userId),
+      nextScopeKey ?? "",
+      JSON.stringify(state),
+      String(VOICE_STATE_TTL_SECONDS),
       lastJson,
-      "EX",
-      VOICE_LAST_TTL_SECONDS,
+      String(VOICE_LAST_TTL_SECONDS),
+      String(expireAtMs),
+    );
+  }
+
+  static async touchMinecraftState(params: {
+    userId: Snowflake;
+    spaceId: Snowflake | null;
+    channelId: Snowflake;
+    updatedAt: number;
+  }) {
+    const expireAtMs = params.updatedAt + VOICE_STATE_TTL_SECONDS * 1000;
+    const lastJson = JSON.stringify({
+      spaceId: params.spaceId,
+      channelId: params.channelId,
+      updatedAt: params.updatedAt,
+    });
+
+    const result = await redis.eval(
+      `
+      local raw = redis.call("GET", KEYS[1])
+      if not raw then
+        return 0
+      end
+      local ok, state = pcall(cjson.decode, raw)
+      if not ok or not state then
+        return 0
+      end
+      if state.client ~= "minecraft" then
+        return 0
+      end
+      if state.channelId == nil or type(state.channelId) == "userdata" then
+        return 0
+      end
+      if tostring(state.channelId) ~= ARGV[1] then
+        return 0
+      end
+      local currentSpace = (state.spaceId ~= nil and type(state.spaceId) ~= "userdata") and tostring(state.spaceId) or ""
+      if currentSpace ~= ARGV[2] then
+        return 0
+      end
+      state.updatedAt = tonumber(ARGV[3])
+      redis.call("SET", KEYS[1], cjson.encode(state), "EX", ARGV[4])
+      redis.call("SET", KEYS[2], ARGV[5], "EX", ARGV[6])
+      redis.call("ZADD", KEYS[3], ARGV[7], ARGV[8])
+      return 1
+      `,
+      3,
+      stateKey(params.userId),
+      lastKey(params.userId),
+      VOICE_EXP_ZSET_KEY,
+      String(params.channelId),
+      params.spaceId == null ? "" : String(params.spaceId),
+      String(params.updatedAt),
+      String(VOICE_STATE_TTL_SECONDS),
+      lastJson,
+      String(VOICE_LAST_TTL_SECONDS),
+      String(expireAtMs),
+      String(params.userId),
     );
 
-    transaction.zadd(VOICE_EXP_ZSET_KEY, String(expireAtMs), state.userId);
-
-    await transaction.exec();
+    return result === 1 || result === "1";
   }
 
   static async removeState(params: {
     userId: Snowflake;
     spaceId: Snowflake | null;
     channelId: Snowflake | null;
+    sessionId?: string | null;
   }) {
-    const transaction = redis.multi();
-
-    if (params.channelId != null) {
-      transaction.srem(
-        voiceScopeKey(params.spaceId, params.channelId),
-        params.userId,
-      );
-    }
-
-    transaction.del(stateKey(params.userId));
-    transaction.zrem(VOICE_EXP_ZSET_KEY, params.userId);
-
-    transaction.set(
+    const result = await redis.eval(
+      `
+      local raw = redis.call("GET", KEYS[1])
+      if not raw then
+        return 0
+      end
+      local ok, state = pcall(cjson.decode, raw)
+      if not ok or not state then
+        redis.call("DEL", KEYS[1])
+        redis.call("ZREM", KEYS[3], ARGV[1])
+        return 0
+      end
+      if ARGV[6] ~= "" then
+        if state.sessionId == nil or type(state.sessionId) == "userdata" then
+          return 0
+        end
+        if tostring(state.sessionId) ~= ARGV[6] then
+          return 0
+        end
+      end
+      if ARGV[2] ~= "" then
+        if state.channelId == nil or type(state.channelId) == "userdata" then
+          return 0
+        end
+        if tostring(state.channelId) ~= ARGV[2] then
+          return 0
+        end
+        local currentSpace = (state.spaceId ~= nil and type(state.spaceId) ~= "userdata") and tostring(state.spaceId) or ""
+        if currentSpace ~= ARGV[3] then
+          return 0
+        end
+        local scope
+        if currentSpace ~= "" then
+          scope = "voice:space:" .. currentSpace .. ":channel:" .. tostring(state.channelId)
+        else
+          scope = "voice:channel:" .. tostring(state.channelId)
+        end
+        redis.call("SREM", scope, ARGV[1])
+      elseif state.channelId ~= nil and type(state.channelId) ~= "userdata" then
+        local previousScope
+        if state.spaceId ~= nil and type(state.spaceId) ~= "userdata" then
+          previousScope = "voice:space:" .. tostring(state.spaceId) .. ":channel:" .. tostring(state.channelId)
+        else
+          previousScope = "voice:channel:" .. tostring(state.channelId)
+        end
+        redis.call("SREM", previousScope, ARGV[1])
+      end
+      redis.call("DEL", KEYS[1])
+      redis.call("ZREM", KEYS[3], ARGV[1])
+      redis.call("SET", KEYS[2], ARGV[4], "EX", ARGV[5])
+      return 1
+      `,
+      3,
+      stateKey(params.userId),
       lastKey(params.userId),
+      VOICE_EXP_ZSET_KEY,
+      String(params.userId),
+      params.channelId == null ? "" : String(params.channelId),
+      params.spaceId == null ? "" : String(params.spaceId),
       JSON.stringify({
         spaceId: params.spaceId,
         channelId: params.channelId,
         updatedAt: Date.now(),
       }),
-      "EX",
-      VOICE_LAST_TTL_SECONDS,
+      String(VOICE_LAST_TTL_SECONDS),
+      params.sessionId == null ? "" : String(params.sessionId),
     );
 
-    await transaction.exec();
+    return result === 1 || result === "1";
   }
 
   static async removeStateBestEffort(userId: Snowflake) {
@@ -195,6 +325,7 @@ export class VoiceStateRedis {
       userId,
       spaceId: existing.spaceId,
       channelId: existing.channelId,
+      sessionId: null,
     });
   }
 }

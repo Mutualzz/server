@@ -15,7 +15,7 @@ import {
 import type { Channel } from "amqplib";
 import { and, eq } from "drizzle-orm";
 import { logger } from "./Logger";
-import { Send, type WebSocket } from "./util";
+import { Send, SessionRuntime, type WebSocket } from "./util";
 import { resyncMemberListWindows } from "@mutualzz/gateway/util/Calculations.ts";
 
 export async function setupListener(this: WebSocket) {
@@ -156,7 +156,14 @@ export async function consume(this: WebSocket, opts: EventOpts) {
 
   switch (event) {
     case "UserForceLogout": {
-      this.close(GatewayCloseCodes.ForceLogout, "Forced logout by staff");
+      const target =
+        SessionRuntime.getLiveSocket(this.sessionId) ?? this;
+      if (
+        target.readyState === target.OPEN ||
+        target.readyState === target.CONNECTING
+      ) {
+        target.close(GatewayCloseCodes.ForceLogout, "Forced logout by staff");
+      }
       opts?.acknowledge?.();
       return;
     }
@@ -212,6 +219,17 @@ export async function consume(this: WebSocket, opts: EventOpts) {
     }
     case "ChannelDelete":
     case "SpaceDelete": {
+      if (
+        data &&
+        typeof data === "object" &&
+        ("initiatorId" in data ||
+          "ringing" in data ||
+          "accepted" in data ||
+          "soloTimeoutMs" in data)
+      ) {
+        break;
+      }
+
       this.events[id]?.();
       delete this.events[id];
 
@@ -345,7 +363,7 @@ export async function consume(this: WebSocket, opts: EventOpts) {
       op: "Dispatch",
       t: event,
       d: data,
-      s: this.sequence++,
+      s: SessionRuntime.nextSequence(this.sessionId, this),
     });
   } catch (err) {
     logger.error("[RabbitMQ] Common error:", err);

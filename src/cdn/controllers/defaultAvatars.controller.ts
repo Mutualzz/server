@@ -73,12 +73,10 @@ export default class DefaultAvatarsController {
             });
           }
 
-          // Single transformation → Buffer
           outputBuffer = await image.toBuffer();
-
-          // Cache the transformed result
-          defaultAvatarCache.set(cacheKey, outputBuffer);
         }
+
+        defaultAvatarCache.set(cacheKey, outputBuffer);
       }
 
       // Compute ETag from transformed buffer
@@ -90,7 +88,7 @@ export default class DefaultAvatarsController {
       }
 
       // Set headers
-      res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       res.setHeader("ETag", etag);
       res.setHeader(
         "Content-Type",

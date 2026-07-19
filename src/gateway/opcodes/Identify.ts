@@ -11,11 +11,12 @@ import { logger } from "../Logger";
 import { saveSession } from "../util";
 import { clearSessionBuffer } from "../util/SessionEventBuffer";
 import { SessionRuntime } from "../util/SessionRuntime";
+import { setHeartbeat } from "../util/Heartbeat";
 import { Send } from "../util/Send";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "../presence/Presence.service.ts";
 import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
-import { VoiceStateRedis } from "@mutualzz/gateway";
+import { CallService } from "../call/Call.service";
 
 export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   if (this.userId) return;
@@ -57,7 +58,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   this.presences = this.presences ?? new Map();
   this.presenceSubs = new Set();
 
-  clearSessionBuffer(this.sessionId);
+  await clearSessionBuffer(this.sessionId);
 
   await saveSession({
     sessionId: this.sessionId,
@@ -66,6 +67,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   });
 
   SessionRuntime.register(this);
+  setHeartbeat(this);
 
   await PresenceService.onSocketAuthenticated(this);
 
@@ -94,10 +96,19 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   await Send(this, {
     op: "Dispatch",
     t: "Ready",
-    s: this.sequence++,
+    s: SessionRuntime.nextSequence(this.sessionId, this),
     d: {
       ...readyData,
       sessionId: this.sessionId,
+      calls: await CallService.listActiveCallsForChannels(
+        (readyData.channels ?? [])
+          .filter(
+            (ch) =>
+              ch.type === ChannelType.DM || ch.type === ChannelType.GroupDM,
+          )
+          .map((ch) => ch.id.toString()),
+        this.userId,
+      ),
     },
   });
 
@@ -108,50 +119,4 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   await setupListener.call(this);
 
   await VoiceStateService.sendRejoinIfNeeded(this);
-
-  (async () => {
-    try {
-      const CHUNK_SIZE = 25;
-      const PAUSE_MS = 10;
-
-      const voiceChannelList: { spaceId: string; channelId: string }[] =
-        readyData.spaces.flatMap((space) =>
-          (space.channels ?? [])
-            .filter((ch) => ch.type === ChannelType.Voice)
-            .map((ch) => ({
-              channelId: ch.id.toString(),
-              spaceId: space.id.toString(),
-            })),
-        );
-
-      for (const { spaceId, channelId } of voiceChannelList) {
-        const states = await VoiceStateRedis.listChannelStates(
-          spaceId,
-          channelId,
-        );
-        if (!states.length) continue;
-
-        const filtered = states.filter(
-          (st) => st.userId.toString() !== this.userId?.toString(),
-        );
-
-        for (let i = 0; i < filtered.length; i += CHUNK_SIZE) {
-          const chunk = filtered.slice(i, i + CHUNK_SIZE);
-
-          for (const state of chunk) {
-            await Send(this, {
-              op: "Dispatch",
-              t: "VoiceStateUpdate",
-              s: this.sequence++,
-              d: state,
-            });
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
-        }
-      }
-    } catch (err) {
-      logger.error("Voice state not sent", err);
-    }
-  })();
 }

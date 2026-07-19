@@ -1,5 +1,5 @@
 import { logger } from "../Logger";
-import { type MemberListRange, Send } from "../util";
+import { type MemberListRange, Send, SessionRuntime } from "../util";
 import type { GatewayPayload } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
 import { getChannelOverwrites } from "@mutualzz/util";
@@ -75,7 +75,7 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
 
   await Send(this, {
     op: "Dispatch",
-    s: this.sequence++,
+    s: SessionRuntime.nextSequence(this.sessionId, this),
     t: "SpaceMemberListUpdate",
     d: {
       ops: ops.map((x) => ({

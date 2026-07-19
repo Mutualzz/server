@@ -1,9 +1,9 @@
+import type { LogLevel } from "@mutualzz/logger";
 import bodyParser from "body-parser";
 import cors from "cors";
 import express, { Router } from "express";
 import fg from "fast-glob";
 import { createServer } from "http";
-import morgan from "morgan";
 import os from "os";
 import path from "path";
 import sharp from "sharp";
@@ -40,6 +40,50 @@ export class Server {
     });
   }
 
+  private initLoggerMiddleware() {
+    this.app.use((req, res, next) => {
+      const start = process.hrtime.bigint();
+
+      res.on("finish", () => {
+        const end = process.hrtime.bigint();
+        const durationMs = Number(end - start) / 1e6;
+
+        const status = res.statusCode;
+
+        const ip =
+          (req.headers["x-forwarded-for"] as string | undefined)?.split(
+            ",",
+          )[0] ||
+          req.socket.remoteAddress ||
+          "-";
+
+        const contentLength = res.getHeader("content-length") || 0;
+
+        const baseMessage = `${req.method} ${req.originalUrl} ${status} ${durationMs.toFixed(2)} ms`;
+
+        let level: LogLevel = "info";
+        if (status >= 500) level = "error";
+        else if (status >= 400) level = "warn";
+
+        const isSlow = durationMs > 1000;
+
+        logger[level]({
+          msg: baseMessage,
+          method: req.method,
+          url: req.originalUrl,
+          status,
+          duration: `${durationMs}ms`,
+          ip,
+          userAgent: req.headers["user-agent"],
+          contentLength: Number(contentLength),
+          slow: isSlow ? "Yes" : "No",
+        });
+      });
+
+      next();
+    });
+  }
+
   private initHeadMiddlewares() {
     this.app.use(
       cors({
@@ -55,10 +99,6 @@ export class Server {
       res.setHeader("X-XSS-Protection", "1; mode=block");
       next();
     });
-
-    this.app.use(
-      morgan(process.env.NODE_ENV === "production" ? "tiny" : "dev"),
-    );
 
     this.app.disable("x-powered-by");
   }
@@ -122,6 +162,7 @@ export class Server {
 
   private async init() {
     this.initHeadMiddlewares();
+    this.initLoggerMiddleware();
     this.initMiddlewares();
     await this.initRoutes();
     this.initErrorHandling();

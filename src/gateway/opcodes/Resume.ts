@@ -14,9 +14,12 @@ import {
 import { Send } from "../util/Send";
 import { getSession, saveSession } from "../util/Session";
 import { SessionRuntime } from "../util/SessionRuntime";
+import { setHeartbeat } from "../util/Heartbeat";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "../presence/Presence.service.ts";
 import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
+import { CallService } from "../call/Call.service";
+import { collectVisibleVoiceStates } from "../../util/Helpers";
 
 async function failResume(socket: WebSocket, reason: string) {
     await Send(socket, {
@@ -29,6 +32,8 @@ async function failResume(socket: WebSocket, reason: string) {
 export async function onResume(this: WebSocket, data: GatewayPayload) {
     const resume = data.d;
     const clientSeq = Number(resume.seq ?? 0);
+
+    clearTimeout(this.readyTimeout);
 
     const rawSession = await redis.get(`rest:sessions:${resume.token}`);
     if (!rawSession) {
@@ -43,19 +48,25 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
         return failResume(this, "Invalid session");
     }
 
-    const runtimeSeq = SessionRuntime.getSequence(resume.sessionId);
-    const bufferedMax = getBufferedMaxSeq(resume.sessionId);
-    const serverSeq = Math.max(
+    const runtimeNext = SessionRuntime.getSequence(resume.sessionId);
+    const bufferedMax = await getBufferedMaxSeq(resume.sessionId);
+    const serverLastEventSeq = Math.max(
         session.seq,
-        runtimeSeq ?? 0,
         bufferedMax ?? 0,
+        runtimeNext != null ? Math.max(0, runtimeNext - 1) : 0,
     );
 
-    if (!canResumeFromSeq(resume.sessionId, clientSeq, serverSeq)) {
+    if (
+        !(await canResumeFromSeq(
+            resume.sessionId,
+            clientSeq,
+            serverLastEventSeq,
+        ))
+    ) {
         logger.warn(
-            `Resume buffer miss for session ${resume.sessionId} (client seq ${clientSeq}, server seq ${serverSeq})`,
+            `Resume buffer miss for session ${resume.sessionId} (client seq ${clientSeq}, server seq ${serverLastEventSeq})`,
         );
-        await SessionRuntime.destroy(resume.sessionId);
+        await SessionRuntime.destroy(resume.sessionId, { leaveVoice: false });
         return failResume(this, "Resume buffer miss");
     }
 
@@ -64,7 +75,7 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
 
     const claimed = SessionRuntime.claim(resume.sessionId, this);
     if (!claimed) {
-        this.sequence = serverSeq;
+        this.sequence = serverLastEventSeq + 1;
     }
 
     const user = await getUser(this.userId, true);
@@ -83,7 +94,9 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
         SessionRuntime.register(this);
     }
 
-    const missed = getDispatchesSince(resume.sessionId, clientSeq);
+    setHeartbeat(this);
+
+    const missed = await getDispatchesSince(resume.sessionId, clientSeq);
 
     for (const event of missed) {
         await Send(this, {
@@ -101,7 +114,7 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
     await saveSession({
         sessionId: this.sessionId,
         userId: user.id,
-        seq: this.sequence,
+        seq: Math.max(0, this.sequence - 1),
     });
 
     await Send(this, {
@@ -110,8 +123,10 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
         d: {
             sessionId: this.sessionId,
             seq: this.sequence,
+            calls: await CallService.listActiveCallsForUser(this.userId),
+            voiceStates: await collectVisibleVoiceStates(this.userId),
         },
-        s: this.sequence++,
+        s: SessionRuntime.nextSequence(this.sessionId, this),
     });
 
     logger.info(

@@ -1,5 +1,6 @@
 import type { MemberListRange, WebSocket } from "../util/WebSocket.ts";
 import { Send } from "../util/Send.ts";
+import { SessionRuntime } from "../util/SessionRuntime.ts";
 import {
   channelMemberOverwritesTable,
   channelRoleOverwritesTable,
@@ -580,7 +581,7 @@ export async function resyncMemberListWindows(
 
     await Send(this, {
       op: "Dispatch",
-      s: this.sequence++,
+      s: SessionRuntime.nextSequence(this.sessionId, this),
       t: "SpaceMemberListUpdate",
       d: {
         ops: ops.map((x) => ({

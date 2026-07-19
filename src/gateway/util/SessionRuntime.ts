@@ -1,8 +1,9 @@
 import { GatewayCloseCodes } from "@mutualzz/types";
 import { logger } from "../Logger";
+import { VoiceStateService } from "../voice/VoiceState.service.ts";
 import { RESUME_WINDOW_MS } from "./Constants";
-import { clearSessionBuffer } from "./SessionEventBuffer";
-import { revokeSession, saveSession } from "./Session";
+import { clearSessionBuffer, touchSessionBuffer } from "./SessionEventBuffer";
+import { revokeSession, saveSession, flushSessionSeq } from "./Session";
 import type { WebSocket } from "./WebSocket";
 
 interface SessionEntry {
@@ -11,6 +12,7 @@ interface SessionEntry {
     owner: WebSocket;
     live: WebSocket | null;
     expireTimer: NodeJS.Timeout | null;
+    sequence: number;
 }
 
 const sessions = new Map<string, SessionEntry>();
@@ -32,6 +34,13 @@ function teardownListeners(ws: WebSocket) {
         ws.userSubscriptions = {};
     } catch (err) {
         logger.error("[SessionRuntime] teardownListeners failed:", err);
+    }
+}
+
+function syncSocketSequences(entry: SessionEntry) {
+    entry.owner.sequence = entry.sequence;
+    if (entry.live) {
+        entry.live.sequence = entry.sequence;
     }
 }
 
@@ -60,7 +69,7 @@ async function destroyEntry(
 
     sessions.delete(entry.sessionId);
     teardownListeners(entry.owner);
-    clearSessionBuffer(entry.sessionId);
+    await clearSessionBuffer(entry.sessionId);
 
     if (revoke) {
         await revokeSession(entry.sessionId).catch(() => null);
@@ -69,8 +78,6 @@ async function destroyEntry(
     if (!leaveVoice) return;
 
     try {
-        const { VoiceStateService } =
-            await import("../voice/VoiceState.service.ts");
         await VoiceStateService.leaveForExpiredGatewaySession(
             entry.userId,
             entry.sessionId,
@@ -98,6 +105,7 @@ export const SessionRuntime = {
             owner: ws,
             live: ws,
             expireTimer: null,
+            sequence: ws.sequence ?? 0,
         });
     },
 
@@ -120,10 +128,20 @@ export const SessionRuntime = {
     getSequence(sessionId: string): number | null {
         const entry = sessions.get(sessionId);
         if (!entry) return null;
-        return Math.max(
-            entry.owner.sequence,
-            entry.live?.sequence ?? 0,
-        );
+        return entry.sequence;
+    },
+
+    nextSequence(sessionId: string | undefined, socket: WebSocket): number {
+        if (sessionId) {
+            const entry = sessions.get(sessionId);
+            if (entry) {
+                const s = entry.sequence;
+                entry.sequence = s + 1;
+                syncSocketSequences(entry);
+                return s;
+            }
+        }
+        return socket.sequence++;
     },
 
     noteSequence(sessionId: string | undefined, nextSeq: number) {
@@ -131,10 +149,8 @@ export const SessionRuntime = {
         const entry = sessions.get(sessionId);
         if (!entry) return;
 
-        entry.owner.sequence = Math.max(entry.owner.sequence, nextSeq);
-        if (entry.live) {
-            entry.live.sequence = Math.max(entry.live.sequence, nextSeq);
-        }
+        entry.sequence = Math.max(entry.sequence, nextSeq);
+        syncSocketSequences(entry);
     },
 
     async detach(ws: WebSocket, code?: number) {
@@ -159,21 +175,27 @@ export const SessionRuntime = {
                 owner: ws,
                 live: null,
                 expireTimer: null,
+                sequence: ws.sequence ?? 0,
             };
             sessions.set(ws.sessionId, entry);
         }
 
-        if (entry.live === ws) {
-            entry.live = null;
+        if (entry.live !== ws) {
+            return;
         }
 
-        const seq = this.getSequence(ws.sessionId) ?? ws.sequence;
+        entry.live = null;
 
+        const nextSeq = this.getSequence(ws.sessionId) ?? ws.sequence;
+        const lastEventSeq = Math.max(0, nextSeq - 1);
+
+        await flushSessionSeq(ws.sessionId, lastEventSeq);
         await saveSession({
             sessionId: ws.sessionId,
             userId: ws.userId,
-            seq,
+            seq: lastEventSeq,
         }).catch(() => null);
+        await touchSessionBuffer(ws.sessionId);
 
         if (entry.expireTimer) {
             clearTimeout(entry.expireTimer);
@@ -185,7 +207,7 @@ export const SessionRuntime = {
         entry.expireTimer.unref?.();
 
         logger.debug(
-            `[SessionRuntime] Detached session ${ws.sessionId} (seq ${seq}), resume window ${RESUME_WINDOW_MS}ms`,
+            `[SessionRuntime] Detached session ${ws.sessionId} (seq ${lastEventSeq}), resume window ${RESUME_WINDOW_MS}ms`,
         );
     },
 
@@ -198,8 +220,26 @@ export const SessionRuntime = {
             entry.expireTimer = null;
         }
 
+        const previousLive = entry.live;
         copyAppState(entry.owner, ws);
+        entry.sequence = Math.max(entry.sequence, ws.sequence ?? 0);
+        ws.sequence = entry.sequence;
+        syncSocketSequences(entry);
         entry.live = ws;
+
+        if (
+            previousLive &&
+            previousLive !== ws &&
+            (previousLive.readyState === previousLive.OPEN ||
+                previousLive.readyState === previousLive.CONNECTING)
+        ) {
+            try {
+                previousLive.close(
+                    GatewayCloseCodes.SessionTimedOut,
+                    "session taken over",
+                );
+            } catch {}
+        }
 
         logger.debug(
             `[SessionRuntime] Claimed session ${sessionId} (seq ${ws.sequence})`,
@@ -219,14 +259,20 @@ export const SessionRuntime = {
         await destroyEntry(entry, { revoke: true, leaveVoice: true });
     },
 
-    async destroy(sessionId: string | undefined) {
+    async destroy(
+        sessionId: string | undefined,
+        options: { leaveVoice?: boolean } = {},
+    ) {
         if (!sessionId) return;
         const entry = sessions.get(sessionId);
         if (!entry) {
-            clearSessionBuffer(sessionId);
+            await clearSessionBuffer(sessionId);
             await revokeSession(sessionId).catch(() => null);
             return;
         }
-        await destroyEntry(entry, { revoke: true, leaveVoice: true });
+        await destroyEntry(entry, {
+            revoke: true,
+            leaveVoice: options.leaveVoice ?? true,
+        });
     },
 };

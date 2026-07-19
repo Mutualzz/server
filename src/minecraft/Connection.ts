@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "http";
 import type { WebSocket } from "ws";
 import { VoiceStateService } from "../gateway/voice/VoiceState.service";
+import { VoiceStateRedis } from "../gateway/voice/VoiceState.redis.ts";
 import { PresenceService } from "../gateway/presence/Presence.service.ts";
 import { publishBridgeEvent } from "./BridgeBus";
 import { emitMinecraftLinkUpdate } from "./linkEvents";
@@ -249,6 +250,16 @@ export const onMinecraftConnection = (
     if (session) {
       const removed = clearServerPlayers(session.bridgeId, session.serverId);
       for (const player of removed) {
+        const link = await db.query.minecraftLinksTable.findFirst({
+          where: eq(minecraftLinksTable.minecraftUuid, player.uuid),
+        });
+        if (link) {
+          await VoiceStateService.leaveFromMinecraft(
+            link.userId.toString(),
+          ).catch((err) =>
+            logger.debug(`voice clear on disconnect failed: ${err}`),
+          );
+        }
         void syncMinecraftPresence(
           player.uuid,
           session.bridgeId,
@@ -694,6 +705,11 @@ const handleVoiceJoin = async (
       spaceId: result.credentials.spaceId,
       channelId: result.credentials.channelId,
     });
+
+    const state = await VoiceStateRedis.getState(userId);
+    MinecraftVoicePeers.get(userId)?.setLocalMuted(
+      !!state?.spaceMute || !!state?.spaceDeaf,
+    );
   } catch (err) {
     logger.error(`Hub voice peer join failed for ${userId}: ${err}`);
     await VoiceStateService.leaveFromMinecraft(userId);
@@ -796,8 +812,6 @@ const handleVoiceLeave = async (
   let channelId = "";
   let channelName = "";
   try {
-    const { VoiceStateRedis } =
-      await import("../gateway/voice/VoiceState.redis.ts");
     const state = await VoiceStateRedis.getState(userId);
     if (state?.client === "minecraft" && state.channelId) {
       channelId = String(state.channelId);

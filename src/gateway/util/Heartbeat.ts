@@ -5,6 +5,7 @@ import type { WebSocket } from "./WebSocket";
 export function setHeartbeat(socket: WebSocket) {
     if (socket.heartbeatTimeout) clearTimeout(socket.heartbeatTimeout);
 
+    socket.isAlive = true;
     socket.heartbeatTimeout = setTimeout(() => {
         if (socket.readyState === socket.OPEN) {
             socket.close(
@@ -12,5 +13,5 @@ export function setHeartbeat(socket: WebSocket) {
                 "Heartbeat timeout",
             );
         }
-    }, HEARTBEAT_INTERVAL * 2); // 90 seconds
+    }, HEARTBEAT_INTERVAL * 2);
 }

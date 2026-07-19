@@ -1,9 +1,12 @@
 import { VoiceDispatchEvents, VoiceOpcodes } from "@mutualzz/types";
 import { Logger } from "@mutualzz/logger";
+import { db, usersTable } from "@mutualzz/database";
+import { eq, inArray } from "drizzle-orm";
 import * as mediasoupClient from "mediasoup-client";
 import { randomUUID } from "node:crypto";
 import wrtc from "@roamhq/wrtc";
 import WebSocket from "ws";
+import { VoiceStateRedis } from "../../gateway/voice/VoiceState.redis.ts";
 import { encodeDownlinkFrame } from "./AudioConnection.ts";
 
 const logger = new Logger({
@@ -170,10 +173,7 @@ export class VoicePeerSession {
       }
     }
     this.audioSocket = socket;
-    // Fresh audio socket ⇒ start unmuted. Client re-sends mute state if needed.
-    // Clears stale localMuted left by an older pause-based mute path.
-    this.localMuted = false;
-    if (this.micProducer?.paused) {
+    if (!this.localMuted && this.micProducer?.paused) {
       try {
         this.micProducer.resume();
         this.producerLive = true;
@@ -206,11 +206,6 @@ export class VoicePeerSession {
       });
       return;
     }
-
-    const { VoiceStateRedis } =
-      await import("../../gateway/voice/VoiceState.redis.ts");
-    const { db, usersTable } = await import("@mutualzz/database");
-    const { inArray } = await import("drizzle-orm");
 
     const states = await VoiceStateRedis.listChannelStates(
       this.spaceId ?? null,
@@ -253,8 +248,6 @@ export class VoicePeerSession {
 
   private async notifyMemberName(userId: string) {
     try {
-      const { db, usersTable } = await import("@mutualzz/database");
-      const { eq } = await import("drizzle-orm");
       const row = await db.query.usersTable.findFirst({
         where: eq(usersTable.id, BigInt(userId)),
         columns: { username: true, globalName: true },
@@ -357,7 +350,7 @@ export class VoicePeerSession {
       const frame = this.uplinkPcmQueue.splice(0, FRAME_SAMPLES);
       let sumSqIn = 0;
       for (let i = 0; i < FRAME_SAMPLES; i++) {
-        const x = frame[i]!;
+        const x = frame[i];
         const y = 0.96 * (this.uplinkHpPrevOut + x - this.uplinkHpPrevIn);
         this.uplinkHpPrevIn = x;
         this.uplinkHpPrevOut = y;
@@ -503,7 +496,7 @@ export class VoicePeerSession {
     });
 
     track.enabled = true;
-    if (this.micProducer.paused) {
+    if (this.micProducer.paused && !this.localMuted) {
       try {
         this.micProducer.resume();
       } catch (err) {
@@ -581,23 +574,32 @@ export class VoicePeerSession {
       });
     });
 
-    await this.rpc(VoiceOpcodes.VoiceAuthenticate, {
+    const authData = (await this.rpc(VoiceOpcodes.VoiceAuthenticate, {
       token: payload.voiceToken,
-    });
+    })) as { rtpCapabilities?: mediasoupClient.types.RtpCapabilities };
 
-    const { rtpCapabilities } = (await this.rpc(
-      VoiceOpcodes.VoiceGetRTPCapabilities,
-      {},
-    )) as { rtpCapabilities: mediasoupClient.types.RtpCapabilities };
+    let rtpCapabilities = authData?.rtpCapabilities;
+    if (!rtpCapabilities) {
+      ({ rtpCapabilities } = (await this.rpc(
+        VoiceOpcodes.VoiceGetRTPCapabilities,
+        {},
+      )) as { rtpCapabilities: mediasoupClient.types.RtpCapabilities });
+    }
 
     const device = new mediasoupClient.Device({ handlerName: "Chrome111" });
     await device.load({ routerRtpCapabilities: rtpCapabilities });
     this.device = device;
 
-    const { transportOptions: recvOptions } = (await this.rpc(
-      VoiceOpcodes.VoiceCreateTransport,
-      { direction: "receive" },
-    )) as { transportOptions: mediasoupClient.types.TransportOptions };
+    const [recvRes, sendRes] = await Promise.all([
+      this.rpc(VoiceOpcodes.VoiceCreateTransport, { direction: "receive" }),
+      this.rpc(VoiceOpcodes.VoiceCreateTransport, { direction: "send" }),
+    ]);
+    const { transportOptions: recvOptions } = recvRes as {
+      transportOptions: mediasoupClient.types.TransportOptions;
+    };
+    const { transportOptions: sendOptions } = sendRes as {
+      transportOptions: mediasoupClient.types.TransportOptions;
+    };
 
     const recvTransport = device.createRecvTransport(recvOptions);
     recvTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
@@ -611,15 +613,6 @@ export class VoicePeerSession {
         );
     });
     this.recvTransport = recvTransport;
-
-    await this.rpc(VoiceOpcodes.VoiceSetRTPCapabilities, {
-      rtpCapabilities: device.recvRtpCapabilities,
-    });
-
-    const { transportOptions: sendOptions } = (await this.rpc(
-      VoiceOpcodes.VoiceCreateTransport,
-      { direction: "send" },
-    )) as { transportOptions: mediasoupClient.types.TransportOptions };
 
     const sendTransport = device.createSendTransport(sendOptions);
     sendTransport.on("connect", ({ dtlsParameters }, callback, errback) => {
@@ -654,9 +647,17 @@ export class VoicePeerSession {
     this.sendTransport = sendTransport;
 
     this.setupComplete = true;
-    for (const item of this.pendingProducers.splice(0)) {
-      await this.consumeProducer(item.producerId, item.userId, item.mediaKind);
-    }
+    void this.rpc(VoiceOpcodes.VoiceSetRTPCapabilities, {
+      rtpCapabilities: device.recvRtpCapabilities,
+    }).catch(() => undefined);
+
+    await Promise.all(
+      this.pendingProducers
+        .splice(0)
+        .map((item) =>
+          this.consumeProducer(item.producerId, item.userId, item.mediaKind),
+        ),
+    );
 
     await this.startMicProduce();
   }

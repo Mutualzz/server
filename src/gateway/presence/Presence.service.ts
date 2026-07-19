@@ -1,6 +1,7 @@
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceStore } from "./Presence.store.ts";
 import { Send } from "../util/Send";
+import { SessionRuntime } from "../util/SessionRuntime";
 import {
   GatewayCloseCodes,
   type CustomStatusSchedule,
@@ -226,7 +227,7 @@ export class PresenceService {
       op: "Dispatch",
       t: "PresenceUpdate",
       d: { userId: ws.userId, presence },
-      s: ws.sequence++,
+      s: SessionRuntime.nextSequence(ws.sessionId, ws),
     }).catch(() => null);
 
     await this.broadcast(ws.userId, presence);
@@ -878,7 +879,7 @@ export class PresenceService {
             userId,
             presence: forSelf ? presence : publicPresence,
           },
-          s: socket.sequence++,
+          s: SessionRuntime.nextSequence(socket.sessionId, socket),
         }).catch((error) => {
           logger.debug("[Presence] send fail:", error);
         });
@@ -948,7 +949,7 @@ export class PresenceService {
           op: "Dispatch",
           t: "PresenceScheduleUpdate",
           d: payload,
-          s: socket.sequence++,
+          s: SessionRuntime.nextSequence(socket.sessionId, socket),
         }).catch((error) => {
           logger.debug("[PresenceSchedule] send fail:", error);
         }),
@@ -974,7 +975,7 @@ export class PresenceService {
           op: "Dispatch",
           t: "CustomStatusScheduleUpdate",
           d: payload,
-          s: socket.sequence++,
+          s: SessionRuntime.nextSequence(socket.sessionId, socket),
         }).catch((error) => {
           logger.debug("[CustomStatusSchedule] send fail:", error);
         }),

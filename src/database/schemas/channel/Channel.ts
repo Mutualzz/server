@@ -45,6 +45,8 @@ export const channelsTable = pgTable(
             .notNull()
             .default(sql`0`),
 
+        lastMessageId: bigint({ mode: "bigint" }),
+
         createdAt: timestamp({ withTimezone: true, mode: "date" })
             .notNull()
             .defaultNow(),
@@ -65,5 +67,6 @@ export const channelsTable = pgTable(
         index("channel_parent_id_idx").on(table.parentId),
         index("channel_created_at_idx").on(table.createdAt),
         index("channel_type_idx").on(table.type),
+        index("channel_last_message_id_idx").on(table.lastMessageId),
     ],
 );

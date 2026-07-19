@@ -23,6 +23,7 @@ export const usersTable = pgTable(
         email: text().notNull().unique(),
         accentColor: text().notNull(),
         globalName: text(),
+        pronouns: text(),
 
         defaultAvatar: jsonb().$type<DefaultAvatar>().notNull(),
         avatar: text(),
