@@ -18,7 +18,7 @@ import path from "path";
 import { type RedisReply, RedisStore } from "rate-limit-redis";
 import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
-import { getExpression } from "@mutualzz/util/Helpers.ts";
+import { getExpression, getMember } from "@mutualzz/util/Helpers.ts";
 import { klipyFetch } from "@mutualzz/util/Klipy.ts";
 import { isSafeFetchUrl } from "./urlSafety";
 
@@ -112,6 +112,7 @@ export const canUseCustomEmoji = (
   emoji: APIExpression,
   channel?: APIChannel | null,
   canUseExternalEmojis = false,
+  isMemberOfEmojiSpace = false,
 ) => {
   if (emoji.type !== ExpressionType.Emoji) return false;
 
@@ -120,7 +121,8 @@ export const canUseCustomEmoji = (
   const inSpace = !!channel?.spaceId;
 
   if (!inSpace) {
-    return !emoji.spaceId && emoji.authorId === userId;
+    if (!emoji.spaceId) return emoji.authorId === userId;
+    return isMemberOfEmojiSpace;
   }
 
   if (emoji.spaceId && BigInt(emoji.spaceId) === BigInt(channel.spaceId!)) {
@@ -144,11 +146,17 @@ export const sanitizeContent = (
 
     if (!emoji) return raw;
 
+    let isMemberOfEmojiSpace = false;
+    if (emoji.spaceId && !channel?.spaceId) {
+      isMemberOfEmojiSpace = await getMember(emoji.spaceId, userId, true);
+    }
+
     const allowed = canUseCustomEmoji(
       userId,
       emoji,
       channel,
       canUseExternalEmojis,
+      isMemberOfEmojiSpace,
     );
 
     if (allowed) return raw;

@@ -1,93 +1,105 @@
 import type { Snowflake } from "@mutualzz/types";
 import { redis } from "@mutualzz/util";
+import { CallService } from "../call/Call.service";
+import { VoiceStateService } from "./VoiceState.service";
 import {
-    VOICE_EXP_ZSET_KEY,
-    VOICE_SWEEP_BATCH_SIZE,
-    VOICE_SWEEP_EVERY_MS,
-    VOICE_SWEEP_LOCK_KEY,
-    VOICE_SWEEP_LOCK_TTL_MS,
+  VOICE_EXP_ZSET_KEY,
+  VOICE_SWEEP_BATCH_SIZE,
+  VOICE_SWEEP_EVERY_MS,
+  VOICE_SWEEP_LOCK_KEY,
+  VOICE_SWEEP_LOCK_TTL_MS,
 } from "./VoiceState.constants";
 import { lastKey, stateKey, voiceScopeKey } from "./VoiceState.util.ts";
 
 export class VoiceStateSweeper {
-    private static intervalHandle: NodeJS.Timeout | null = null;
+  private static intervalHandle: NodeJS.Timeout | null = null;
 
-    static start(instanceId: string) {
-        if (this.intervalHandle) return;
+  static start(instanceId: string) {
+    if (this.intervalHandle) return;
 
-        this.intervalHandle = setInterval(() => {
-            void this.runOnce(instanceId);
-        }, VOICE_SWEEP_EVERY_MS);
-    }
+    this.intervalHandle = setInterval(() => {
+      void this.runOnce(instanceId);
+    }, VOICE_SWEEP_EVERY_MS);
+  }
 
-    private static async acquireLock(instanceId: string) {
-        const result = await redis.set(
-            VOICE_SWEEP_LOCK_KEY,
-            instanceId,
-            "PX",
-            VOICE_SWEEP_LOCK_TTL_MS,
-            "NX",
+  private static async acquireLock(instanceId: string) {
+    const result = await redis.set(
+      VOICE_SWEEP_LOCK_KEY,
+      instanceId,
+      "PX",
+      VOICE_SWEEP_LOCK_TTL_MS,
+      "NX",
+    );
+    return result === "OK";
+  }
+
+  private static async runOnce(instanceId: string) {
+    const hasLock = await this.acquireLock(instanceId);
+    if (!hasLock) return;
+
+    const now = Date.now();
+
+    const expiredUserIds = (await redis.zrangebyscore(
+      VOICE_EXP_ZSET_KEY,
+      0,
+      now,
+      "LIMIT",
+      0,
+      VOICE_SWEEP_BATCH_SIZE,
+    )) as Snowflake[];
+
+    if (!expiredUserIds.length) return;
+
+    for (const userId of expiredUserIds) {
+      const stillAlive = await redis.get(stateKey(userId));
+      if (stillAlive) {
+        await redis.zadd(
+          VOICE_EXP_ZSET_KEY,
+          String(Date.now() + 30_000),
+          userId,
         );
-        return result === "OK";
-    }
+        continue;
+      }
 
-    private static async runOnce(instanceId: string) {
-        const hasLock = await this.acquireLock(instanceId);
-        if (!hasLock) return;
+      const lastRaw = await redis.get(lastKey(userId));
+      if (lastRaw) {
+        try {
+          const last = JSON.parse(lastRaw) as {
+            spaceId: Snowflake | null;
+            channelId: Snowflake | null;
+            updatedAt?: number;
+          };
 
-        const now = Date.now();
+          const ageMs = Date.now() - Number(last.updatedAt ?? 0);
+          if (ageMs < 30_000) {
+            await redis.zadd(
+              VOICE_EXP_ZSET_KEY,
+              String(Date.now() + 15_000),
+              userId,
+            );
+            continue;
+          }
 
-        const expiredUserIds = (await redis.zrangebyscore(
-            VOICE_EXP_ZSET_KEY,
-            0,
-            now,
-            "LIMIT",
-            0,
-            VOICE_SWEEP_BATCH_SIZE,
-        )) as Snowflake[];
+          if (last.channelId) {
+            await redis.srem(
+              voiceScopeKey(last.spaceId ?? null, last.channelId),
+              userId,
+            );
 
-        if (!expiredUserIds.length) return;
+            void VoiceStateService.notifyMemberLeftChannel(
+              last.spaceId ?? null,
+              last.channelId,
+              userId,
+            );
 
-        for (const userId of expiredUserIds) {
-            const stillAlive = await redis.get(stateKey(userId));
-            if (stillAlive) {
-                await redis.zadd(
-                    VOICE_EXP_ZSET_KEY,
-                    String(Date.now() + 30_000),
-                    userId,
-                );
-                continue;
+            if (last.spaceId == null) {
+              void CallService.onVoiceOccupancyChanged(last.channelId!);
             }
+          }
+        } catch {}
+      }
 
-            const lastRaw = await redis.get(lastKey(userId));
-            if (lastRaw) {
-                try {
-                    const last = JSON.parse(lastRaw) as {
-                        spaceId: Snowflake;
-                        channelId: Snowflake | null;
-                        updatedAt?: number;
-                    };
-
-                    const ageMs = Date.now() - Number(last.updatedAt ?? 0);
-                    if (ageMs < 30_000) {
-                        await redis.zadd(
-                            VOICE_EXP_ZSET_KEY,
-                            String(Date.now() + 15_000),
-                            userId,
-                        );
-                        continue;
-                    }
-
-                    if (last.spaceId && last.channelId) {
-                        await redis.srem(
-                            voiceScopeKey(last.spaceId, last.channelId),
-                            userId,
-                        );
-                    }
-                } catch {}
-            }
-
-            await redis.zrem(VOICE_EXP_ZSET_KEY, userId);
-        }
+      await redis.zrem(VOICE_EXP_ZSET_KEY, userId);
     }
+  }
 }

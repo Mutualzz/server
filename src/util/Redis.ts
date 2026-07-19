@@ -1,8 +1,6 @@
 import { Logger } from "@mutualzz/logger";
 import Redis from "ioredis";
 
-import { SESSION_EXPIRY } from "./Constants";
-
 const logger = new Logger({
     tag: "Redis",
 });
@@ -22,11 +20,4 @@ redis.on("error", (err) => {
     logger.error("Redis error:", err);
 });
 
-const storeEvent = async (sessionId: string, s: number, t: string, d: any) => {
-    const key = `gateway:events:${sessionId}`;
-    await redis.rpush(key, JSON.stringify({ s, t, d }));
-    await redis.expire(key, SESSION_EXPIRY);
-    await redis.ltrim(key, -100, -1); // Keep only the last 100 events
-};
-
-export { redis, storeEvent };
+export { redis };

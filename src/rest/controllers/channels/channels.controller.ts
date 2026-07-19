@@ -32,6 +32,7 @@ import sharp from "sharp";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, } from "@aws-sdk/client-s3";
 import { BitField, channelFlags } from "@mutualzz/bitfield";
 import { z } from "zod";
+import { VoiceStateService } from "@mutualzz/gateway";
 
 export default class ChannelsController {
   static async getOne(req: Request, res: Response, next: NextFunction) {
@@ -646,6 +647,17 @@ export default class ChannelsController {
         );
 
         fireAndForgetAll([
+          ...deletedChannels
+            .filter((ch) => ch.type === ChannelType.Voice && ch.spaceId)
+            .map((ch) => ({
+              label: `voice:kickChannelFromVoice:${ch.id}`,
+              run: () =>
+                VoiceStateService.kickChannelFromVoice(
+                  ch.spaceId!,
+                  ch.id,
+                  "Voice channel deleted",
+                ),
+            })),
           {
             label: "event:BulkChannelDelete",
             run: () =>
@@ -681,6 +693,19 @@ export default class ChannelsController {
       });
 
       fireAndForgetAll([
+        ...(channel.type === ChannelType.Voice && channel.spaceId
+          ? [
+              {
+                label: "voice:kickChannelFromVoice",
+                run: () =>
+                  VoiceStateService.kickChannelFromVoice(
+                    channel.spaceId!,
+                    channel.id,
+                    "Voice channel deleted",
+                  ),
+              },
+            ]
+          : []),
         {
           label: "event:ChannelDelete",
           run: () =>

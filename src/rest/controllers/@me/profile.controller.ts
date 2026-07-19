@@ -1,6 +1,16 @@
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { db, userProfilesTable } from "@mutualzz/database";
-import type { APIProfileMusic, APIUserProfile } from "@mutualzz/types";
+import { setCache } from "@mutualzz/cache";
+import {
+  db,
+  toPublicUser,
+  userProfilesTable,
+  usersTable,
+} from "@mutualzz/database";
+import type {
+  APIPrivateUser,
+  APIProfileMusic,
+  APIUserProfile,
+} from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
   buildEmbed,
@@ -13,6 +23,7 @@ import {
   emitEvent,
   execNormalized,
   fireAndForget,
+  fireAndForgetAll,
   generateHash,
   resolveUserIdentifier,
   s3Client,
@@ -50,6 +61,7 @@ const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
 
 const toAPIUserProfile = (
   row: typeof userProfilesTable.$inferSelect,
+  pronouns?: string | null,
 ): APIUserProfile => ({
   userId: row.userId.toString(),
   configured: row.configured,
@@ -57,6 +69,7 @@ const toAPIUserProfile = (
   backgroundImage: row.backgroundImage,
   banner: row.banner,
   bio: row.bio,
+  pronouns: pronouns ?? null,
   pageFontFamily: row.pageFontFamily,
   profileMusic: row.profileMusic,
   blocks: row.blocks,
@@ -64,13 +77,17 @@ const toAPIUserProfile = (
   updatedAt: row.updatedAt,
 });
 
-const emptyProfile = (userId: string): APIUserProfile => ({
+const emptyProfile = (
+  userId: string,
+  pronouns?: string | null,
+): APIUserProfile => ({
   userId,
   configured: false,
   backgroundColor: null,
   backgroundImage: null,
   banner: null,
   bio: null,
+  pronouns: pronouns ?? null,
   pageFontFamily: null,
   profileMusic: null,
   blocks: [],
@@ -84,6 +101,7 @@ const isConfigured = (profile: {
   backgroundColor?: string | null;
   banner?: string | null;
   bio?: string | null;
+  pronouns?: string | null;
   profileMusic?: APIProfileMusic | null;
 }) =>
   profile.blocks.length > 0 ||
@@ -91,6 +109,7 @@ const isConfigured = (profile: {
   !!profile.backgroundColor ||
   !!profile.banner ||
   !!profile.bio ||
+  !!profile.pronouns ||
   !!profile.profileMusic;
 
 const resolveProfileMusic = async (input: {
@@ -175,10 +194,12 @@ export default class ProfileController {
       );
 
       if (!profile)
-        return res.status(HttpStatusCode.Success).json(emptyProfile(userId));
+        return res
+          .status(HttpStatusCode.Success)
+          .json(emptyProfile(userId, user.pronouns ?? null));
 
       const apiProfile = await hydrateUserProfileMusicPreviews(
-        toAPIUserProfile(profile),
+        toAPIUserProfile(profile, user.pronouns ?? null),
       );
       return res.status(HttpStatusCode.Success).json(apiProfile);
     } catch (err) {
@@ -242,6 +263,8 @@ export default class ProfileController {
         return block;
       });
 
+      const pronouns = body.pronouns ?? null;
+
       const payload = {
         backgroundColor: body.backgroundColor ?? null,
         backgroundImage: body.backgroundImage ?? null,
@@ -257,6 +280,7 @@ export default class ProfileController {
           backgroundImage: body.backgroundImage ?? null,
           banner: body.banner ?? null,
           bio: body.bio ?? null,
+          pronouns,
           profileMusic,
         }),
         updatedAt: new Date(),
@@ -286,19 +310,62 @@ export default class ProfileController {
         );
       }
 
+      const updatedUser = await execNormalized<APIPrivateUser | null>(
+        db
+          .update(usersTable)
+          .set({ pronouns })
+          .where(eq(usersTable.id, BigInt(user.id)))
+          .returning()
+          .then((rows) => rows[0] ?? null),
+      );
+
+      if (!updatedUser) {
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to update pronouns",
+        );
+      }
+
+      const publicUser = toPublicUser(updatedUser);
+
       const apiProfile = await hydrateUserProfileMusicPreviews(
-        toAPIUserProfile(updated),
+        toAPIUserProfile(updated, pronouns),
       );
 
       res.status(HttpStatusCode.Success).json(apiProfile);
 
-      fireAndForget(() =>
-        emitEvent({
-          event: "UserProfileUpdate",
-          user_id: user.id,
-          data: apiProfile,
-        }),
-      );
+      fireAndForgetAll([
+        {
+          label: "event:UserProfileUpdate",
+          run: () =>
+            emitEvent({
+              event: "UserProfileUpdate",
+              user_id: user.id,
+              data: apiProfile,
+            }),
+          meta: { userId: user.id },
+        },
+        {
+          label: "event:UserUpdate",
+          run: () =>
+            emitEvent({
+              event: "UserUpdate",
+              user_id: user.id,
+              data: publicUser,
+            }),
+          meta: { userId: user.id },
+        },
+        {
+          label: "cache:update:user",
+          run: () => setCache("user", user.id, publicUser),
+          meta: { userId: user.id },
+        },
+        {
+          label: "cache:update:authUser",
+          run: () => setCache("authUser", user.id, updatedUser),
+          meta: { userId: user.id },
+        },
+      ]);
 
       fireAndForget(
         () => cleanupOrphanedProfileAssets(user.id, existing, payload),

@@ -68,19 +68,27 @@ export const createVoiceSession = async (
     tokenId: tokenId ?? crypto.randomUUID(),
   };
 
-  await redis.set(
+  const previousToken = await redis.get(
+    `voice:currentToken:${normalizedUserId}`,
+  );
+
+  const transaction = redis.multi();
+  if (previousToken && previousToken !== token) {
+    transaction.del(`voice:sessions:${previousToken}`);
+  }
+  transaction.set(
     `voice:sessions:${token}`,
     JSON.stringify(voiceSession),
     "EX",
     ttlSeconds,
   );
-
-  await redis.set(
+  transaction.set(
     `voice:currentToken:${normalizedUserId}`,
     token,
     "EX",
     ttlSeconds,
   );
+  await transaction.exec();
 
   return voiceSession;
 };
@@ -141,6 +149,9 @@ export const verifyVoiceToken = async (token: string) => {
 
   const session = JSON.parse(raw) as VoiceSession | null;
   if (!session) return null;
+
+  const currentToken = await redis.get(`voice:currentToken:${session.userId}`);
+  if (!currentToken || currentToken !== token) return null;
 
   return session;
 };

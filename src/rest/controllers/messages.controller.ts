@@ -50,6 +50,7 @@ import {
   s3Client,
   sanitizeContent,
   sendMessagePushNotifications,
+  setChannelLastMessageId,
   Snowflake,
   validateMessageStickers,
 } from "@mutualzz/util";
@@ -546,6 +547,10 @@ export default class MessagesController {
             }),
         },
         {
+          label: "channel:lastMessageId",
+          run: () => setChannelLastMessageId(channel.id, message.id),
+        },
+        {
           label: "readState:mentions",
           run: async () => {
             if (uniqueMentions.length > 0) {
@@ -623,6 +628,7 @@ export default class MessagesController {
           run: () => {
             const updatedChannel = {
               ...channel,
+              lastMessageId: message.id,
               lastMessage: message,
             };
 

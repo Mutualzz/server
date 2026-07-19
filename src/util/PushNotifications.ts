@@ -66,6 +66,10 @@ function shouldPushForPresence(status: string): boolean {
   return status === "idle" || status === "offline";
 }
 
+function shouldPushForCallPresence(status: string): boolean {
+  return status !== "dnd" && status !== "invisible";
+}
+
 function buildNotificationUrl(channel: NotifyChannel): string {
   const isDm =
     channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM;
@@ -442,6 +446,136 @@ export async function sendSupportReplyPush(
     body: subject,
     data: { url, ticketId },
   }));
+
+  await deliverPushMessages(messages);
+}
+
+export interface CallPushContext {
+  callId: string;
+  channelId: string;
+  channelType: ChannelType;
+  callerId: string;
+  callerName: string;
+  recipientIds: string[];
+}
+
+export async function sendCallPushNotifications(
+  ctx: CallPushContext,
+): Promise<void> {
+  const recipientIds = ctx.recipientIds.filter(
+    (id) => id && id !== ctx.callerId,
+  );
+  if (recipientIds.length === 0) return;
+
+  const tokensByUser = await getTokensForUsers(recipientIds);
+  if (tokensByUser.size === 0) return;
+
+  const pushSettingsByUser = await getPushSettingsForUsers(recipientIds);
+  const url = `${APP_SCHEME}:///me/${ctx.channelId}?callId=${ctx.callId}`;
+  const title = ctx.callerName;
+  const body = "Incoming call";
+  const messages: ExpoPushMessage[] = [];
+
+  await Promise.all(
+    recipientIds.map(async (userId) => {
+      const tokens = tokensByUser.get(userId);
+      if (!tokens?.length) return;
+
+      const pushSettings =
+        pushSettingsByUser.get(userId) ?? DEFAULT_PUSH_SETTINGS;
+      if (!shouldSendPushForSettings(pushSettings, true)) return;
+
+      const presence = await PresenceService.get(userId);
+      const status = presence?.status ?? "offline";
+      if (!shouldPushForCallPresence(status)) return;
+
+      for (const { token, platform } of tokens) {
+        const isIos = platform === "ios";
+        const sharedData = {
+          displayMode: MESSAGE_PUSH_DISPLAY_MODE,
+          url,
+          channelId: ctx.channelId,
+          conversationId: ctx.channelId,
+          callId: ctx.callId,
+          senderId: ctx.callerId,
+          senderName: ctx.callerName,
+          title,
+          body,
+          pushType: "call",
+        };
+
+        if (isIos) {
+          messages.push({
+            to: token,
+            sound: "default",
+            title,
+            body,
+            collapseId: `call:${ctx.callId}`,
+            data: sharedData,
+            categoryId: DM_REPLY_CATEGORY_ID,
+          });
+        } else {
+          messages.push({
+            to: token,
+            sound: "default",
+            title,
+            body,
+            channelId: ANDROID_MESSAGE_CHANNEL_ID,
+            collapseId: `call:${ctx.callId}`,
+            data: sharedData,
+          });
+        }
+      }
+    }),
+  );
+
+  await deliverPushMessages(messages);
+}
+
+export async function cancelCallPushNotifications(ctx: {
+  callId: string;
+  channelId: string;
+  recipientIds: string[];
+}): Promise<void> {
+  const recipientIds = ctx.recipientIds.filter(Boolean);
+  if (recipientIds.length === 0) return;
+
+  const tokensByUser = await getTokensForUsers(recipientIds);
+  if (tokensByUser.size === 0) return;
+
+  const messages: ExpoPushMessage[] = [];
+
+  for (const userId of recipientIds) {
+    const tokens = tokensByUser.get(userId);
+    if (!tokens?.length) continue;
+
+    for (const { token, platform } of tokens) {
+      const sharedData = {
+        displayMode: MESSAGE_PUSH_DISPLAY_MODE,
+        channelId: ctx.channelId,
+        conversationId: ctx.channelId,
+        callId: ctx.callId,
+        pushType: "call_end",
+      };
+
+      if (platform === "ios") {
+        messages.push({
+          to: token,
+          collapseId: `call:${ctx.callId}`,
+          data: sharedData,
+          _contentAvailable: true,
+        } as ExpoPushMessage);
+      } else {
+        messages.push({
+          to: token,
+          collapseId: `call:${ctx.callId}`,
+          channelId: ANDROID_MESSAGE_CHANNEL_ID,
+          data: sharedData,
+          priority: "normal",
+        });
+      }
+    }
+  }
 
   await deliverPushMessages(messages);
 }

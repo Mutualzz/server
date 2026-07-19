@@ -518,6 +518,20 @@
       "when": 1784245531919,
       "tag": "0073_colossal_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1784358636620,
+      "tag": "0074_channel_last_message_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1784427629231,
+      "tag": "0075_nifty_maggott",
+      "breakpoints": true
     }
   ],
   "version": "7"

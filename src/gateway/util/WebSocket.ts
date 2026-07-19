@@ -27,6 +27,7 @@ export interface WebSocket extends WS {
   userAgent?: string;
   heartbeatTimeout?: NodeJS.Timeout;
   readyTimeout?: NodeJS.Timeout;
+  isAlive?: boolean;
   sequence: number;
   events: Record<string, undefined | (() => unknown)>;
   memberEvents: Record<string, () => unknown>;

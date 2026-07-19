@@ -82,8 +82,9 @@ export default class AppIconsController {
           }
 
           outputBuffer = await image.toBuffer();
-          appIconCache.set(cacheKey, outputBuffer);
         }
+
+        appIconCache.set(cacheKey, outputBuffer);
       }
 
       const etag = crypto.createHash("md5").update(outputBuffer).digest("hex");
@@ -93,7 +94,7 @@ export default class AppIconsController {
         return;
       }
 
-      res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       res.setHeader("ETag", etag);
       res.setHeader(
         "Content-Type",

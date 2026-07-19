@@ -1,7 +1,8 @@
 import crypto from "crypto";
-import { type Snowflake } from "@mutualzz/types";
+import { ChannelType, type Snowflake } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
 import { Send } from "../util/Send";
+import { SessionRuntime } from "../util/SessionRuntime";
 import { VoiceStateRedis } from "./VoiceState.redis";
 import type { VoiceState, VoiceStateUpdateBody } from "./VoiceState.types";
 import {
@@ -16,19 +17,86 @@ import { logger } from "../Logger.ts";
 import { voiceScopeKey } from "./VoiceState.util";
 import { PresenceBucket } from "../presence/Presence.bucket.ts";
 import { and, eq } from "drizzle-orm";
-import { db, voiceModerationTable } from "@mutualzz/database";
+import {
+  channelsTable,
+  channelRecipientsTable,
+  db,
+  voiceModerationTable,
+} from "@mutualzz/database";
 import { INSTANCE_ID } from "../../util/InstanceId.ts";
+import { RESUME_WINDOW_MS } from "../util/Constants";
+import { CallService } from "../call/Call.service";
+import { CallRedis } from "../call/Call.redis";
+import {
+  MinecraftVoicePeers,
+  setMinecraftVoicePeerLocalMuted,
+} from "../../minecraft/voice/MinecraftVoicePeers.ts";
+import {
+  getMinecraftVoicePeerLocation,
+  mintMinecraftAudioToken,
+  revokeMinecraftAudioTokenForUser,
+} from "../../minecraft/voice/audioTokens.ts";
+import { findOnlinePlayer } from "../../minecraft/OnlinePlayers.ts";
+import {
+  sessionsForBridge,
+  sendToSocket,
+} from "../../minecraft/SessionRegistry.ts";
 
 export class VoiceStateService {
   static readonly instanceId: string = INSTANCE_ID;
 
   private static readonly STREAM_CHUNK_SIZE = 25;
   private static readonly STREAM_PAUSE_MS = 10;
-  private static readonly DETACHED_VOICE_LEAVE_MS = 10_000;
+  private static readonly DETACHED_VOICE_LEAVE_MS = RESUME_WINDOW_MS;
   private static readonly detachedLeaveTimers = new Map<
     string,
     NodeJS.Timeout
   >();
+
+  private static async publishVoiceKick(params: {
+    userId: Snowflake | string;
+    spaceId?: Snowflake | null;
+    roomId?: string | null;
+    sessionId?: string | null;
+    reason: string;
+  }) {
+    try {
+      const payload = JSON.stringify({
+        userId: String(params.userId),
+        spaceId: params.spaceId ?? null,
+        roomId: params.roomId ?? null,
+        sessionId: params.sessionId ?? null,
+        reason: params.reason,
+        instanceId: this.instanceId,
+      });
+      await redis.publish("voice:control:kick", payload);
+    } catch (err) {
+      logger.error("Failed to publish voice kick control event", err);
+    }
+  }
+
+  private static async publishVoiceModeration(params: {
+    userId: Snowflake | string;
+    roomId: string;
+    muted: boolean;
+    deafened: boolean;
+  }) {
+    try {
+      await redis.publish(
+        "voice:control:kick",
+        JSON.stringify({
+          action: "moderation",
+          userId: String(params.userId),
+          roomId: params.roomId,
+          muted: params.muted,
+          deafened: params.deafened,
+          instanceId: this.instanceId,
+        }),
+      );
+    } catch (err) {
+      logger.error("Failed to publish voice moderation control event", err);
+    }
+  }
 
   private static getVoiceEndpoint() {
     const endpoint = process.env.VOICE_ENDPOINT?.trim();
@@ -90,7 +158,7 @@ export class VoiceStateService {
     await Send(socket, {
       op: "Dispatch",
       t: "VoiceServerUpdate",
-      s: socket.sequence++,
+      s: SessionRuntime.nextSequence(socket.sessionId, socket),
       d: {
         roomId: params.roomId,
         spaceId: params.spaceId,
@@ -128,20 +196,39 @@ export class VoiceStateService {
           "Ignoring app voice leave while user is on Minecraft voice",
           { userId: String(userId) },
         );
+        if (previous.channelId) {
+          try {
+            await Send(socket, {
+              op: "Dispatch",
+              t: "VoiceStateUpdate",
+              s: SessionRuntime.nextSequence(socket.sessionId, socket),
+              d: previous,
+            });
+          } catch (err) {
+            logger.debug(
+              "Failed to re-sync Minecraft voice state after ignored leave",
+              err,
+            );
+          }
+          void VoiceStateService.streamStatesToSocket(
+            socket,
+            previous.spaceId ?? null,
+            previous.channelId,
+            userId,
+          );
+        }
         return;
       }
       if (previous) {
-        try {
-          const payload = JSON.stringify({
-            userId: String(userId),
-            spaceId: previous.spaceId,
-            reason: "left",
-            instanceId: this.instanceId,
-          });
-          await redis.publish("voice:control:kick", payload);
-        } catch (err) {
-          logger.error("Failed to publish voice leave control event", err);
-        }
+        await VoiceStateService.publishVoiceKick({
+          userId,
+          spaceId: previous.spaceId,
+          roomId: previous.channelId
+            ? voiceScopeKey(previous.spaceId, previous.channelId)
+            : null,
+          sessionId: previous.sessionId,
+          reason: "left",
+        });
 
         const active = await VoiceStateRedis.getActiveSession(userId);
         if (active) {
@@ -152,26 +239,39 @@ export class VoiceStateService {
           }
         }
 
-        await VoiceStateRedis.removeState({
+        const removed = await VoiceStateRedis.removeState({
           userId,
           spaceId: previous.spaceId ?? null,
           channelId: previous.channelId,
+          sessionId: null,
         });
+        if (!removed) {
+          await VoiceStateRedis.removeStateBestEffort(userId);
+        }
 
-        await emitEvent({
-          space_id: previous.spaceId ?? null,
-          event: "VoiceStateUpdate",
-          data: {
+        const leftChannelId = previous.channelId;
+        const leftSpaceId = previous.spaceId ?? null;
+
+        await VoiceStateService.emitVoiceStateUpdate(
+          leftSpaceId,
+          leftChannelId,
+          {
             userId,
-            spaceId: previous.spaceId ?? null,
+            spaceId: leftSpaceId,
             channelId: null,
           },
-        });
-
-        void VoiceStateService.emitStatesAsUpdates(
-          previous.spaceId ?? null,
-          previous.channelId!,
         );
+
+        if (leftChannelId) {
+          void VoiceStateService.emitChannelVoiceStateSync(
+            leftSpaceId,
+            leftChannelId,
+          );
+        }
+
+        if (leftSpaceId == null && leftChannelId) {
+          void CallService.onVoiceOccupancyChanged(leftChannelId);
+        }
       }
 
       return;
@@ -191,6 +291,19 @@ export class VoiceStateService {
           incomingClient: incomingClient ?? null,
         },
       );
+      try {
+        await Send(socket, {
+          op: "Dispatch",
+          t: "VoiceStateUpdate",
+          s: SessionRuntime.nextSequence(socket.sessionId, socket),
+          d: previous,
+        });
+      } catch (err) {
+        logger.debug(
+          "Failed to re-sync Minecraft voice state after ignored join",
+          err,
+        );
+      }
       void VoiceStateService.streamStatesToSocket(
         socket,
         previous.spaceId ?? spaceId,
@@ -218,6 +331,51 @@ export class VoiceStateService {
           userId,
           spaceId,
           "Missing permission to connect to this voice channel",
+          true,
+        );
+        return;
+      }
+    } else {
+      const hasDmAccess = await this.canJoinDmVoice(requestedChannelId, userId);
+      if (!hasDmAccess) {
+        logger.debug(
+          `User ${userId} attempted to join DM voice channel ${requestedChannelId} without membership`,
+        );
+        await this.rejectVoiceJoin(
+          socket,
+          userId,
+          spaceId,
+          "Missing access to this voice channel",
+          true,
+        );
+        return;
+      }
+
+      const activeCall = await CallRedis.getByChannel(requestedChannelId);
+      if (!activeCall || activeCall.status === "ended") {
+        const alreadyInDm =
+          previous?.channelId != null &&
+          previous.spaceId == null &&
+          String(previous.channelId) === String(requestedChannelId);
+        if (alreadyInDm) {
+          await this.kickMemberFromVoice(
+            null,
+            userId,
+            "call ended",
+            requestedChannelId,
+          );
+          return;
+        }
+        logger.debug(
+          `User ${userId} attempted to join DM voice without an active call`,
+          { channelId: String(requestedChannelId) },
+        );
+        await this.rejectVoiceJoin(
+          socket,
+          userId,
+          spaceId,
+          "No active call in this channel",
+          true,
         );
         return;
       }
@@ -227,8 +385,8 @@ export class VoiceStateService {
     const isMove =
       previous != null &&
       previous.channelId != null &&
-      (previous.spaceId !== spaceId ||
-        previous.channelId !== requestedChannelId);
+      (String(previous.spaceId) !== String(spaceId) ||
+        String(previous.channelId) !== String(requestedChannelId));
 
     const moderation = await this.getMemberVoiceModeration(spaceId, userId);
 
@@ -246,6 +404,14 @@ export class VoiceStateService {
     if (active && active.sessionId !== sessionId) {
       try {
         await VoiceStateRedis.clearActiveSession(userId, active.tokenId);
+
+        await VoiceStateService.publishVoiceKick({
+          userId,
+          spaceId: previous?.spaceId ?? spaceId,
+          roomId: active.roomId,
+          sessionId: active.sessionId,
+          reason: "superseded",
+        });
 
         shouldSupersede = true;
 
@@ -298,13 +464,36 @@ export class VoiceStateService {
 
     await VoiceStateRedis.upsertState(next);
 
-    await emitEvent({
-      event: "VoiceStateUpdate",
-      space_id: spaceId,
-      data: next,
-    });
+    const stateChanged =
+      !previous ||
+      String(previous.channelId ?? "") !== String(next.channelId ?? "") ||
+      String(previous.spaceId ?? "") !== String(next.spaceId ?? "") ||
+      previous.selfMute !== next.selfMute ||
+      previous.selfDeaf !== next.selfDeaf ||
+      previous.spaceMute !== next.spaceMute ||
+      previous.spaceDeaf !== next.spaceDeaf ||
+      String(previous.sessionId ?? "") !== String(next.sessionId ?? "") ||
+      previous.client !== next.client;
+
+    if (stateChanged) {
+      await VoiceStateService.emitVoiceStateUpdate(
+        spaceId,
+        requestedChannelId,
+        next,
+      );
+    }
 
     if (isFirstJoin || isMove || shouldSupersede || refreshRtcRequested) {
+      if (isMove && previous?.channelId) {
+        await VoiceStateService.publishVoiceKick({
+          userId,
+          spaceId: previous.spaceId ?? spaceId,
+          roomId: voiceScopeKey(previous.spaceId, previous.channelId),
+          sessionId: previous.sessionId,
+          reason: "Moved to another voice channel",
+        });
+      }
+
       const roomId = voiceScopeKey(spaceId, requestedChannelId);
 
       const issued = await this.issueVoiceServerUpdate(socket, {
@@ -314,7 +503,32 @@ export class VoiceStateService {
         userId,
         sessionId,
       });
-      if (!issued) return;
+      if (!issued) {
+        await VoiceStateRedis.removeState({
+          userId,
+          spaceId,
+          channelId: requestedChannelId,
+          sessionId,
+        });
+        await VoiceStateService.emitVoiceStateUpdate(spaceId, requestedChannelId, {
+          userId,
+          spaceId,
+          channelId: null,
+        });
+        if (isMove && previous?.channelId) {
+          void VoiceStateService.emitStatesAsUpdates(
+            previous.spaceId ?? null,
+            previous.channelId,
+          );
+          if (previous.spaceId == null) {
+            void CallService.onVoiceOccupancyChanged(previous.channelId);
+          }
+        }
+        if (spaceId == null) {
+          void CallService.onVoiceOccupancyChanged(requestedChannelId);
+        }
+        return;
+      }
 
       void VoiceStateService.streamStatesToSocket(
         socket,
@@ -323,10 +537,23 @@ export class VoiceStateService {
         socket.userId,
       );
 
+      if (isMove && previous?.channelId) {
+        void VoiceStateService.emitStatesAsUpdates(
+          previous.spaceId ?? null,
+          previous.channelId,
+        );
+        if (previous.spaceId == null) {
+          void CallService.onVoiceOccupancyChanged(previous.channelId);
+        }
+      }
       void VoiceStateService.emitStatesAsUpdates(spaceId, requestedChannelId);
     } else {
       await VoiceStateRedis.touchActiveSession(userId);
       await touchVoiceSessionTtls(userId);
+    }
+
+    if (spaceId == null) {
+      void CallService.onVoiceOccupancyChanged(requestedChannelId);
     }
   }
 
@@ -334,32 +561,26 @@ export class VoiceStateService {
     spaceId: Snowflake | null,
     targetUserId: Snowflake,
     reason = "Kicked from voice",
+    channelId?: Snowflake | null,
   ) {
     const existing = await VoiceStateRedis.getState(targetUserId);
     if (!existing?.channelId) return false;
-    if (existing.spaceId !== spaceId) return false;
+    if (String(existing.spaceId) !== String(spaceId)) return false;
+    if (channelId != null && String(existing.channelId) !== String(channelId))
+      return false;
 
     if (existing.client === "minecraft") {
-      const { MinecraftVoicePeers } =
-        await import("../../minecraft/voice/MinecraftVoicePeers.ts");
-      const { revokeMinecraftAudioTokenForUser } =
-        await import("../../minecraft/voice/audioTokens.ts");
       await revokeMinecraftAudioTokenForUser(String(targetUserId));
       await MinecraftVoicePeers.leave(String(targetUserId), "kicked");
     }
 
-    try {
-      const payload = JSON.stringify({
-        userId: String(targetUserId),
-        spaceId: existing.spaceId,
-        reason,
-        instanceId: this.instanceId,
-      });
-
-      await redis.publish("voice:control:kick", payload);
-    } catch (err) {
-      logger.error("Failed to publish voice kick control event", err);
-    }
+    await VoiceStateService.publishVoiceKick({
+      userId: targetUserId,
+      spaceId: existing.spaceId,
+      roomId: voiceScopeKey(existing.spaceId, existing.channelId),
+      sessionId: existing.sessionId,
+      reason,
+    });
 
     const active = await VoiceStateRedis.getActiveSession(targetUserId);
     if (active) {
@@ -370,25 +591,49 @@ export class VoiceStateService {
       }
     }
 
-    await VoiceStateRedis.removeState({
+    const removed = await VoiceStateRedis.removeState({
       userId: targetUserId,
       spaceId,
       channelId: existing.channelId,
+      sessionId: existing.sessionId,
     });
+    if (!removed) return false;
 
-    await emitEvent({
-      event: "VoiceStateUpdate",
-      space_id: spaceId,
-      data: {
-        userId: targetUserId,
-        spaceId,
-        channelId: null,
-      },
+    await VoiceStateService.emitVoiceStateUpdate(spaceId, existing.channelId, {
+      userId: targetUserId,
+      spaceId,
+      channelId: null,
     });
 
     void VoiceStateService.emitStatesAsUpdates(spaceId, existing.channelId);
 
+    if (spaceId == null) {
+      void CallService.onVoiceOccupancyChanged(existing.channelId!);
+    }
+
     return true;
+  }
+
+  static async kickChannelFromVoice(
+    spaceId: Snowflake | null,
+    channelId: Snowflake,
+    reason = "Voice channel deleted",
+  ) {
+    const states = await VoiceStateRedis.listChannelStates(spaceId, channelId);
+    if (!states.length) return 0;
+
+    let kicked = 0;
+    for (const state of states) {
+      const ok = await this.kickMemberFromVoice(
+        state.spaceId ?? null,
+        state.userId,
+        reason,
+        channelId,
+      );
+      if (ok) kicked++;
+    }
+
+    return kicked;
   }
 
   /**
@@ -429,6 +674,15 @@ export class VoiceStateService {
       };
     }
 
+    const voiceEndpoint = this.getVoiceEndpoint();
+    if (!voiceEndpoint) {
+      return {
+        ok: false,
+        code: "voice_unavailable",
+        message: "Voice server is not configured",
+      };
+    }
+
     const previous = await VoiceStateRedis.getState(userId);
     const sessionId = crypto.randomUUID();
     const moderation = await this.getMemberVoiceModeration(spaceId, userId);
@@ -457,14 +711,13 @@ export class VoiceStateService {
     if (active && active.sessionId !== sessionId) {
       try {
         await VoiceStateRedis.clearActiveSession(userId, active.tokenId);
-        const payload = JSON.stringify({
-          userId: String(userId),
+        await VoiceStateService.publishVoiceKick({
+          userId,
           spaceId: previous?.spaceId ?? spaceId,
-          // App only skips auto-rejoin for the exact token "superseded".
+          roomId: active.roomId,
+          sessionId: active.sessionId,
           reason: "superseded",
-          instanceId: this.instanceId,
         });
-        await redis.publish("voice:control:kick", payload);
       } catch (err) {
         logger.warn(
           "Failed to supersede prior voice session for Minecraft join",
@@ -475,7 +728,7 @@ export class VoiceStateService {
 
     if (
       previous?.channelId &&
-      (previous.spaceId !== spaceId ||
+      (String(previous.spaceId) !== String(spaceId) ||
         String(previous.channelId) !== String(channelId))
     ) {
       await VoiceStateRedis.removeState({
@@ -483,39 +736,29 @@ export class VoiceStateService {
         spaceId: previous.spaceId ?? null,
         channelId: previous.channelId,
       });
-      await emitEvent({
-        event: "VoiceStateUpdate",
-        space_id: previous.spaceId ?? null,
-        data: {
+      await VoiceStateService.emitVoiceStateUpdate(
+        previous.spaceId ?? null,
+        previous.channelId,
+        {
           userId,
           spaceId: previous.spaceId ?? null,
           channelId: null,
         },
-      });
+      );
       if (previous.channelId) {
         void VoiceStateService.emitStatesAsUpdates(
           previous.spaceId ?? null,
           previous.channelId,
         );
+        if (previous.spaceId == null) {
+          void CallService.onVoiceOccupancyChanged(previous.channelId);
+        }
       }
     }
 
     await VoiceStateRedis.upsertState(next);
-    await emitEvent({
-      event: "VoiceStateUpdate",
-      space_id: spaceId,
-      data: next,
-    });
+    await VoiceStateService.emitVoiceStateUpdate(spaceId, channelId, next);
     void VoiceStateService.emitStatesAsUpdates(spaceId, channelId);
-
-    const voiceEndpoint = this.getVoiceEndpoint();
-    if (!voiceEndpoint) {
-      return {
-        ok: false,
-        code: "voice_unavailable",
-        message: "Voice server is not configured",
-      };
-    }
 
     const roomId = voiceScopeKey(spaceId, channelId);
     const tokenId = crypto.randomUUID();
@@ -576,7 +819,6 @@ export class VoiceStateService {
     userId: Snowflake,
     sessionId: string,
   ) {
-    const { SessionRuntime } = await import("../util/SessionRuntime.ts");
     if (SessionRuntime.getLiveSocket(sessionId)) return;
     await this.leaveForExpiredGatewaySession(userId, sessionId);
   }
@@ -608,10 +850,6 @@ export class VoiceStateService {
   static async leaveFromMinecraft(userId: Snowflake): Promise<boolean> {
     const existing = await VoiceStateRedis.getState(userId);
     if (!existing?.channelId || !existing.spaceId) {
-      const { MinecraftVoicePeers } =
-        await import("../../minecraft/voice/MinecraftVoicePeers.ts");
-      const { revokeMinecraftAudioTokenForUser } =
-        await import("../../minecraft/voice/audioTokens.ts");
       await revokeMinecraftAudioTokenForUser(String(userId));
       await MinecraftVoicePeers.leave(String(userId));
       return false;
@@ -653,16 +891,14 @@ export class VoiceStateService {
 
     if (changed) {
       await VoiceStateRedis.upsertState(next);
-      await emitEvent({
-        event: "VoiceStateUpdate",
-        space_id: existing.spaceId ?? null,
-        data: next,
-      });
+      await VoiceStateService.emitVoiceStateUpdate(
+        existing.spaceId ?? null,
+        existing.channelId,
+        next,
+      );
     }
 
     try {
-      const { MinecraftVoicePeers } =
-        await import("../../minecraft/voice/MinecraftVoicePeers.ts");
       // Always apply — even when Redis already matched — so a stale paused
       // producer cannot leave the MC peer silently muted.
       MinecraftVoicePeers.get(String(userId))?.setLocalMuted(
@@ -675,6 +911,23 @@ export class VoiceStateService {
     return true;
   }
 
+  static async keepAliveMinecraftVoice(userId: Snowflake): Promise<boolean> {
+    const existing = await VoiceStateRedis.getState(userId);
+    if (!existing?.channelId || existing.client !== "minecraft") return false;
+
+    const touched = await VoiceStateRedis.touchMinecraftState({
+      userId,
+      spaceId: existing.spaceId ?? null,
+      channelId: existing.channelId,
+      updatedAt: Date.now(),
+    });
+    if (!touched) return false;
+
+    await VoiceStateRedis.touchActiveSession(userId);
+    await touchVoiceSessionTtls(userId);
+    return true;
+  }
+
   static async moveMemberToVoiceChannel(
     spaceId: Snowflake,
     targetUserId: Snowflake,
@@ -682,7 +935,7 @@ export class VoiceStateService {
   ) {
     const existing = await VoiceStateRedis.getState(targetUserId);
     if (!existing?.channelId) return false;
-    if (existing.spaceId !== spaceId) return false;
+    if (String(existing.spaceId) !== String(spaceId)) return false;
     if (String(existing.channelId) === String(channelId)) return true;
 
     const hasConnect = await canVoiceConnect({
@@ -692,7 +945,23 @@ export class VoiceStateService {
     });
     if (!hasConnect) return false;
 
+    const voiceEndpoint = this.getVoiceEndpoint();
+    if (!voiceEndpoint) return false;
+
     const oldChannelId = existing.channelId;
+    const isMinecraft = existing.client === "minecraft";
+
+    let minecraftUuid: string | null = null;
+    if (isMinecraft) {
+      minecraftUuid =
+        MinecraftVoicePeers.get(String(targetUserId))?.minecraftUuid ?? null;
+      if (!minecraftUuid) {
+        const location = await getMinecraftVoicePeerLocation(
+          String(targetUserId),
+        );
+        minecraftUuid = location?.minecraftUuid ?? null;
+      }
+    }
 
     const moderation = await this.getMemberVoiceModeration(
       spaceId,
@@ -721,29 +990,18 @@ export class VoiceStateService {
 
     await VoiceStateRedis.upsertState(next);
 
-    await emitEvent({
-      event: "VoiceStateUpdate",
-      space_id: spaceId,
-      data: next,
-    });
+    await VoiceStateService.emitVoiceStateUpdate(spaceId, channelId, next);
 
     const roomId = voiceScopeKey(spaceId, channelId);
-    const voiceEndpoint = this.getVoiceEndpoint();
-    if (!voiceEndpoint) return false;
 
     const oldRoomId = voiceScopeKey(spaceId, oldChannelId);
-    try {
-      const payload = JSON.stringify({
-        userId: String(targetUserId),
-        spaceId,
-        roomId: oldRoomId,
-        reason: "Moved to another voice channel",
-        instanceId: this.instanceId,
-      });
-      await redis.publish("voice:control:kick", payload);
-    } catch (err) {
-      logger.error("Failed to publish voice move kick control event", err);
-    }
+    await VoiceStateService.publishVoiceKick({
+      userId: targetUserId,
+      spaceId,
+      roomId: oldRoomId,
+      sessionId: existing.sessionId,
+      reason: "Moved to another voice channel",
+    });
 
     const tokenId = crypto.randomUUID();
     const voiceToken = generateVoiceToken(
@@ -770,18 +1028,97 @@ export class VoiceStateService {
       tokenId,
     );
 
-    await emitEvent({
-      event: "VoiceServerUpdate",
-      user_id: targetUserId,
-      data: {
-        roomId,
-        spaceId,
-        channelId,
-        voiceEndpoint,
-        voiceToken,
-        sessionId,
-      },
-    });
+    if (isMinecraft) {
+      if (!minecraftUuid) {
+        logger.warn(
+          "Minecraft voice move aborted: peer uuid unavailable",
+          { userId: String(targetUserId) },
+        );
+        await this.kickMemberFromVoice(
+          spaceId,
+          targetUserId,
+          "Minecraft voice peer unavailable",
+        );
+        return false;
+      }
+
+      try {
+        await MinecraftVoicePeers.join({
+          userId: String(targetUserId),
+          minecraftUuid,
+          voiceEndpoint,
+          voiceToken,
+          sessionId,
+          roomId,
+          spaceId: String(spaceId),
+          channelId: String(channelId),
+        });
+
+        MinecraftVoicePeers.get(String(targetUserId))?.setLocalMuted(
+          next.spaceMute || next.spaceDeaf,
+        );
+
+        const audio = await mintMinecraftAudioToken({
+          userId: String(targetUserId),
+          sessionId,
+          minecraftUuid,
+        });
+
+        const found = findOnlinePlayer(minecraftUuid);
+        const channel = await db.query.channelsTable.findFirst({
+          where: eq(channelsTable.id, BigInt(channelId)),
+        });
+        if (found) {
+          for (const minecraftSession of sessionsForBridge(found.bridgeId)) {
+            if (minecraftSession.serverId !== found.player.serverId) continue;
+            sendToSocket(minecraftSession.socket, {
+              op: "dispatch",
+              t: "VOICE_RESULT",
+              d: {
+                action: "join",
+                ok: true,
+                uuid: minecraftUuid,
+                message: channel?.name
+                  ? `Moved to #${channel.name}`
+                  : "Moved to Mutualzz voice",
+                userId: String(targetUserId),
+                spaceId: String(spaceId),
+                channelId: String(channelId),
+                channelName: channel?.name ?? "",
+                room: String(channelId),
+                roomId,
+                audioWsUrl: audio.audioWsUrl,
+                audioToken: audio.token,
+              },
+            });
+          }
+        }
+      } catch (err) {
+        logger.error(
+          "Failed to rejoin Minecraft voice peer after moderator move",
+          { userId: String(targetUserId), err },
+        );
+        await this.kickMemberFromVoice(
+          spaceId,
+          targetUserId,
+          "Failed to move Minecraft voice session",
+        );
+        return false;
+      }
+    } else {
+      await emitEvent({
+        event: "VoiceServerUpdate",
+        user_id: targetUserId,
+        data: {
+          roomId,
+          spaceId,
+          channelId,
+          voiceEndpoint,
+          voiceToken,
+          sessionId,
+        },
+      });
+    }
 
     void VoiceStateService.emitStatesAsUpdates(spaceId, oldChannelId);
     void VoiceStateService.emitStatesAsUpdates(spaceId, channelId);
@@ -832,6 +1169,19 @@ export class VoiceStateService {
 
     const isDmVoice = existing.spaceId == null;
 
+    if (isDmVoice) {
+      const activeCall = await CallRedis.getByChannel(existing.channelId);
+      if (!activeCall || activeCall.status === "ended") {
+        await VoiceStateService.kickMemberFromVoice(
+          null,
+          userId,
+          "call ended",
+          existing.channelId,
+        );
+        return;
+      }
+    }
+
     const hasSpeak = isDmVoice
       ? true
       : await canVoiceSpeak({
@@ -851,6 +1201,13 @@ export class VoiceStateService {
       try {
         await VoiceStateRedis.clearActiveSession(userId, active.tokenId);
         existing.joinedAt = Date.now();
+        await VoiceStateService.publishVoiceKick({
+          userId,
+          spaceId: existing.spaceId,
+          roomId: active.roomId,
+          sessionId: active.sessionId,
+          reason: "superseded",
+        });
       } catch (err) {
         logger.warn("Failed to clear active voice session while superseding", {
           userId,
@@ -861,6 +1218,12 @@ export class VoiceStateService {
     }
 
     await VoiceStateRedis.upsertState(existing);
+
+    await VoiceStateService.emitVoiceStateUpdate(
+      existing.spaceId,
+      existing.channelId,
+      existing,
+    );
 
     const roomId = voiceScopeKey(existing.spaceId, existing.channelId);
     const issued = await this.issueVoiceServerUpdate(socket, {
@@ -887,10 +1250,17 @@ export class VoiceStateService {
   ) {
     const existing = await VoiceStateRedis.getState(targetUserId);
     if (!existing?.channelId) return;
-    if (existing.spaceId !== spaceId) return;
+    if (String(existing.spaceId) !== String(spaceId)) return;
 
-    if (patch.spaceMute != null) existing.spaceMute = patch.spaceMute;
-    if (patch.spaceDeaf != null) existing.spaceDeaf = patch.spaceDeaf;
+    const moderation = await this.getMemberVoiceModeration(spaceId, targetUserId);
+    const hasSpeak = await canVoiceSpeak({
+      spaceId,
+      channelId: existing.channelId,
+      userId: targetUserId,
+    });
+
+    existing.spaceMute = moderation.spaceMute || !hasSpeak;
+    existing.spaceDeaf = moderation.spaceDeaf;
 
     existing.updatedAt = Date.now();
     if (!existing.joinedAt) {
@@ -898,62 +1268,102 @@ export class VoiceStateService {
     }
     await VoiceStateRedis.upsertState(existing);
 
-    try {
-      const current = await db.query.voiceModerationTable.findFirst({
-        where: and(
-          eq(voiceModerationTable.spaceId, BigInt(spaceId)),
-          eq(voiceModerationTable.userId, BigInt(targetUserId)),
-        ),
-      });
+    await VoiceStateService.publishVoiceModeration({
+      userId: targetUserId,
+      roomId: voiceScopeKey(existing.spaceId, existing.channelId),
+      muted: existing.spaceMute || existing.spaceDeaf,
+      deafened: existing.spaceDeaf,
+    });
 
-      if (current) {
-        await db
-          .update(voiceModerationTable)
-          .set({
-            spaceMute: patch.spaceMute ?? current.spaceMute,
-            spaceDeaf: patch.spaceDeaf ?? current.spaceDeaf,
-          })
-          .where(
-            and(
-              eq(voiceModerationTable.spaceId, BigInt(spaceId)),
-              eq(voiceModerationTable.userId, BigInt(targetUserId)),
-            ),
-          );
-      } else if (patch.spaceMute || patch.spaceDeaf) {
-        await db.insert(voiceModerationTable).values({
-          spaceId: BigInt(spaceId),
-          userId: BigInt(targetUserId),
-          spaceMute: patch.spaceMute ?? false,
-          spaceDeaf: patch.spaceDeaf ?? false,
-        });
-      }
-    } catch (err) {
-      logger.error("Failed to persist voice moderation", err);
+    if (existing.client === "minecraft") {
+      await setMinecraftVoicePeerLocalMuted(
+        String(targetUserId),
+        existing.spaceMute || existing.spaceDeaf,
+      );
     }
 
-    await emitEvent({
-      event: "VoiceStateUpdate",
-      space_id: spaceId,
-      data: existing,
-    });
+    await VoiceStateService.emitVoiceStateUpdate(spaceId, existing.channelId, existing);
   }
 
   private static async rejectVoiceJoin(
     socket: WebSocket,
     userId: Snowflake,
     spaceId: Snowflake | null,
-    _reason: string,
+    reason: string,
+    preserveExisting = false,
   ) {
+    const existing = await VoiceStateRedis.getState(userId);
+    if (existing?.channelId) {
+      if (preserveExisting) {
+        await Send(socket, {
+          op: "Dispatch",
+          t: "VoiceStateUpdate",
+          s: SessionRuntime.nextSequence(socket.sessionId, socket),
+          d: existing,
+        });
+        void VoiceStateService.streamStatesToSocket(
+          socket,
+          existing.spaceId ?? null,
+          existing.channelId,
+          userId,
+        );
+        const ownsExistingSession =
+          !!socket.sessionId &&
+          String(existing.sessionId) === String(socket.sessionId);
+        if (ownsExistingSession && this.getVoiceEndpoint()) {
+          await this.issueVoiceServerUpdate(socket, {
+            roomId: voiceScopeKey(existing.spaceId, existing.channelId),
+            spaceId: existing.spaceId ?? null,
+            channelId: existing.channelId,
+            userId,
+            sessionId: socket.sessionId!,
+          });
+        }
+        return;
+      }
+      await this.kickMemberFromVoice(
+        existing.spaceId,
+        userId,
+        reason || "Unable to join voice channel",
+      );
+      return;
+    }
+
     await Send(socket, {
       op: "Dispatch",
       t: "VoiceStateUpdate",
-      s: socket.sequence++,
+      s: SessionRuntime.nextSequence(socket.sessionId, socket),
       d: {
         userId,
         spaceId,
         channelId: null,
       },
     });
+  }
+
+  private static async canJoinDmVoice(
+    channelId: Snowflake,
+    userId: Snowflake,
+  ) {
+    const channel = await db.query.channelsTable.findFirst({
+      where: eq(channelsTable.id, BigInt(channelId)),
+    });
+    if (
+      !channel ||
+      (channel.type !== ChannelType.DM && channel.type !== ChannelType.GroupDM)
+    ) {
+      return false;
+    }
+
+    const recipient = await db.query.channelRecipientsTable.findFirst({
+      where: and(
+        eq(channelRecipientsTable.channelId, BigInt(channelId)),
+        eq(channelRecipientsTable.userId, BigInt(userId)),
+        eq(channelRecipientsTable.closed, false),
+      ),
+    });
+
+    return !!recipient;
   }
 
   private static async getMemberVoiceModeration(
@@ -1010,7 +1420,7 @@ export class VoiceStateService {
             await Send(socket, {
               op: "Dispatch",
               t: "VoiceStateUpdate",
-              s: socket.sequence++,
+              s: SessionRuntime.nextSequence(socket.sessionId, socket),
               d: state,
             });
           } catch (sendErr) {
@@ -1034,6 +1444,60 @@ export class VoiceStateService {
     }
   }
 
+  static async notifyMemberLeftChannel(
+    spaceId: Snowflake | null,
+    channelId: Snowflake,
+    userId: Snowflake,
+  ) {
+    await this.emitVoiceStateUpdate(spaceId, channelId, {
+      userId,
+      spaceId,
+      channelId: null,
+    });
+    void this.emitStatesAsUpdates(spaceId, channelId);
+  }
+
+  private static async emitVoiceStateUpdate(
+    spaceId: Snowflake | null | undefined,
+    routeChannelId: Snowflake | null | undefined,
+    data: unknown,
+  ) {
+    await emitEvent({
+      event: "VoiceStateUpdate",
+      space_id: spaceId ?? null,
+      channel_id: spaceId == null ? (routeChannelId ?? null) : null,
+      data,
+    });
+  }
+
+  static async emitChannelVoiceStateSync(
+    spaceId: Snowflake | null,
+    channelId: Snowflake,
+  ) {
+    try {
+      const states = await VoiceStateRedis.listChannelStates(
+        spaceId,
+        channelId,
+      );
+      await emitEvent({
+        event: "VoiceStateSync",
+        space_id: spaceId,
+        channel_id: spaceId == null ? channelId : null,
+        data: {
+          channelId: String(channelId),
+          spaceId: spaceId == null ? null : String(spaceId),
+          states,
+        },
+      });
+    } catch (err) {
+      logger.error("Failed to emit VoiceStateSync", {
+        spaceId,
+        channelId,
+        err,
+      });
+    }
+  }
+
   private static async emitStatesAsUpdates(
     spaceId: Snowflake | null,
     channelId: Snowflake,
@@ -1043,15 +1507,16 @@ export class VoiceStateService {
         spaceId,
         channelId,
       );
-      if (states.length === 0) return;
+      if (states.length === 0) {
+        if (spaceId == null) {
+          await VoiceStateService.emitChannelVoiceStateSync(spaceId, channelId);
+        }
+        return;
+      }
 
       for (const st of states) {
         try {
-          await emitEvent({
-            event: "VoiceStateUpdate",
-            space_id: spaceId,
-            data: st,
-          });
+          await VoiceStateService.emitVoiceStateUpdate(spaceId, channelId, st);
         } catch (emitErr) {
           logger.debug("Failed to emit per-member VoiceStateUpdate", {
             err: emitErr,
