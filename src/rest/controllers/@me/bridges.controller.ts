@@ -698,6 +698,17 @@ export class MeBridgesController {
         channelId,
       );
 
+      const canAccess = await DiscordBridgePeer.canAccessChannel(
+        guildId,
+        channelId,
+      );
+      if (!canAccess) {
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "Discord bot cannot access that channel",
+        );
+      }
+
       if (existing) {
         const [updated] = await db
           .update(bridgeDiscordBindingsTable)

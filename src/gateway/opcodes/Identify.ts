@@ -28,7 +28,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   const rawSession = await redis.get(`rest:sessions:${identify.token}`);
   if (!rawSession) {
     logger.error(
-      `Invalid token for session ${this.sessionId}: ${identify.token}`,
+      `Invalid token for session ${this.sessionId}`,
     );
     await Send(this, {
       op: "InvalidSession",

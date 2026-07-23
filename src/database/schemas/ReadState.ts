@@ -28,6 +28,8 @@ export const readStatesTable = pgTable(
         mentionCount: integer().notNull().default(0),
         lastPinTimestamp: timestamp({ mode: "date", withTimezone: true }),
         badgeCount: integer().notNull().default(0),
+        notificationLevel: smallint(),
+        mutedUntil: timestamp({ mode: "date", withTimezone: true }),
         flags: bigint({ mode: "bigint" })
             .notNull()
             .default(sql`0`),

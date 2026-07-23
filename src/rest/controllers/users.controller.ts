@@ -3,6 +3,7 @@ import { assertUserVisible, resolveUserIdentifier } from "@mutualzz/util";
 import { listRecentActivities } from "@mutualzz/util/ActivityHistory.ts";
 import { validateUserGet } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
+import { assertCanViewUserProfile, canViewerDmTarget } from "@mutualzz/util/privacy.ts";
 
 export default class UsersController {
   static async get(req: Request, res: Response, next: NextFunction) {
@@ -14,10 +15,22 @@ export default class UsersController {
       if (!user)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      if (req.user?.id && req.user.id !== user.id)
-        await assertUserVisible(req.user.id, user.id);
+      const viewerId = req.user?.id;
 
-      return res.status(HttpStatusCode.Success).json(user);
+      if (viewerId && String(viewerId) !== String(user.id)) {
+        await assertUserVisible(viewerId, user.id);
+      }
+
+      await assertCanViewUserProfile(viewerId, user.id);
+
+      const viewerCanDm = viewerId
+        ? await canViewerDmTarget(viewerId, user.id)
+        : undefined;
+
+      return res.status(HttpStatusCode.Success).json({
+        ...user,
+        ...(viewerCanDm === undefined ? {} : { viewerCanDm }),
+      });
     } catch (err) {
       next(err);
     }
@@ -42,9 +55,13 @@ export default class UsersController {
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
       }
 
-      if (req.user?.id && req.user.id !== target.id) {
-        await assertUserVisible(req.user.id, target.id);
+      const viewerId = req.user?.id;
+
+      if (viewerId && String(viewerId) !== String(target.id)) {
+        await assertUserVisible(viewerId, target.id);
       }
+
+      await assertCanViewUserProfile(viewerId, target.id);
 
       res.json({
         activities: await listRecentActivities(target.id, req.user?.id),

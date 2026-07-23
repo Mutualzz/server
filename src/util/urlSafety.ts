@@ -1,3 +1,5 @@
+import dns from "node:dns/promises";
+
 const BLOCKED_HOSTNAMES = new Set([
   "localhost",
   "metadata.google.internal",
@@ -24,6 +26,10 @@ const isPrivateIPv6 = (host: string) => {
   if (h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
   if (h.startsWith("fc") || h.startsWith("fd")) return true;
   if (h.startsWith("fe80")) return true;
+  if (h.startsWith("::ffff:")) {
+    const mapped = h.slice("::ffff:".length);
+    if (isPrivateIPv4(mapped)) return true;
+  }
   return false;
 };
 
@@ -46,6 +52,31 @@ export const isSafeFetchUrl = (urlString: string) => {
   }
 
   if (isPrivateIPv4(hostname) || isPrivateIPv6(hostname)) return false;
+
+  return true;
+};
+
+export const isSafeFetchUrlAsync = async (urlString: string) => {
+  if (!isSafeFetchUrl(urlString)) return false;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(urlString);
+  } catch {
+    return false;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (isPrivateIPv4(hostname) || isPrivateIPv6(hostname)) return false;
+
+  try {
+    const addresses = await dns.lookup(hostname, { all: true });
+    for (const { address } of addresses) {
+      if (isPrivateIPv4(address) || isPrivateIPv6(address)) return false;
+    }
+  } catch {
+    return false;
+  }
 
   return true;
 };

@@ -91,6 +91,24 @@ export class DiscordBridgePeer {
     }
   }
 
+  static async canAccessChannel(
+    guildId: string,
+    channelId: string,
+  ): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      const channel =
+        this.client.channels.cache.get(channelId) ??
+        (await this.client.channels.fetch(channelId));
+      if (!channel) return false;
+      if ("guildId" in channel && channel.guildId && channel.guildId !== guildId)
+        return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   static getInviteUrl(): string | null {
     const clientId =
       process.env.DISCORD_CLIENT_ID?.trim() ||

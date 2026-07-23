@@ -46,6 +46,10 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
+import {
+  getSpaceNotificationSettingsForUser,
+  serializeReadState,
+} from "@mutualzz/util/notificationSettings.ts";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
 import { VoiceStateRedis } from "@mutualzz/gateway/voice/VoiceState.redis.ts";
 
@@ -274,6 +278,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     presenceSchedule,
     customStatusSchedule,
     minecraftLinkRow,
+    spaceNotificationSettings,
   ] = await Promise.all([
     // Get all personal themes owned by the user (exclude space-owned)
     execNormalizedMany<APITheme>(
@@ -393,20 +398,20 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     ),
     getReadStates(user.id),
 
-    // Get user profile
     execNormalized<APIUserProfile>(
       db.query.userProfilesTable.findFirst({
         where: eq(userProfilesTable.userId, BigInt(user.id)),
       }),
     ),
 
-    // Get presence schedule and custom status schedule
     PresenceService.getScheduleForUser(user.id),
     PresenceService.getCustomStatusScheduleForUser(user.id),
 
     db.query.minecraftLinksTable.findFirst({
       where: eq(minecraftLinksTable.userId, BigInt(user.id)),
     }),
+
+    getSpaceNotificationSettingsForUser(user.id),
   ]);
 
   const presenceUserIds = new Set<string>();
@@ -506,6 +511,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     expressions,
     settings,
     readStates,
+    spaceNotificationSettings,
     mergedPresences,
     profile,
     presenceSchedule,
@@ -534,13 +540,7 @@ export async function getReadStates(userId: string): Promise<APIReadState[]> {
     .from(readStatesTable)
     .where(eq(readStatesTable.userId, BigInt(userId)));
 
-  return rows.map((r) => ({
-    ...r,
-    id: r.channelId.toString(),
-    lastMessageId: r.lastMessageId?.toString() ?? null,
-    notificationsCursor: r.notificationsCursor?.toString() ?? null,
-    lastAckedId: r.lastAckedId?.toString() ?? null,
-  })) satisfies APIReadState[];
+  return rows.map((r) => serializeReadState(r));
 }
 
 export async function incrementMentionCounts(

@@ -20,7 +20,7 @@ import { redis } from "./Redis";
 import MurmurHash from "imurmurhash";
 import { getExpression, getMember } from "@mutualzz/util/Helpers.ts";
 import { klipyFetch } from "@mutualzz/util/Klipy.ts";
-import { isSafeFetchUrl } from "./urlSafety";
+import { isSafeFetchUrl, isSafeFetchUrlAsync } from "./urlSafety";
 
 type Services =
   | "spotify"
@@ -373,7 +373,14 @@ export const fetchImgurMetadata = async (
 ): Promise<APIMessageEmbed | null> => {
   try {
     if (/i\.imgur\.com/.test(url)) {
-      const res = await fetch(url, { method: "HEAD" });
+      if (!(await isSafeFetchUrlAsync(url))) return null;
+      const res = await fetch(url, { method: "HEAD", redirect: "follow" });
+      if (
+        res.url &&
+        res.url !== url &&
+        !(await isSafeFetchUrlAsync(res.url))
+      )
+        return null;
       const ct = res.headers.get("content-type") ?? "";
       if (!ct.includes("image/gif") && !ct.includes("video/mp4")) return null;
 
@@ -448,7 +455,14 @@ export const fetchDirectGifMetadata = async (
   spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
   try {
-    const res = await fetch(url, { method: "HEAD" });
+    if (!(await isSafeFetchUrlAsync(url))) return null;
+    const res = await fetch(url, { method: "HEAD", redirect: "follow" });
+    if (
+      res.url &&
+      res.url !== url &&
+      !(await isSafeFetchUrlAsync(res.url))
+    )
+      return null;
     const ct = res.headers.get("content-type") ?? "";
     if (!ct.includes("image/gif")) return null;
 
@@ -533,7 +547,14 @@ export const fetchYoutubeMetadata = async (
   const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`;
 
   try {
-    const res = await fetch(apiUrl);
+    if (!(await isSafeFetchUrlAsync(apiUrl))) return null;
+    const res = await fetch(apiUrl, { redirect: "follow" });
+    if (
+      res.url &&
+      res.url !== apiUrl &&
+      !(await isSafeFetchUrlAsync(res.url))
+    )
+      return null;
     if (!res.ok) return null;
     const data = await res.json();
     const video = data.items?.[0];
@@ -711,7 +732,7 @@ export const buildEmbed = async (
   url: string,
   spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
-  if (!isSafeFetchUrl(url)) return null;
+  if (!(await isSafeFetchUrlAsync(url))) return null;
 
   const service = detectService(url);
   let embed: APIMessageEmbed;

@@ -644,6 +644,10 @@ export default class MembersController {
           label: "cache:invalidate:spaceMembers",
           run: () => invalidateCache("spaceMembers", space.id),
         },
+        {
+          label: "cache:invalidate:memberRoles",
+          run: () => invalidateCache("memberRoles", spaceId),
+        },
       ]);
     } catch (err) {
       next(err);
@@ -703,6 +707,17 @@ export default class MembersController {
           actorTopPos,
           role.position,
         );
+
+        for (const targetUserId of userIds) {
+          const targetRoles = await getMemberRoles(space.id, targetUserId);
+          const targetTop = topPos(targetRoles);
+
+          if (actorTopPos <= targetTop)
+            throw new HttpException(
+              HttpStatusCode.Forbidden,
+              "Role hierarchy prevents modifying this member",
+            );
+        }
       }
 
       const members = await db
@@ -872,6 +887,10 @@ export default class MembersController {
         {
           label: "cache:invalidate:spaceMembers",
           run: () => invalidateCache("spaceMembers", space.id),
+        },
+        {
+          label: "cache:invalidate:memberRoles",
+          run: () => invalidateCache("memberRoles", spaceId),
         },
       ]);
     } catch (err) {
@@ -1284,6 +1303,17 @@ export default class MembersController {
 
       const { spaceMute, spaceDeaf, disconnect, channelId } =
         validateMemberVoiceModerationBody.parse(req.body);
+
+      if (
+        spaceMute == null &&
+        spaceDeaf == null &&
+        !disconnect &&
+        !channelId
+      )
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "No voice moderation action specified",
+        );
 
       if (channelId) {
         const { permissions } = await requireSpacePermissions({

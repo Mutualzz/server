@@ -72,7 +72,7 @@ export async function assertUserVisible(
   viewerId: string,
   targetUserId: string,
 ): Promise<void> {
-  if (viewerId === targetUserId) return;
+  if (String(viewerId) === String(targetUserId)) return;
 
   if (await isBlockedBetween(viewerId, targetUserId)) {
     throw new HttpException(HttpStatusCode.NotFound, "User not found");

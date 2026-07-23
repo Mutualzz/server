@@ -139,6 +139,11 @@ router.post(
   MessagesController.ack,
 );
 router.post("/ack-bulk", createLimiter(20_000, 10), MessagesController.ackBulk);
+router.patch(
+  "/:channelId/read-state",
+  createLimiter(20_000, 20),
+  MessagesController.patchReadState,
+);
 
 // Typing
 router.post(

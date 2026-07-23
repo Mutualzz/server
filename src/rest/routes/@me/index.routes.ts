@@ -4,6 +4,7 @@ import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
+router.get("/", createLimiter(60_000, 60), MeController.getSelf);
 router.patch(
   "/",
   createLimiter(60_000, 5),
@@ -65,6 +66,21 @@ router.delete(
   "/activity-history",
   createLimiter(60_000, 10),
   MeController.clearActivityHistory,
+);
+router.get(
+  "/sessions",
+  createLimiter(60_000, 30),
+  MeController.getSessions,
+);
+router.delete(
+  "/sessions",
+  createLimiter(60_000, 5),
+  MeController.revokeOtherSessions,
+);
+router.delete(
+  "/sessions/:sessionId",
+  createLimiter(60_000, 10),
+  MeController.revokeSession,
 );
 router.post(
   "/delete",

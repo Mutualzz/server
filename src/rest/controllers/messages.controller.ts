@@ -11,6 +11,7 @@ import {
   postsTable,
   relationshipsTable,
   spaceMembersTable,
+  spaceMemberRolesTable,
 } from "@mutualzz/database";
 import {
   type APIAttachment,
@@ -25,6 +26,8 @@ import {
   MessageType,
   ReadStateType,
   RelationshipType,
+  NotificationLevel,
+  shouldIncrementMentionCount,
 } from "@mutualzz/types";
 import {
   attachHashtagsToPosts,
@@ -33,7 +36,9 @@ import {
   emitEvent,
   execNormalized,
   execNormalizedMany,
+  filterByBlockedAuthors,
   fireAndForgetAll,
+  getBlockedUserIds,
   getChannel,
   getChannels,
   getMember,
@@ -53,7 +58,11 @@ import {
   setChannelLastMessageId,
   Snowflake,
   validateMessageStickers,
+  serializeReadState,
+  computeMutedUntilDuration,
+  resolveChannelNotificationForUser,
 } from "@mutualzz/util";
+import { patchChannelNotificationSettingsSchema } from "@mutualzz/validators";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import {
@@ -67,11 +76,14 @@ import {
 import { and, asc, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import {
-  type BitField,
+  BitField,
   messageFlags,
+  readStateFlags,
   type PermissionFlags,
 } from "@mutualzz/bitfield";
 import { createSystemMessage } from "@mutualzz/util/systemUser";
+import { isBlockedBetween } from "@mutualzz/util/blocks.ts";
+import { assertCanDm } from "@mutualzz/util/privacy.ts";
 import {
   contentHasInviteLinks,
   resolveMessageCodedLinks,
@@ -115,7 +127,20 @@ export default class MessagesController {
         expressionIds = [],
         sharedPostId,
         codedLinks = [],
+        attachmentSpoilers: validatedAttachmentSpoilers = [],
       } = validateMessageBodyPut.parse(req.body);
+
+      const rawSpoilers =
+        validatedAttachmentSpoilers.length > 0
+          ? validatedAttachmentSpoilers
+          : (() => {
+              const body = req.body as Record<string, unknown>;
+              const raw =
+                body["attachmentSpoilers[]"] ?? body.attachmentSpoilers;
+              if (raw == null) return [];
+              const arr = Array.isArray(raw) ? raw : [raw];
+              return arr.map((v) => v === true || v === "true");
+            })();
 
       const uploadedFiles: Express.Multer.File[] = Array.isArray(req.files)
         ? req.files
@@ -261,7 +286,10 @@ export default class MessagesController {
         ? await sanitizeContent(content, channel, user.id, canUseExternalEmojis)
         : null;
 
-      if (channel.type === ChannelType.DM) {
+      if (
+        channel.type === ChannelType.DM ||
+        channel.type === ChannelType.GroupDM
+      ) {
         const recipientRows = await execNormalizedMany(
           db.query.channelRecipientsTable.findMany({
             where: eq(channelRecipientsTable.channelId, BigInt(channel.id)),
@@ -272,54 +300,34 @@ export default class MessagesController {
           .map((r) => r.userId)
           .filter((id: string) => id !== user.id);
 
-        const enforceBlockCheck = otherRecipients.length === 1;
-
-        if (enforceBlockCheck) {
-          for (const otherId of otherRecipients) {
-            const theirBlockOfMe = await execNormalized<APIRelationship>(
-              db.query.relationshipsTable.findFirst({
-                where: and(
-                  eq(relationshipsTable.userId, BigInt(otherId)),
-                  eq(relationshipsTable.otherUserId, BigInt(user.id)),
-                  eq(relationshipsTable.type, RelationshipType.Blocked),
-                ),
-              }),
+        for (const otherId of otherRecipients) {
+          if (await isBlockedBetween(user.id, otherId)) {
+            const sysMsg = await createSystemMessage(
+              channelId,
+              "You cannot message this person",
+              messageFlags.Ephemeral,
             );
 
-            const myBlockOfThem = await execNormalized<APIRelationship>(
-              db.query.relationshipsTable.findFirst({
-                where: and(
-                  eq(relationshipsTable.userId, BigInt(user.id)),
-                  eq(relationshipsTable.otherUserId, BigInt(otherId)),
-                  eq(relationshipsTable.type, RelationshipType.Blocked),
-                ),
-              }),
+            fireAndForgetAll([
+              {
+                label: `event:MessageCreate:ephemeral:${user.id}`,
+                run: () =>
+                  emitEvent({
+                    event: "MessageCreate",
+                    user_id: user.id,
+                    data: sysMsg,
+                  }),
+              },
+            ]);
+
+            throw new HttpException(
+              HttpStatusCode.Forbidden,
+              "You cannot message this person",
             );
+          }
 
-            if (theirBlockOfMe || myBlockOfThem) {
-              const sysMsg = await createSystemMessage(
-                channelId,
-                "You cannot message this person",
-                messageFlags.Ephemeral,
-              );
-
-              fireAndForgetAll([
-                {
-                  label: `event:MessageCreate:ephemeral:${user.id}`,
-                  run: () =>
-                    emitEvent({
-                      event: "MessageCreate",
-                      user_id: user.id,
-                      data: sysMsg,
-                    }),
-                },
-              ]);
-
-              throw new HttpException(
-                HttpStatusCode.Forbidden,
-                "You cannot message this person",
-              );
-            }
+          if (channel.type === ChannelType.DM && otherRecipients.length === 1) {
+            await assertCanDm(otherId, user.id);
           }
         }
       }
@@ -327,15 +335,18 @@ export default class MessagesController {
       const messageId = BigInt(Snowflake.generate());
 
       const allUploaded: APIAttachment[] = await Promise.all(
-        uploadedFiles.map(async (file) => {
+        uploadedFiles.map(async (file, index) => {
+          const spoiler = rawSpoilers[index] ?? false;
           const attachmentId = Snowflake.generate();
           const originalName =
             typeof file.originalname === "string"
               ? file.originalname.trim()
               : "";
           const fallbackExt =
-            file.mimetype.split("/")[1]?.split(";")[0]?.replace("jpeg", "jpg") ||
-            "bin";
+            file.mimetype
+              .split("/")[1]
+              ?.split(";")[0]
+              ?.replace("jpeg", "jpg") || "bin";
           const safeName = (
             originalName || `attachment.${fallbackExt}`
           ).replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -371,6 +382,7 @@ export default class MessagesController {
             url: `${cdnBase}/attachments/${messageId}/${attachmentId}_${safeName}`,
             width,
             height,
+            spoiler,
           } satisfies APIAttachment;
         }),
       );
@@ -387,6 +399,7 @@ export default class MessagesController {
           media: gif.url,
           image: gif.url,
           title: gif.filename,
+          spoiler: gif.spoiler,
         }));
 
       const { codedLinks: hydratedCodedLinks, content: messageContent } =
@@ -498,7 +511,10 @@ export default class MessagesController {
       if (repliedToId)
         repliedTo = await execNormalized<APIMessage>(
           db.query.messagesTable.findFirst({
-            where: eq(messagesTable.id, BigInt(repliedToId)),
+            where: and(
+              eq(messagesTable.id, BigInt(repliedToId)),
+              eq(messagesTable.channelId, BigInt(channelId)),
+            ),
           }),
         );
 
@@ -577,11 +593,27 @@ export default class MessagesController {
                   .where(
                     eq(spaceMembersTable.spaceId, BigInt(channel.spaceId)),
                   );
-                membersToNotify.push(
-                  ...allMembers
-                    .map((m) => m.userId.toString())
-                    .filter((id) => id !== user.id),
-                );
+
+                const viewableMemberIds = (
+                  await Promise.all(
+                    allMembers.map(async (m) => {
+                      const id = m.userId.toString();
+                      if (id === user.id) return null;
+                      try {
+                        await requireChannelPermissions({
+                          channelId: channel.id,
+                          userId: id,
+                          needed: ["ViewChannel"],
+                        });
+                        return id;
+                      } catch {
+                        return null;
+                      }
+                    }),
+                  )
+                ).filter((id): id is string => id != null);
+
+                membersToNotify.push(...viewableMemberIds);
               }
 
               if (hereMentions.length > 0 && channel.spaceId) {
@@ -611,12 +643,55 @@ export default class MessagesController {
               }
 
               const uniqueMembers = Array.from(new Set(membersToNotify));
+              const directMentionIds = new Set(userMentionIds);
+              let roleMemberIds: string[] = [];
+              if (roleMentionIds.length > 0) {
+                const roleMembers = await db
+                  .select({ userId: spaceMemberRolesTable.userId })
+                  .from(spaceMemberRolesTable)
+                  .where(
+                    sql`${spaceMemberRolesTable.roleId} = ANY(ARRAY[${sql.raw(roleMentionIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+                  );
+                roleMemberIds = roleMembers
+                  .map((row) => row.userId.toString())
+                  .filter((id) => id !== user.id);
+              }
+              const allCandidates = Array.from(
+                new Set([...uniqueMembers, ...roleMemberIds]),
+              );
+              const filteredMembers: string[] = [];
 
-              if (uniqueMembers.length > 0 || roleMentionIds.length > 0) {
+              for (const memberId of allCandidates) {
+                const ctx = {
+                  isDirectMention: directMentionIds.has(memberId),
+                  isRoleMention:
+                    roleMemberIds.includes(memberId) &&
+                    !directMentionIds.has(memberId),
+                  isEveryoneMention: everyoneMentions.length > 0,
+                  isHereMention: hereMentions.length > 0,
+                  isRegularMessage: false,
+                };
+                const resolved = await resolveChannelNotificationForUser(
+                  memberId,
+                  channel.id,
+                  channel.spaceId,
+                );
+                if (
+                  shouldIncrementMentionCount(
+                    resolved.level,
+                    ctx,
+                    resolved.suppress,
+                  )
+                ) {
+                  filteredMembers.push(memberId);
+                }
+              }
+
+              if (filteredMembers.length > 0) {
                 await incrementMentionCounts(
                   channel.id,
-                  uniqueMembers,
-                  roleMentionIds,
+                  filteredMembers,
+                  undefined,
                   newMessage.id,
                 );
               }
@@ -967,12 +1042,17 @@ export default class MessagesController {
       let messages = await getCache("messages", cacheKey);
 
       if (messages) {
+        const blockedIds = await getBlockedUserIds(user.id);
+        const filtered = filterByBlockedAuthors(messages, blockedIds);
         return res
           .status(HttpStatusCode.Success)
-          .json(await attachReactionsToMessages(messages, user.id));
+          .json(await attachReactionsToMessages(filtered, user.id));
       }
 
       if (around) {
+        const halfLimit = Math.floor(limit / 2);
+        const afterLimit = limit - halfLimit;
+
         const right = await execNormalizedMany<APIMessage>(
           db.query.messagesTable.findMany({
             with: {
@@ -987,7 +1067,8 @@ export default class MessagesController {
               eq(messagesTable.channelId, BigInt(channelId)),
               lt(messagesTable.id, BigInt(around)),
             ),
-            orderBy: asc(messagesTable.createdAt),
+            orderBy: desc(messagesTable.createdAt),
+            limit: halfLimit,
           }),
         );
 
@@ -1006,6 +1087,7 @@ export default class MessagesController {
               gte(messagesTable.id, BigInt(around)),
             ),
             orderBy: asc(messagesTable.createdAt),
+            limit: afterLimit,
           }),
         );
 
@@ -1073,9 +1155,15 @@ export default class MessagesController {
         user.id,
       );
 
-      res.status(HttpStatusCode.Success).json(messagesWithExpressions);
+      const blockedIds = await getBlockedUserIds(user.id);
+      const visibleMessages = filterByBlockedAuthors(
+        messagesWithExpressions,
+        blockedIds,
+      );
 
-      void setCache("messages", cacheKey, messagesWithExpressions);
+      res.status(HttpStatusCode.Success).json(visibleMessages);
+
+      void setCache("messages", cacheKey, visibleMessages);
     } catch (err) {
       next(err);
     }
@@ -1352,6 +1440,138 @@ export default class MessagesController {
             }),
         },
       ]);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async patchReadState(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { channelId } = validateChannelParamsGet.parse(req.params);
+      const body = patchChannelNotificationSettingsSchema.parse(req.body);
+
+      const channel = await getChannel(channelId);
+      if (!channel) {
+        throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
+      }
+
+      if (channel.spaceId) {
+        if (!(await getMember(channel.spaceId, user.id, true))) {
+          throw new HttpException(
+            HttpStatusCode.Forbidden,
+            "You are not a member of this space",
+          );
+        }
+      } else if (!(await isChannelRecipient(channel.id, user.id))) {
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "You are not part of this channel",
+        );
+      }
+
+      const existing = await db.query.readStatesTable.findFirst({
+        where: and(
+          eq(readStatesTable.userId, BigInt(user.id)),
+          eq(readStatesTable.channelId, BigInt(channelId)),
+          eq(readStatesTable.type, ReadStateType.Messages),
+        ),
+      });
+
+      let mutedUntil = existing?.mutedUntil ?? null;
+      if (body.muteDuration !== undefined) {
+        mutedUntil = computeMutedUntilDuration(body.muteDuration);
+      } else if (body.mutedUntil !== undefined) {
+        mutedUntil = body.mutedUntil;
+      }
+
+      let notificationLevel = existing?.notificationLevel ?? null;
+      if (body.useSpaceDefault) {
+        notificationLevel = null;
+      } else if (body.notificationLevel !== undefined) {
+        notificationLevel = body.notificationLevel;
+      }
+
+      let muted = existing
+        ? BitField.fromBits(readStateFlags, existing.flags ?? 0n).has("Muted")
+        : false;
+
+      if (body.muted !== undefined) {
+        muted = body.muted;
+      } else if (
+        body.muteDuration !== undefined ||
+        body.mutedUntil !== undefined
+      ) {
+        muted =
+          mutedUntil != null && new Date(mutedUntil).getTime() > Date.now();
+      } else if (body.notificationLevel === NotificationLevel.Nothing) {
+        muted = true;
+      } else if (
+        body.notificationLevel !== undefined &&
+        body.notificationLevel !== NotificationLevel.Nothing
+      ) {
+        muted = false;
+      } else if (body.useSpaceDefault) {
+        muted = false;
+      }
+
+      const flags = BitField.fromBits(
+        readStateFlags,
+        existing?.flags ?? 0n,
+      ).set("Muted", muted);
+
+      const conflictSet: {
+        flags: bigint;
+        updatedAt: Date;
+        notificationLevel?: number | null;
+        mutedUntil?: Date | null;
+      } = {
+        flags: flags.toBigInt(),
+        updatedAt: new Date(),
+      };
+
+      if (body.useSpaceDefault || body.notificationLevel !== undefined) {
+        conflictSet.notificationLevel = notificationLevel;
+      }
+      if (body.muteDuration !== undefined || body.mutedUntil !== undefined) {
+        conflictSet.mutedUntil = mutedUntil;
+      }
+
+      const [row] = await db
+        .insert(readStatesTable)
+        .values({
+          userId: BigInt(user.id),
+          channelId: BigInt(channelId),
+          type: ReadStateType.Messages,
+          flags: flags.toBigInt(),
+          notificationLevel,
+          mutedUntil,
+        })
+        .onConflictDoUpdate({
+          target: [
+            readStatesTable.userId,
+            readStatesTable.channelId,
+            readStatesTable.type,
+          ],
+          set: conflictSet,
+        })
+        .returning();
+
+      const result = serializeReadState(row);
+
+      fireAndForgetAll([
+        {
+          label: "event:ReadStateUpdate",
+          run: () =>
+            emitEvent({
+              event: "ReadStateUpdate",
+              user_id: user.id,
+              data: result,
+            }),
+        },
+      ]);
+
+      res.status(HttpStatusCode.Success).json(result);
     } catch (err) {
       next(err);
     }

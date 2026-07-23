@@ -3,7 +3,7 @@ import type {
   APIProfileMusicSearchTrack,
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { isSafeFetchUrl } from "./urlSafety";
+import { isSafeFetchUrlAsync } from "./urlSafety";
 
 interface ItunesTrack {
   trackId: number;
@@ -19,7 +19,7 @@ const artworkUrl = (source?: string) =>
   null;
 
 const fetchItunes = async (url: string) => {
-  if (!isSafeFetchUrl(url))
+  if (!(await isSafeFetchUrlAsync(url)))
     throw new HttpException(
       HttpStatusCode.BadRequest,
       "Invalid iTunes request",
@@ -27,7 +27,18 @@ const fetchItunes = async (url: string) => {
 
   const response = await fetch(url, {
     headers: { Accept: "application/json" },
+    redirect: "follow",
   });
+
+  if (
+    response.url &&
+    response.url !== url &&
+    !(await isSafeFetchUrlAsync(response.url))
+  )
+    throw new HttpException(
+      HttpStatusCode.BadRequest,
+      "Invalid iTunes request",
+    );
 
   if (!response.ok)
     throw new HttpException(

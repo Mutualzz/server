@@ -11,6 +11,7 @@ import {
 } from "@mutualzz/util/connections/index.ts";
 import { resolveUserIdentifier } from "@mutualzz/util";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import { assertCanViewUserProfile } from "@mutualzz/util/privacy.ts";
 import type { NextFunction, Request, Response } from "express";
 
 export default class ConnectionsController {
@@ -176,6 +177,9 @@ export default class ConnectionsController {
       if (!target) {
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
       }
+
+      await assertCanViewUserProfile(req.user?.id, target.id);
+
       res.json({
         connections: await listPublicConnections(target.id),
       });

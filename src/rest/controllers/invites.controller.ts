@@ -27,6 +27,7 @@ import {
   getUser,
   requireChannelPermissions,
   requireNotRestricted,
+  publicUserColumns,
   requireSpacePermissions,
   Snowflake,
 } from "@mutualzz/util";
@@ -45,19 +46,25 @@ import type { NextFunction, Request, Response } from "express";
 export default class InvitesController {
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user)
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+
       const { spaceId } = validateInviteParamsGet.parse(req.params);
 
       const space = await getSpace(spaceId);
       if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
 
-      let invites = await getCache("invites", spaceId);
-      if (invites) return res.status(HttpStatusCode.Success).json(invites);
+      await requireSpacePermissions({
+        spaceId,
+        userId: req.user.id,
+        needed: ["ManageSpace"],
+      });
 
-      invites = await execNormalizedMany<APIInvite>(
+      let invites = await execNormalizedMany<APIInvite>(
         db.query.invitesTable.findMany({
           with: {
-            inviter: true,
+            inviter: { columns: publicUserColumns },
           },
           where: eq(invitesTable.spaceId, BigInt(spaceId)),
         }),
@@ -94,11 +101,21 @@ export default class InvitesController {
 
   static async getOne(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user)
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+
       const { spaceId, code } = validateInviteParamsCode.parse(req.params);
 
       const space = await getSpace(spaceId);
       if (!space)
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
+
+      await requireSpacePermissions({
+        spaceId,
+        userId: req.user.id,
+        needed: ["ManageSpace"],
+      });
+
       let invite = await getCache("invite", code);
       if (invite) return res.status(HttpStatusCode.Success).json(invite);
 
@@ -151,7 +168,7 @@ export default class InvitesController {
               : true,
             channel: { columns: { id: true, name: true, type: true } },
             user: true,
-            inviter: true,
+            inviter: { columns: publicUserColumns },
           },
           where: eq(invitesTable.code, code),
         }),
@@ -686,7 +703,7 @@ export default class InvitesController {
         db.query.invitesTable.findFirst({
           with: {
             user: true,
-            inviter: true,
+            inviter: { columns: publicUserColumns },
           },
           where: and(
             eq(invitesTable.type, InviteType.Friend),
@@ -726,7 +743,7 @@ export default class InvitesController {
         db.query.invitesTable.findFirst({
           with: {
             user: true,
-            inviter: true,
+            inviter: { columns: publicUserColumns },
           },
           where: and(
             eq(invitesTable.type, InviteType.Friend),
@@ -768,7 +785,7 @@ export default class InvitesController {
         db.query.invitesTable.findFirst({
           with: {
             user: true,
-            inviter: true,
+            inviter: { columns: publicUserColumns },
           },
           where: eq(invitesTable.code, invite.code),
         }),
