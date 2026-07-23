@@ -6,10 +6,12 @@ import {
   spaceMembersTable,
   userSettingsTable,
 } from "@mutualzz/database";
+import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { unavailableLike } from "@mutualzz/gateway/util/Calculations";
 import { Logger } from "@mutualzz/logger";
-import { type APIMessage, ChannelType } from "@mutualzz/types";
+import { BitField, readStateFlags } from "@mutualzz/bitfield";
+import { type APIMessage, ChannelType, ReadStateType } from "@mutualzz/types";
 import { and, eq, sql } from "drizzle-orm";
 import {
   Expo,
@@ -22,6 +24,11 @@ import {
   type PushAuthorAvatar,
 } from "./pushNotificationAvatar.js";
 import { formatPushNotificationBody } from "./pushNotificationContent.js";
+import {
+  getAllMessagePushRecipientIds,
+  resolveChannelNotificationForUser,
+} from "./notificationSettings.js";
+import { shouldDeliverMessageNotification } from "@mutualzz/types";
 
 const MESSAGE_PUSH_DISPLAY_MODE = "notifee";
 const ANDROID_MESSAGE_CHANNEL_ID = "messages";
@@ -193,13 +200,45 @@ async function getPushSettingsForUsers(
   return settingsByUser;
 }
 
+async function getMutedUserIdsForChannel(
+  channelId: string,
+  userIds: string[],
+): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+
+  const rows = await db
+    .select({
+      userId: readStatesTable.userId,
+      flags: readStatesTable.flags,
+    })
+    .from(readStatesTable)
+    .where(
+      and(
+        eq(readStatesTable.channelId, BigInt(channelId)),
+        eq(readStatesTable.type, ReadStateType.Messages),
+        sql`${readStatesTable.userId} = ANY(ARRAY[${sql.raw(userIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
+      ),
+    );
+
+  const muted = new Set<string>();
+
+  for (const row of rows) {
+    const flags = BitField.fromBits(readStateFlags, row.flags ?? 0n);
+    if (flags.has("Muted")) muted.add(row.userId.toString());
+  }
+
+  return muted;
+}
+
 function shouldSendPushForSettings(
   settings: UserPushSettings,
   isDm: boolean,
+  isMentionPush: boolean,
 ): boolean {
   if (!settings.pushEnabled) return false;
   if (isDm) return settings.pushDirectMessages;
-  return settings.pushMentions;
+  if (isMentionPush) return settings.pushMentions;
+  return true;
 }
 
 async function getTokensForUsers(userIds: string[]) {
@@ -296,19 +335,31 @@ async function deliverPushMessages(messages: ExpoPushMessage[]) {
 export async function sendMessagePushNotifications(
   ctx: MessagePushContext,
 ): Promise<void> {
-  const recipientIds = await resolveRecipientIds(ctx);
-  if (recipientIds.size === 0) return;
-
-  const tokensByUser = await getTokensForUsers([...recipientIds]);
-  if (tokensByUser.size === 0) return;
-
-  const pushSettingsByUser = await getPushSettingsForUsers([...recipientIds]);
   const isDm =
     ctx.channel.type === ChannelType.DM ||
     ctx.channel.type === ChannelType.GroupDM;
 
+  const mentionRecipients = await resolveRecipientIds(ctx);
+  const allRecipients = new Set(mentionRecipients);
+
+  if (!isDm && ctx.channel.spaceId) {
+    const allMessageRecipients = await getAllMessagePushRecipientIds(
+      ctx.channel.spaceId,
+      ctx.channel.id,
+      ctx.authorId,
+    );
+    for (const userId of allMessageRecipients) allRecipients.add(userId);
+  }
+
+  if (allRecipients.size === 0) return;
+
+  const tokensByUser = await getTokensForUsers([...allRecipients]);
+  if (tokensByUser.size === 0) return;
+
+  const pushSettingsByUser = await getPushSettingsForUsers([...allRecipients]);
+  const directMentionIds = new Set(ctx.userMentionIds);
+
   const title = ctx.authorName;
-  const subtitle = isDm ? undefined : "Mentioned you";
   const body = formatPushNotificationBody(
     ctx.message.content,
     ctx.authorName,
@@ -318,19 +369,53 @@ export async function sendMessagePushNotifications(
   const messages: ExpoPushMessage[] = [];
 
   await Promise.all(
-    [...recipientIds].map(async (userId) => {
+    [...allRecipients].map(async (userId) => {
+      const userCtx = {
+        isDirectMention: directMentionIds.has(userId),
+        isRoleMention:
+          ctx.roleMentionIds.length > 0 &&
+          mentionRecipients.has(userId) &&
+          !directMentionIds.has(userId),
+        isEveryoneMention: ctx.everyoneMentioned && mentionRecipients.has(userId),
+        isHereMention: ctx.hereMentioned && mentionRecipients.has(userId),
+        isRegularMessage: !mentionRecipients.has(userId),
+      };
+
+      const resolved = await resolveChannelNotificationForUser(
+        userId,
+        ctx.channel.id,
+        ctx.channel.spaceId,
+      );
+
+      if (
+        !shouldDeliverMessageNotification(
+          resolved.level,
+          userCtx,
+          resolved.suppress,
+        )
+      ) {
+        return;
+      }
+
       const tokens = tokensByUser.get(userId);
       if (!tokens?.length) return;
 
+      const isMentionPush = mentionRecipients.has(userId);
       const pushSettings =
         pushSettingsByUser.get(userId) ?? DEFAULT_PUSH_SETTINGS;
 
-      if (!shouldSendPushForSettings(pushSettings, isDm)) return;
+      if (!shouldSendPushForSettings(pushSettings, isDm, isMentionPush)) return;
 
       const presence = await PresenceService.get(userId);
       const status = presence?.status ?? "offline";
 
       if (!shouldPushForPresence(status)) return;
+
+      const subtitle = isDm
+        ? undefined
+        : isMentionPush
+          ? "Mentioned you"
+          : "New message";
 
       for (const { token, platform } of tokens) {
         const isIos = platform === "ios";
@@ -345,7 +430,7 @@ export async function sendMessagePushNotifications(
           title,
           body,
           subtitle: subtitle ?? "",
-          pushType: isDm ? "dm" : "mention",
+          pushType: isDm ? "dm" : isMentionPush ? "mention" : "message",
         };
 
         if (isIos) {
@@ -483,7 +568,7 @@ export async function sendCallPushNotifications(
 
       const pushSettings =
         pushSettingsByUser.get(userId) ?? DEFAULT_PUSH_SETTINGS;
-      if (!shouldSendPushForSettings(pushSettings, true)) return;
+      if (!shouldSendPushForSettings(pushSettings, true, true)) return;
 
       const presence = await PresenceService.get(userId);
       const status = presence?.status ?? "offline";

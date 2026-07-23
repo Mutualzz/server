@@ -4,6 +4,7 @@ import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
+router.get("/", createLimiter(60_000, 60), ProfileController.getMe);
 router.put("/", createLimiter(60_000, 20), ProfileController.update);
 router.post(
   "/assets",

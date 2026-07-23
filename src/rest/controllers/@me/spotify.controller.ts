@@ -15,6 +15,7 @@ import {
 import { resolveUserIdentifier } from "@mutualzz/util";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import type { NextFunction, Request, Response } from "express";
+import { assertCanViewUserProfile } from "@mutualzz/util/privacy.ts";
 
 export default class SpotifyController {
   static async startOAuth(req: Request, res: Response, next: NextFunction) {
@@ -203,6 +204,8 @@ export default class SpotifyController {
       if (!target) {
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
       }
+
+      await assertCanViewUserProfile(req.user?.id, target.id);
 
       const connection = await getPublicSpotifyConnection(target.id);
       if (!connection) {

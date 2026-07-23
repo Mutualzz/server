@@ -532,6 +532,20 @@
       "when": 1784427629231,
       "tag": "0075_nifty_maggott",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1784707076010,
+      "tag": "0076_flimsy_mesmero",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1784771483571,
+      "tag": "0077_funny_hairball",
+      "breakpoints": true
     }
   ],
   "version": "7"

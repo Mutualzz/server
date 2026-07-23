@@ -6,6 +6,8 @@ import { and, eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { deleteCache, invalidateCache, setCache } from "@mutualzz/cache";
+import { assertNoPermissionEscalation } from "@mutualzz/rest/util";
+import { permissionFlags } from "@mutualzz/bitfield";
 
 const validateOverwriteParams = z.object({
   channelId: z.string("Invalid Channel ID"),
@@ -40,7 +42,7 @@ export default class ChannelPermissionOverwritesController {
           "Permission overwrites can only be set on space channels",
         );
 
-      await requireChannelPermissions({
+      const { space, permissions } = await requireChannelPermissions({
         channelId,
         userId: user.id,
         needed: ["ManageRoles"],
@@ -48,6 +50,24 @@ export default class ChannelPermissionOverwritesController {
 
       const allowBits = BigInt(allow ?? 0);
       const denyBits = BigInt(deny ?? 0);
+
+      const actorIsOwner = BigInt(user.id) === BigInt(space.ownerId);
+      const actorIsAdmin =
+        (permissions.bits & permissionFlags.Administrator) ===
+        permissionFlags.Administrator;
+
+      assertNoPermissionEscalation(
+        actorIsOwner,
+        actorIsAdmin,
+        permissions.bits,
+        allowBits,
+      );
+      assertNoPermissionEscalation(
+        actorIsOwner,
+        actorIsAdmin,
+        permissions.bits,
+        denyBits,
+      );
 
       if (type === "role") {
         const table = channelRoleOverwritesTable;
@@ -139,6 +159,10 @@ export default class ChannelPermissionOverwritesController {
         {
           label: "cache:set:channel",
           run: () => setCache("channel", updatedChannel.id, updatedChannel),
+        },
+        {
+          label: "cache:invalidate:channelOverwrites",
+          run: () => invalidateCache("channelOverwrites", channel.spaceId!),
         },
         {
           label: "cache:invalidate:spaceHydrated",
@@ -236,6 +260,10 @@ export default class ChannelPermissionOverwritesController {
         {
           label: "cache:set:channel",
           run: () => setCache("channel", updatedChannel.id, updatedChannel),
+        },
+        {
+          label: "cache:invalidate:channelOverwrites",
+          run: () => invalidateCache("channelOverwrites", channel.spaceId!),
         },
         {
           label: "cache:invalidate:spaceHydrated",

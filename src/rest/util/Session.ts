@@ -14,6 +14,7 @@ export const sessionLRU = new LRUCache<string, RESTSession>({
 });
 
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+export const MAX_USER_SESSIONS = 25;
 
 export const generateSessionToken = (userId: string) => {
   userId = userId.toString();
@@ -57,7 +58,78 @@ export const createSession = async (
 
   sessionLRU.set(token, sessionData);
 
+  await enforceSessionCap(userId, token);
+
   return sessionData;
+};
+
+const cleanupExpiredSessionTokens = async (
+  userId: string,
+  tokens: string[],
+) => {
+  if (tokens.length === 0) return tokens;
+
+  const pipeline = redis.multi();
+  for (const token of tokens) {
+    pipeline.exists(`rest:sessions:${token}`);
+  }
+
+  const rawResults = await pipeline.exec();
+  if (!rawResults) return tokens;
+
+  const valid: string[] = [];
+  const expired: string[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const [err, exists] = rawResults[i];
+    if (!err && exists) valid.push(tokens[i]);
+    else expired.push(tokens[i]);
+  }
+
+  if (expired.length > 0) {
+    await redis.srem(`users:${userId}:sessions`, ...expired);
+    for (const token of expired) sessionLRU.delete(token);
+  }
+
+  return valid;
+};
+
+export const enforceSessionCap = async (
+  userId: string,
+  keepToken?: string,
+) => {
+  userId = userId.toString();
+
+  let sessions = await listSessions(userId);
+  while (sessions.length > MAX_USER_SESSIONS) {
+    const oldest = [...sessions]
+      .sort((a, b) => a.lastUsedAt - b.lastUsedAt)
+      .find((session) => session.token && session.token !== keepToken);
+
+    if (!oldest?.token) break;
+
+    await revokeSession(oldest.token);
+    sessions = sessions.filter((session) => session.token !== oldest.token);
+  }
+};
+
+export const revokeOtherSessions = async (
+  userId: string,
+  keepToken: string,
+) => {
+  userId = userId.toString();
+  keepToken = keepToken.toString();
+
+  const sessions = await listSessions(userId);
+  let revoked = 0;
+
+  for (const session of sessions) {
+    if (!session.token || session.token === keepToken) continue;
+    const removed = await revokeSession(session.token);
+    if (removed) revoked++;
+  }
+
+  return revoked;
 };
 
 export const verifySessionToken = async (token: string) => {
@@ -76,7 +148,15 @@ export const verifySessionToken = async (token: string) => {
 
   let session = sessionLRU.get(token);
 
-  if (!session) {
+  if (session) {
+    const stillValid = await redis.exists(`rest:sessions:${token}`);
+    if (!stillValid) {
+      sessionLRU.delete(token);
+      const userId = base64UrlDecode(base64UserId);
+      await redis.srem(`users:${userId}:sessions`, token);
+      return null;
+    }
+  } else {
     const raw = await redis.get(`rest:sessions:${token}`);
     if (!raw) {
       const userId = base64UrlDecode(base64UserId);
@@ -137,7 +217,11 @@ export const revokeAllSessions = async (userId: string) => {
 };
 
 export const listSessions = async (userId: string) => {
-  const tokens = await redis.smembers(`users:${userId}:sessions`);
+  userId = userId.toString();
+  const rawTokens = await redis.smembers(`users:${userId}:sessions`);
+  if (rawTokens.length === 0) return [];
+
+  const tokens = await cleanupExpiredSessionTokens(userId, rawTokens);
   if (tokens.length === 0) return [];
 
   const keys = tokens.map((token) => `rest:sessions:${token}`);

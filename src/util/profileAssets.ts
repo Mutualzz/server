@@ -19,13 +19,13 @@ export type ProfileFontExt = (typeof PROFILE_FONT_EXTENSIONS)[number];
 
 const PROFILE_FONT_REF_RE = /^([a-f0-9]{64})(?:\.(woff2|woff|ttf|otf))?$/i;
 
-export const LEGACY_PROFILE_IMAGE_KINDS = [
+export const PROFILE_IMAGE_KINDS = [
   "banner",
   "background",
   "image",
 ] as const;
 
-export type ProfileImageKind = (typeof LEGACY_PROFILE_IMAGE_KINDS)[number];
+export type ProfileImageKind = (typeof PROFILE_IMAGE_KINDS)[number];
 
 export interface ProfileAssetRefs {
   images: Set<string>;
@@ -58,7 +58,7 @@ export const profileImageExt = (hash: string): "gif" | "png" =>
 export const profileImageKey = (userId: string, hash: string): string =>
   `profiles/${userId}/image/${hash}.${profileImageExt(hash)}`;
 
-export const legacyProfileImageKey = (
+export const profileImageKindKey = (
   userId: string,
   hash: string,
   kind: ProfileImageKind,
@@ -70,25 +70,10 @@ export const profileImageSourceKeys = (
   preferredKind: ProfileImageKind,
 ): string[] => {
   const ext = profileImageExt(hash);
-  const baseName = hash;
-  const seen = new Set<string>();
-  const keys: string[] = [];
-
-  const push = (key: string) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    keys.push(key);
-  };
-
-  push(`profiles/${userId}/image/${baseName}.${ext}`);
-  push(`profiles/${userId}/${preferredKind}/${baseName}.${ext}`);
-
-  for (const kind of LEGACY_PROFILE_IMAGE_KINDS) {
-    if (kind === preferredKind) continue;
-    push(`profiles/${userId}/${kind}/${baseName}.${ext}`);
-  }
-
-  return keys;
+  return [
+    `profiles/${userId}/image/${hash}.${ext}`,
+    profileImageKindKey(userId, hash, preferredKind),
+  ];
 };
 
 export const profileMusicKey = (userId: string, hash: string): string =>
@@ -206,7 +191,6 @@ export const fetchProfileImageSource = async (
       if (!Body) continue;
       return await Body.transformToByteArray();
     } catch {
-      // Try the next legacy location.
     }
   }
 
@@ -239,8 +223,8 @@ export const cleanupOrphanedProfileAssets = async (
   for (const hash of previousRefs.images) {
     if (nextRefs.images.has(hash)) continue;
     keysToDelete.push(profileImageKey(userId, hash));
-    for (const kind of LEGACY_PROFILE_IMAGE_KINDS) {
-      keysToDelete.push(legacyProfileImageKey(userId, hash, kind));
+    for (const kind of PROFILE_IMAGE_KINDS) {
+      keysToDelete.push(profileImageKindKey(userId, hash, kind));
     }
   }
 

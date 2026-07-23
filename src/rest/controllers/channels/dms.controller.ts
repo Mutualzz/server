@@ -19,6 +19,8 @@ import sharp from "sharp";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { VoiceStateService } from "../../../gateway/voice/VoiceState.service.ts";
 import { CallService } from "../../../gateway/call/Call.service.ts";
+import { assertCanDm } from "@mutualzz/util/privacy.ts";
+import { assertNotBlocked } from "@mutualzz/util/blocks.ts";
 
 export default class DMsController {
   static async createDM(req: Request, res: Response, next: NextFunction) {
@@ -33,23 +35,34 @@ export default class DMsController {
           "You cannot DM yourself",
         );
 
-      // Check if a DM channel already exists between these two users
       const existing = await db
         .select({ channelId: channelRecipientsTable.channelId })
         .from(channelRecipientsTable)
+        .innerJoin(
+          channelsTable,
+          eq(channelsTable.id, channelRecipientsTable.channelId),
+        )
         .where(
           and(
             eq(channelRecipientsTable.userId, BigInt(user.id)),
+            eq(channelsTable.type, ChannelType.DM),
             sql`exists (
                         select 1 from ${channelRecipientsTable} cr2
             where cr2."channelId" = ${channelRecipientsTable.channelId}
             and cr2."userId" = ${BigInt(recipientId)}
             )`,
+            sql`(
+              select count(*)::int from ${channelRecipientsTable} cr3
+              where cr3."channelId" = ${channelRecipientsTable.channelId}
+            ) = 2`,
           ),
         )
         .then((res) => (res.length ? res[0] : null));
 
       if (existing) {
+        await assertCanDm(recipientId, user.id);
+        await assertNotBlocked(user.id, recipientId);
+
         const recipient = await db.query.channelRecipientsTable.findFirst({
           where: and(
             eq(channelRecipientsTable.channelId, existing.channelId),
@@ -95,6 +108,9 @@ export default class DMsController {
 
         return;
       }
+
+      await assertNotBlocked(user.id, recipientId);
+      await assertCanDm(recipientId, user.id);
 
       const channelId = BigInt(Snowflake.generate());
 
@@ -189,6 +205,11 @@ export default class DMsController {
           HttpStatusCode.BadRequest,
           "Group DM must include at least one other user",
         );
+
+      for (const recipientId of filteredRecipientIds) {
+        await assertNotBlocked(user.id, recipientId);
+        await assertCanDm(recipientId, user.id);
+      }
 
       const iconFile = imageFileValidator.optional().parse(req.file);
 
@@ -639,6 +660,9 @@ export default class DMsController {
           HttpStatusCode.BadRequest,
           "User is already in this group DM",
         );
+
+      await assertNotBlocked(user.id, recipientId);
+      await assertCanDm(recipientId, user.id);
 
       await db
         .insert(channelRecipientsTable)

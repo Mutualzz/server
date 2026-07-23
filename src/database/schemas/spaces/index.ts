@@ -5,3 +5,4 @@ export * from "./SpaceMember";
 export * from "./SpaceMemberRole";
 export * from "./VoiceModeration";
 export * from "./SpaceBan";
+export * from "./SpaceMemberNotificationSettings";

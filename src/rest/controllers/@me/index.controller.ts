@@ -30,7 +30,13 @@ import {
   Snowflake,
 } from "@mutualzz/util";
 import { revokeAllSessions } from "@mutualzz/rest/util";
-import type { APIPrivateUser, APIUserSettings, StaffActionType } from "@mutualzz/types";
+import type {
+  APIMeSession,
+  APIPrivateUser,
+  APIUserSettings,
+  StaffActionType,
+} from "@mutualzz/types";
+import { mergeExtendedSettings } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import {
@@ -50,6 +56,11 @@ import sharp from "sharp";
 import { BitField, userFlags } from "@mutualzz/bitfield";
 import bcrypt from "bcrypt";
 import { BCRYPT_SALT_ROUNDS } from "@mutualzz/rest/util";
+import {
+  listSessions,
+  revokeOtherSessions as revokeOtherSessionsForUser,
+  revokeSession,
+} from "../../util/Session.ts";
 import { z } from "zod";
 
 export default class MeController {
@@ -332,7 +343,7 @@ export default class MeController {
     try {
       const { user } = req;
 
-      const { spacePositions, ...validatedSettings } =
+      const { spacePositions, extendedSettings, ...validatedSettings } =
         validateMeSettingsUpdate.parse(req.body);
 
       await db
@@ -345,11 +356,23 @@ export default class MeController {
           set: { userId: BigInt(user.id) },
         });
 
+      const existing = await db.query.userSettingsTable.findFirst({
+        where: eq(userSettingsTable.userId, BigInt(user.id)),
+      });
+
+      const mergedExtended = extendedSettings
+        ? mergeExtendedSettings({
+            ...(existing?.extendedSettings ?? {}),
+            ...extendedSettings,
+          })
+        : undefined;
+
       const newSettings = {
         ...validatedSettings,
         ...(spacePositions && {
           spacePositions: spacePositions.map(BigInt),
         }),
+        ...(mergedExtended && { extendedSettings: mergedExtended }),
       };
 
       const result = await execNormalized<APIUserSettings | null>(
@@ -369,7 +392,7 @@ export default class MeController {
 
       res.status(HttpStatusCode.Success).json(result);
 
-      if (result.shareActivity === false) {
+      if (!result.shareActivity) {
         void PresenceService.clearAllMinecraftBridgeActivities(user.id).catch(
           () => null,
         );
@@ -958,6 +981,8 @@ export default class MeController {
           "Failed to change password",
         );
 
+      await revokeAllSessions(user.id);
+
       res.status(HttpStatusCode.Success).json({
         success: true,
       });
@@ -1035,10 +1060,7 @@ export default class MeController {
           "Incorrect password",
         );
 
-      const flags = BitField.fromString(
-        userFlags,
-        storedUser.flags.toString(),
-      );
+      const flags = BitField.fromString(userFlags, storedUser.flags.toString());
 
       if (flags.has("Deleted"))
         throw new HttpException(
@@ -1105,6 +1127,85 @@ export default class MeController {
       }
       await clearActivityHistory(user.id);
       res.status(HttpStatusCode.NoContent).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getSelf(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+      }
+
+      res.status(HttpStatusCode.Success).json(toPublicUser(req.user));
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getSessions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const token = req.headers.authorization?.split(" ")[1] ?? null;
+      const sessions = await listSessions(user.id);
+
+      const sanitized: APIMeSession[] = sessions
+        .map(({ sessionId, createdAt, lastUsedAt, token: sessionToken }) => ({
+          sessionId,
+          createdAt,
+          lastUsedAt,
+          current: !!token && sessionToken === token,
+        }))
+        .sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+
+      res.status(HttpStatusCode.Success).json(sanitized);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async revokeSession(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { sessionId } = z
+        .object({ sessionId: z.string().trim().min(1) })
+        .parse(req.params);
+
+      const sessions = await listSessions(user.id);
+      const match = sessions.find((session) => session.sessionId === sessionId);
+
+      if (!match?.token) {
+        throw new HttpException(HttpStatusCode.NotFound, "Session not found");
+      }
+
+      await revokeSession(match.token);
+
+      res.status(HttpStatusCode.Success).json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async revokeOtherSessions(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const { user } = req;
+      const token = req.headers.authorization?.split(" ")[1];
+
+      if (!token) {
+        throw new HttpException(
+          HttpStatusCode.Unauthorized,
+          "Authorization token required",
+        );
+      }
+
+      const revoked = await revokeOtherSessionsForUser(user.id, token);
+
+      res.status(HttpStatusCode.Success).json({ success: true, revoked });
     } catch (err) {
       next(err);
     }

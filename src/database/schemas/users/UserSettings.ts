@@ -1,12 +1,14 @@
 import {
   bigint,
   boolean,
+  jsonb,
   pgEnum,
   pgTable,
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./User";
+import type { UserExtendedSettings } from "@mutualzz/types";
 
 export const preferredModeEnum = pgEnum("preferred_mode", ["spaces", "feed"]);
 
@@ -41,6 +43,11 @@ export const userSettingsTable = pgTable("user_settings", {
   shareRecentActivity: boolean().notNull().default(true),
 
   lastSeenChangelogId: bigint({ mode: "bigint" }),
+
+  extendedSettings: jsonb()
+    .$type<UserExtendedSettings>()
+    .notNull()
+    .default({} as UserExtendedSettings),
 
   updatedAt: timestamp()
     .notNull()

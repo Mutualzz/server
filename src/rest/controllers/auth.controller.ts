@@ -8,7 +8,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { eq, or } from "drizzle-orm";
 import { type NextFunction, type Request, type Response } from "express";
-import { BCRYPT_SALT_ROUNDS, createSession, generateSessionToken, revokeSession, } from "../util";
+import { BCRYPT_SALT_ROUNDS, createSession, generateSessionToken, revokeAllSessions, revokeSession, } from "../util";
 
 export default class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
@@ -238,7 +238,7 @@ export default class AuthController {
       if (!user)
         throw new HttpException(HttpStatusCode.NotFound, "User does not exist");
 
-      const cooldownKey = `passwordResetCooldown`;
+      const cooldownKey = `passwordResetCooldown:${user.id}`;
       const onCooldown = await redis.get(cooldownKey);
 
       if (onCooldown) {
@@ -315,6 +315,8 @@ export default class AuthController {
           HttpStatusCode.InternalServerError,
           "Failed to update user password",
         );
+
+      await revokeAllSessions(userId);
 
       res.status(HttpStatusCode.Success).json({
         success: true,

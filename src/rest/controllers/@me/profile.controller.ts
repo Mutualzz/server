@@ -51,6 +51,7 @@ import {
 import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
+import { assertCanViewUserProfile } from "@mutualzz/util/privacy.ts";
 
 const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
   woff2: "font/woff2",
@@ -172,6 +173,31 @@ const resolveProfileMusic = async (input: {
 };
 
 export default class ProfileController {
+  private static async sendProfile(
+    res: Response,
+    userId: string,
+    pronouns?: string | null,
+  ) {
+    const profile = await execNormalized<
+      typeof userProfilesTable.$inferSelect | null
+    >(
+      db.query.userProfilesTable.findFirst({
+        where: eq(userProfilesTable.userId, BigInt(userId)),
+      }),
+    );
+
+    if (!profile) {
+      return res
+        .status(HttpStatusCode.Success)
+        .json(emptyProfile(userId, pronouns ?? null));
+    }
+
+    const apiProfile = await hydrateUserProfileMusicPreviews(
+      toAPIUserProfile(profile, pronouns ?? null),
+    );
+    return res.status(HttpStatusCode.Success).json(apiProfile);
+  }
+
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
       const { identifier } = validateProfileGet.parse(req.params);
@@ -180,28 +206,15 @@ export default class ProfileController {
       if (!user)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      if (req.user?.id && req.user.id !== user.id)
-        await assertUserVisible(req.user.id, user.id);
+      const viewerId = req.user?.id;
 
-      const userId = user.id;
+      if (viewerId && String(viewerId) !== String(user.id)) {
+        await assertUserVisible(viewerId, user.id);
+      }
 
-      const profile = await execNormalized<
-        typeof userProfilesTable.$inferSelect | null
-      >(
-        db.query.userProfilesTable.findFirst({
-          where: eq(userProfilesTable.userId, BigInt(userId)),
-        }),
-      );
+      await assertCanViewUserProfile(viewerId, user.id);
 
-      if (!profile)
-        return res
-          .status(HttpStatusCode.Success)
-          .json(emptyProfile(userId, user.pronouns ?? null));
-
-      const apiProfile = await hydrateUserProfileMusicPreviews(
-        toAPIUserProfile(profile, user.pronouns ?? null),
-      );
-      return res.status(HttpStatusCode.Success).json(apiProfile);
+      return ProfileController.sendProfile(res, user.id, user.pronouns ?? null);
     } catch (err) {
       next(err);
     }
@@ -209,8 +222,15 @@ export default class ProfileController {
 
   static async getMe(req: Request, res: Response, next: NextFunction) {
     try {
-      req.params.identifier = req.user.id;
-      return ProfileController.get(req, res, next);
+      if (!req.user) {
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+      }
+
+      return ProfileController.sendProfile(
+        res,
+        String(req.user.id),
+        req.user.pronouns ?? null,
+      );
     } catch (err) {
       next(err);
     }

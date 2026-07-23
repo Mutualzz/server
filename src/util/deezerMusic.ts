@@ -3,7 +3,7 @@ import type {
   APIProfileMusicSearchTrack,
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { isSafeFetchUrl } from "./urlSafety";
+import { isSafeFetchUrlAsync } from "./urlSafety";
 
 interface DeezerSearchResult {
   id: number;
@@ -22,7 +22,7 @@ interface DeezerSearchResponse {
 }
 
 const fetchDeezer = async (url: string) => {
-  if (!isSafeFetchUrl(url)) {
+  if (!(await isSafeFetchUrlAsync(url))) {
     throw new HttpException(
       HttpStatusCode.BadRequest,
       "Invalid Deezer request",
@@ -31,7 +31,19 @@ const fetchDeezer = async (url: string) => {
 
   const response = await fetch(url, {
     headers: { Accept: "application/json" },
+    redirect: "follow",
   });
+
+  if (
+    response.url &&
+    response.url !== url &&
+    !(await isSafeFetchUrlAsync(response.url))
+  ) {
+    throw new HttpException(
+      HttpStatusCode.BadRequest,
+      "Invalid Deezer request",
+    );
+  }
 
   if (!response.ok) {
     throw new HttpException(
@@ -53,7 +65,7 @@ export const searchDeezerTracks = async (query: string, limit: number) => {
 
 export const lookupDeezerTrack = async (trackId: string) => {
   const url = `https://api.deezer.com/track/${encodeURIComponent(trackId)}`;
-  if (!isSafeFetchUrl(url)) {
+  if (!(await isSafeFetchUrlAsync(url))) {
     throw new HttpException(
       HttpStatusCode.BadRequest,
       "Invalid Deezer request",
@@ -62,7 +74,16 @@ export const lookupDeezerTrack = async (trackId: string) => {
 
   const response = await fetch(url, {
     headers: { Accept: "application/json" },
+    redirect: "follow",
   });
+
+  if (
+    response.url &&
+    response.url !== url &&
+    !(await isSafeFetchUrlAsync(response.url))
+  ) {
+    return null;
+  }
 
   if (!response.ok) return null;
   const track = (await response.json()) as DeezerSearchResult & {

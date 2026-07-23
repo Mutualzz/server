@@ -2,8 +2,9 @@ import { logger } from "../Logger";
 import { type MemberListRange, Send, SessionRuntime } from "../util";
 import type { GatewayPayload } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
-import { getChannelOverwrites } from "@mutualzz/util";
+import { getChannelOverwrites, getMember, getSpace } from "@mutualzz/util";
 import {
+  canViewChannel,
   computeListIdFromOverwrites,
   computeVisibleUserIds,
   getEveryonePermissions,
@@ -13,8 +14,10 @@ import {
 } from "../util/Calculations";
 
 export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
+  if (!this.userId) return;
+
   const { spaceId, channels } = d;
-  if (!channels) throw new Error("Must provide channel ranges");
+  if (!spaceId || !channels) throw new Error("Must provide channel ranges");
 
   const channelId = Object.keys(channels)[0];
   if (!channelId) return;
@@ -22,10 +25,32 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
   const ranges = channels[channelId] as MemberListRange[];
   if (!Array.isArray(ranges)) throw new Error("Not a valid Array");
 
+  const space = await getSpace(String(spaceId));
+  if (!space) return;
+
+  const isOwner = BigInt(this.userId) === BigInt(space.ownerId);
+  const member = await getMember(String(spaceId), this.userId);
+  if (!isOwner && !member) return;
+
   const { allow: everyoneAllow, deny: everyoneDeny } =
     await getEveryonePermissions(spaceId);
   const channelOverwrites = await getChannelOverwrites(spaceId, channelId);
   const parentOverwrites = await getParentOverwrites(spaceId, channelId);
+
+  if (
+    !isOwner &&
+    (!member ||
+      !canViewChannel({
+        member,
+        spaceId,
+        channelOverwrites,
+        parentOverwrites,
+        everyoneAllow,
+        everyoneDeny,
+      }))
+  ) {
+    return;
+  }
 
   const listId = computeListIdFromOverwrites({
     parentOverwrites,
@@ -55,8 +80,8 @@ export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
   );
 
   for (const op of ops) {
-    for (const member of op.members) {
-      const userId = member?.user?.id ?? member?.userId;
+    for (const memberRow of op.members) {
+      const userId = memberRow?.user?.id ?? memberRow?.userId;
       if (!userId) continue;
       void subscribeToMemberEvents.call(this, String(userId));
     }
