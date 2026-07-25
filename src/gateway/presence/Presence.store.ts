@@ -164,6 +164,7 @@ export class PresenceStore {
         userId: string,
         sessionId: string,
         presence: Omit<PresencePayload, "updatedAt">,
+        opts?: { stripCustomStatus?: boolean },
     ): Promise<PresencePayload> {
         const now = Date.now();
         const raw = await redis.hgetall(sessionsKey(userId)).catch(() => null);
@@ -173,14 +174,21 @@ export class PresenceStore {
             for (const [id, value] of Object.entries(raw)) {
                 try {
                     const existing = JSON.parse(value) as SessionPresence;
+                    const activities = opts?.stripCustomStatus
+                        ? (existing.activities ?? []).filter(
+                              (activity) => activity.type !== "custom",
+                          )
+                        : id === sessionId
+                          ? presence.activities
+                          : existing.activities;
                     next[id] = JSON.stringify({
                         ...existing,
                         status: presence.status,
                         updatedAt: now,
-                        ...(id === sessionId
+                        ...(id === sessionId || opts?.stripCustomStatus
                             ? {
-                                  activities: presence.activities,
-                                  ...(presence.device
+                                  activities,
+                                  ...(id === sessionId && presence.device
                                       ? { device: presence.device }
                                       : {}),
                               }

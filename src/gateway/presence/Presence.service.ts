@@ -414,18 +414,29 @@ export class PresenceService {
     else if (persist)
       await this.setManualStatus(ws.userId, clean.status).catch(() => null);
 
-    const customScheduled = await this.getCustomStatusSchedule(ws.userId).catch(
-      () => null,
-    );
-    if (customScheduled && customScheduled.until > Date.now()) {
-      clean.activities = applyCustomStatus(
-        clean.activities,
-        customScheduled.text,
-        customScheduled.emoji,
-      );
-    } else if (persist) {
-      const custom = getCustomStatusSnapshot(clean.activities);
-      await this.setManualCustomStatus(ws.userId, custom).catch(() => null);
+    const persistedCustom = persist
+      ? getCustomStatusSnapshot(clean.activities)
+      : null;
+    const clearingCustom = persist && !persistedCustom;
+
+    if (clearingCustom) {
+      await this.clearCustomStatusSchedule(ws.userId).catch(() => null);
+      await this.setManualCustomStatus(ws.userId, null).catch(() => null);
+    } else {
+      const customScheduled = await this.getCustomStatusSchedule(
+        ws.userId,
+      ).catch(() => null);
+      if (customScheduled && customScheduled.until > Date.now()) {
+        clean.activities = applyCustomStatus(
+          clean.activities,
+          customScheduled.text,
+          customScheduled.emoji,
+        );
+      } else if (persist) {
+        await this.setManualCustomStatus(ws.userId, persistedCustom).catch(
+          () => null,
+        );
+      }
     }
 
     const previous =
@@ -437,6 +448,7 @@ export class PresenceService {
         ws.userId,
         ws.sessionId,
         clean,
+        { stripCustomStatus: clearingCustom },
       );
     } else {
       presence = await this.store.upsertSession(ws.userId, ws.sessionId, clean);
@@ -663,22 +675,20 @@ export class PresenceService {
       () => null,
     );
     await this.clearCustomStatusSchedule(userId);
+    await this.setManualCustomStatus(userId, null).catch(() => null);
 
     if (existing) {
       await this.store.warmFromRedis(userId).catch(() => null);
       const current = await this.store.get(userId);
-      const activities = applyCustomStatusSnapshot(
-        current?.activities ?? [],
-        normalizeCustomStatusSnapshot(existing.revertTo),
-      );
+      const activities = removeCustomStatus(current?.activities ?? []);
 
-      const reverted = this.store.writeMerged(userId, {
+      const cleared = this.store.writeMerged(userId, {
         ...(current ?? { activities: [], device: "web", status: "online" }),
         activities,
         updatedAt: Date.now(),
       });
 
-      await this.broadcast(userId, reverted);
+      await this.broadcast(userId, cleared);
     }
 
     await this.notifyCustomStatusScheduleChanged(userId, null);
