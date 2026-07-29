@@ -19,8 +19,7 @@ export const getCache = async <T extends CacheName>(
         ) as unknown as CacheValue<T>;
         const cacheToSet = caches[type];
         if (!cacheToSet) return null;
-        // @ts-expect-error cache map typing varies by cache type
-        cacheToSet.set(cacheKey, parsed);
+        cacheToSet.set(cacheKey, parsed as CacheValue<T>);
         return parsed;
     } catch {
         return null;

@@ -94,7 +94,7 @@ async function loadFromRedis(sessionId: string): Promise<BufferedDispatch[]> {
 
 function trackWrite(sessionId: string, write: Promise<void>) {
     const next = (pendingWrites.get(sessionId) ?? Promise.resolve())
-        .catch(() => null)
+        .catch(() => undefined)
         .then(() => write);
     pendingWrites.set(sessionId, next);
     void next.finally(() => {
@@ -107,7 +107,7 @@ function trackWrite(sessionId: string, write: Promise<void>) {
 export async function flushSessionBufferWrites(sessionId: string) {
     if (!sessionId) return;
     const pending = pendingWrites.get(sessionId);
-    if (pending) await pending.catch(() => null);
+    if (pending) await pending.catch(() => undefined);
 }
 
 async function getBuffer(sessionId: string): Promise<BufferedDispatch[]> {
@@ -136,8 +136,8 @@ export async function appendSessionDispatch(
 
     appendLocal(sessionId, event);
     const write = persistToRedis(sessionId, event).then(
-        () => null,
-        () => null,
+        () => undefined,
+        () => undefined,
     );
     trackWrite(sessionId, write);
     await write;
