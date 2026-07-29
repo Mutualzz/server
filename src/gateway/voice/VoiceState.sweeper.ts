@@ -46,7 +46,7 @@ export class VoiceStateSweeper {
       "LIMIT",
       0,
       VOICE_SWEEP_BATCH_SIZE,
-    )) as Snowflake[];
+    ));
 
     if (!expiredUserIds.length) return;
 
@@ -93,10 +93,12 @@ export class VoiceStateSweeper {
             );
 
             if (last.spaceId == null) {
-              void CallService.onVoiceOccupancyChanged(last.channelId!);
+              void CallService.onVoiceOccupancyChanged(last.channelId);
             }
           }
-        } catch {}
+        } catch {
+            // ignore
+        }
       }
 
       await redis.zrem(VOICE_EXP_ZSET_KEY, userId);

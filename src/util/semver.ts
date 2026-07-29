@@ -12,8 +12,8 @@ export const semverGte = (a: string, b: string): boolean => {
   if (!parsedA || !parsedB) return false;
 
   for (let i = 0; i < 3; i++) {
-    if (parsedA[i]! > parsedB[i]!) return true;
-    if (parsedA[i]! < parsedB[i]!) return false;
+    if (parsedA[i] > parsedB[i]) return true;
+    if (parsedA[i] < parsedB[i]) return false;
   }
 
   return true;

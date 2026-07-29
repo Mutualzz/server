@@ -114,7 +114,7 @@ class MinecraftVoicePeersRegistry {
     if (!session) return;
 
     this.byUserId.delete(data.userId);
-    await clearMinecraftVoicePeerLocation(data.userId).catch(() => undefined);
+    await clearMinecraftVoicePeerLocation(data.userId).catch(() => { return; });
 
     if (data.reason === "replaced") {
       session.close("replaced");
@@ -122,7 +122,7 @@ class MinecraftVoicePeersRegistry {
     }
 
     await session.leave(data.reason === "kicked" ? "kicked" : "leave").catch(
-      () => undefined,
+      () => null,
     );
     if (data.reason === "kicked") {
       void notifyMinecraftClientLeave(session.minecraftUuid, "kicked");
@@ -168,7 +168,7 @@ class MinecraftVoicePeersRegistry {
     for (const userId of this.byUserId.keys()) {
       const alive = await VoiceStateService.keepAliveMinecraftVoice(userId);
       if (!alive) {
-        await this.leave(userId).catch(() => undefined);
+        await this.leave(userId).catch(() => { return; });
       }
     }
   }
@@ -186,7 +186,7 @@ class MinecraftVoicePeersRegistry {
     const existing = this.byUserId.get(payload.userId);
     if (existing) {
       this.byUserId.delete(payload.userId);
-      await clearMinecraftVoicePeerLocation(payload.userId).catch(() => undefined);
+      await clearMinecraftVoicePeerLocation(payload.userId).catch(() => { return; });
       existing.close("replaced");
     }
 
@@ -206,7 +206,7 @@ class MinecraftVoicePeersRegistry {
       return session;
     } catch (err) {
       this.byUserId.delete(payload.userId);
-      await clearMinecraftVoicePeerLocation(payload.userId).catch(() => undefined);
+      await clearMinecraftVoicePeerLocation(payload.userId).catch(() => { return; });
       session.close();
       throw err;
     }
@@ -219,13 +219,13 @@ class MinecraftVoicePeersRegistry {
     const session = this.byUserId.get(userId);
     if (!session) {
       await this.publishRemoteLeave(userId, reason);
-      await clearMinecraftVoicePeerLocation(userId).catch(() => undefined);
+      await clearMinecraftVoicePeerLocation(userId).catch(() => { return; });
       return false;
     }
     const minecraftUuid = session.minecraftUuid;
     this.byUserId.delete(userId);
-    await clearMinecraftVoicePeerLocation(userId).catch(() => undefined);
-    await session.leave(reason).catch(() => undefined);
+    await clearMinecraftVoicePeerLocation(userId).catch(() => { return; });
+    await session.leave(reason).catch(() => { return; });
     logger.debug(`Minecraft voice peer left userId=${userId} reason=${reason}`);
     void notifyMinecraftClientLeave(minecraftUuid, reason);
     return true;

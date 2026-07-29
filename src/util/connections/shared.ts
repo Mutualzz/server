@@ -69,19 +69,17 @@ export function isAllowedReturnTo(returnTo: string): boolean {
   return false;
 }
 
-export function providerEnvConfigured(
-  provider: ConnectionProvider,
-): boolean {
+export function providerEnvConfigured(provider: ConnectionProvider): boolean {
   switch (provider) {
     case "github":
       return Boolean(
         process.env.GITHUB_CLIENT_ID?.trim() &&
-          process.env.GITHUB_CLIENT_SECRET?.trim(),
+        process.env.GITHUB_CLIENT_SECRET?.trim(),
       );
     case "twitch":
       return Boolean(
         process.env.TWITCH_CLIENT_ID?.trim() &&
-          process.env.TWITCH_CLIENT_SECRET?.trim(),
+        process.env.TWITCH_CLIENT_SECRET?.trim(),
       );
     case "steam":
       return Boolean(process.env.STEAM_API_KEY?.trim());

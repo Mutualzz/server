@@ -168,12 +168,12 @@ const DEMO_COMMENTS = [
   "the vibes are immaculate",
 ];
 
-type SeededUser = {
+interface SeededUser {
   id: bigint;
   username: string;
   email: string;
   globalName: string;
-};
+}
 
 function hoursAgoDate(hours: number) {
   return new Date(Date.now() - hours * 60 * 60 * 1000);
@@ -190,7 +190,6 @@ async function createDemoUser(input: {
   password: string;
   accentColor: string;
   defaultAvatarType: number;
-  preferredMode?: "spaces" | "feed";
 }): Promise<SeededUser> {
   const id = BigInt(Snowflake.generate());
   const hash = await bcrypt.hash(input.password, BCRYPT_SALT_ROUNDS);
@@ -212,7 +211,6 @@ async function createDemoUser(input: {
 
     await tx.insert(userSettingsTable).values({
       userId: id,
-      preferredMode: input.preferredMode ?? "feed",
     });
   });
 
@@ -594,7 +592,6 @@ async function main() {
     password: HERO_PASSWORD,
     accentColor: "#88449a",
     defaultAvatarType: 2,
-    preferredMode: "feed",
   });
 
   const friends: SeededUser[] = [];

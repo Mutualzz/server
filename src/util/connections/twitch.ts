@@ -68,11 +68,11 @@ export async function exchangeTwitchCode(
     );
   }
   const meJson = (await meRes.json()) as {
-    data?: Array<{
+    data?: {
       id: string;
       login: string;
       display_name?: string;
-    }>;
+    }[];
   };
   const me = meJson.data?.[0];
   if (!me) {

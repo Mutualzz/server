@@ -15,7 +15,7 @@ export const ACTIVITY_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const ACTIVITY_HISTORY_MIN_DURATION_MS = 60_000;
 export const ACTIVITY_HISTORY_DEDUPE_MS = ACTIVITY_HISTORY_RETENTION_MS;
 
-export type RecentActivityView = {
+export interface RecentActivityView {
   type: Exclude<PresenceActivityType, "custom">;
   name: string;
   applicationId?: string;
@@ -25,7 +25,7 @@ export type RecentActivityView = {
   assets?: PresenceActivityAssets;
   startedAt: number | null;
   endedAt: number;
-};
+}
 
 function activityIdentity(activity: {
   type: string;
@@ -195,7 +195,7 @@ export async function listRecentActivities(
       })
       .catch(() => null);
 
-    if (settings && settings.shareRecentActivity === false) {
+    if (settings && !settings.shareRecentActivity) {
       return [];
     }
   }

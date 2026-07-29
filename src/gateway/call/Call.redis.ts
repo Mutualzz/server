@@ -56,7 +56,7 @@ export class CallRedis {
   }
 
   static async listActiveCallIds(): Promise<Snowflake[]> {
-    return (await redis.smembers(CALL_ACTIVE_SET)) as Snowflake[];
+    return (await redis.smembers(CALL_ACTIVE_SET));
   }
 
   static async dropActive(callId: Snowflake) {

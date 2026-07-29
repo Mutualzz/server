@@ -2,19 +2,37 @@ import { db, relationshipsTable, userSettingsTable } from "@mutualzz/database";
 import {
   HttpException,
   HttpStatusCode,
-  mergeExtendedSettings,
   RelationshipType,
+  type DmPrivacy,
+  type ProfileVisibility,
 } from "@mutualzz/types";
 import { and, eq } from "drizzle-orm";
 
 import { assertUserVisible } from "./blocks.ts";
 
-export async function getExtendedSettings(userId: string) {
+async function getPrivacySettings(userId: string) {
   const row = await db.query.userSettingsTable.findFirst({
     where: eq(userSettingsTable.userId, BigInt(userId)),
   });
 
-  return mergeExtendedSettings(row?.extendedSettings ?? null);
+  if (!row) {
+    return {
+      whoCanDm: "everyone" as DmPrivacy,
+      profileVisibility: "everyone" as ProfileVisibility,
+    };
+  }
+
+  const whoCanDm =
+    row.whoCanDm === "friends" || row.whoCanDm === "nobody"
+      ? row.whoCanDm
+      : "everyone";
+
+  const profileVisibility =
+    row.profileVisibility === "friends" || row.profileVisibility === "nobody"
+      ? row.profileVisibility
+      : "everyone";
+
+  return { whoCanDm, profileVisibility };
 }
 
 export async function areFriends(
@@ -35,7 +53,7 @@ export async function areFriends(
 export async function assertCanDm(recipientId: string, senderId: string) {
   if (String(recipientId) === String(senderId)) return;
 
-  const settings = await getExtendedSettings(recipientId);
+  const settings = await getPrivacySettings(recipientId);
 
   if (settings.whoCanDm === "everyone") return;
 
@@ -91,7 +109,7 @@ export async function assertProfileVisible(
 ) {
   if (sameUser(viewerId, targetId)) return;
 
-  const settings = await getExtendedSettings(targetId);
+  const settings = await getPrivacySettings(targetId);
 
   if (settings.profileVisibility === "everyone") return;
 

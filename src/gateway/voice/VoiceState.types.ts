@@ -18,7 +18,7 @@ export interface VoiceState {
     client?: VoiceClient;
 }
 
-export type VoiceStateUpdateBody = {
+export interface VoiceStateUpdateBody {
     spaceId: Snowflake | null;
     channelId: Snowflake | null;
     selfMute?: boolean;
@@ -26,4 +26,4 @@ export type VoiceStateUpdateBody = {
     /** Request fresh voice server credentials (e.g. after RTC disconnect). */
     refreshRtc?: boolean;
     client?: VoiceClient;
-};
+}

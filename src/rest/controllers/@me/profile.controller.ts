@@ -37,6 +37,7 @@ import {
   toMusicSearchTrack,
   assertUserVisible,
 } from "@mutualzz/util";
+import { isProfileConfigured, mapUserProfileRow } from "../../../util/profileAssets.ts";
 import {
   fontExtFromFile,
   fontFileValidator,
@@ -60,23 +61,7 @@ const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
   otf: "font/otf",
 };
 
-const toAPIUserProfile = (
-  row: typeof userProfilesTable.$inferSelect,
-  pronouns?: string | null,
-): APIUserProfile => ({
-  userId: row.userId.toString(),
-  configured: row.configured,
-  backgroundColor: row.backgroundColor,
-  backgroundImage: row.backgroundImage,
-  banner: row.banner,
-  bio: row.bio,
-  pronouns: pronouns ?? null,
-  pageFontFamily: row.pageFontFamily,
-  profileMusic: row.profileMusic,
-  blocks: row.blocks,
-  mobileBlocks: row.mobileBlocks,
-  updatedAt: row.updatedAt,
-});
+const toAPIUserProfile = mapUserProfileRow;
 
 const emptyProfile = (
   userId: string,
@@ -96,22 +81,7 @@ const emptyProfile = (
   updatedAt: new Date(),
 });
 
-const isConfigured = (profile: {
-  blocks: unknown[];
-  backgroundImage?: string | null;
-  backgroundColor?: string | null;
-  banner?: string | null;
-  bio?: string | null;
-  pronouns?: string | null;
-  profileMusic?: APIProfileMusic | null;
-}) =>
-  profile.blocks.length > 0 ||
-  !!profile.backgroundImage ||
-  !!profile.backgroundColor ||
-  !!profile.banner ||
-  !!profile.bio ||
-  !!profile.pronouns ||
-  !!profile.profileMusic;
+const isConfigured = isProfileConfigured;
 
 const resolveProfileMusic = async (input: {
   profileMusicUrl?: string | null;

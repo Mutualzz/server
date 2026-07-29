@@ -1,7 +1,4 @@
-import {
-  db,
-  userSpotifyConnectionsTable,
-} from "@mutualzz/database";
+import { db, userSpotifyConnectionsTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { redis } from "@mutualzz/util";
 import { eq } from "drizzle-orm";
@@ -21,14 +18,14 @@ const SCOPES = [
 const STATE_TTL_SEC = 600;
 const STATE_PREFIX = "spotify:oauth:";
 
-export type SpotifyConnectionPublic = {
+export interface SpotifyConnectionPublic {
   connected: true;
   displayName: string | null;
   externalUrl: string | null;
   shareSpotify: boolean;
   available: boolean;
   expired?: boolean;
-};
+}
 
 export type SpotifyConnectionStatus =
   | { connected: false; available: boolean }
@@ -37,7 +34,7 @@ export type SpotifyConnectionStatus =
 export function isSpotifyConfigured() {
   return Boolean(
     process.env.SPOTIFY_CLIENT_ID?.trim() &&
-      process.env.SPOTIFY_CLIENT_SECRET?.trim(),
+    process.env.SPOTIFY_CLIENT_SECRET?.trim(),
   );
 }
 
@@ -49,7 +46,7 @@ export function isSpotifyAvailable() {
   return isSpotifyConfigured() && isSpotifyConnectEnabled();
 }
 
-export type SpotifyCurrentlyPlaying = {
+export interface SpotifyCurrentlyPlaying {
   name: "Spotify";
   details: string;
   state: string;
@@ -64,7 +61,7 @@ export type SpotifyCurrentlyPlaying = {
   durationMs: number;
   trackUrl?: string;
   spotifyUri?: string;
-};
+}
 
 function requireSpotifyEnv() {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
@@ -146,9 +143,7 @@ function isAllowedReturnTo(returnTo: string): boolean {
   return false;
 }
 
-async function spotifyTokenRequest(
-  body: URLSearchParams,
-): Promise<{
+async function spotifyTokenRequest(body: URLSearchParams): Promise<{
   access_token: string;
   refresh_token?: string;
   expires_in: number;
@@ -369,7 +364,7 @@ export async function getOwnSpotifyConnection(
   const row = await getConnectionRow(BigInt(userId));
   if (!row) return { connected: false, available };
 
-  let expired = false;
+  const expired = false;
   if (row.expiresAt.getTime() <= Date.now() + 60_000) {
     try {
       await ensureAccessToken(BigInt(userId));
@@ -442,7 +437,10 @@ export async function getCurrentlyPlaying(
 
   if (res.status === 204) return null;
   if (res.status === 401) {
-    throw new HttpException(HttpStatusCode.Unauthorized, "Spotify auth expired");
+    throw new HttpException(
+      HttpStatusCode.Unauthorized,
+      "Spotify auth expired",
+    );
   }
   if (!res.ok) {
     if (res.status === 403 || res.status === 429) return null;
@@ -457,10 +455,10 @@ export async function getCurrentlyPlaying(
       duration_ms?: number;
       uri?: string;
       external_urls?: { spotify?: string };
-      artists?: Array<{ name?: string }>;
+      artists?: { name?: string }[];
       album?: {
         name?: string;
-        images?: Array<{ url?: string }>;
+        images?: { url?: string }[];
       };
     } | null;
     currently_playing_type?: string;
@@ -496,7 +494,10 @@ export async function getCurrentlyPlaying(
         }
       : {}),
     ...(item.external_urls?.spotify
-      ? { url: item.external_urls.spotify, trackUrl: item.external_urls.spotify }
+      ? {
+          url: item.external_urls.spotify,
+          trackUrl: item.external_urls.spotify,
+        }
       : {}),
     ...(item.uri ? { spotifyUri: item.uri } : {}),
     isPlaying: data.is_playing === true,

@@ -5,10 +5,10 @@ const ARTWORK_ICON = 9;
 const ARTWORK_LOGO = 8;
 const ARTWORK_TILE = 6;
 
-type IgdbIconResult = {
+interface IgdbIconResult {
   iconImageId: string;
   iconUrl: string;
-};
+}
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
@@ -82,11 +82,11 @@ async function igdbFetch<T>(endpoint: string, body: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-type IgdbGameRow = {
+interface IgdbGameRow {
   name?: string;
   artworks?: { image_id?: string; artwork_type?: number }[];
   cover?: { image_id?: string };
-};
+}
 
 function pickIconImageId(row: IgdbGameRow | undefined): string | null {
   if (!row) return null;

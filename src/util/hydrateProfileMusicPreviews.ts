@@ -10,10 +10,10 @@ import { lookupItunesTrack } from "./itunesMusic";
 
 type MusicSource = "itunes" | "deezer";
 
-type PreviewCacheEntry = {
+interface PreviewCacheEntry {
   url: string;
   expiresAt: number;
-};
+}
 
 const previewCache = new Map<string, PreviewCacheEntry>();
 const DEEZER_CACHE_SKEW_MS = 60_000;

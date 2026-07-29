@@ -12,11 +12,11 @@ export function isConnectionProvider(
   return (CONNECTION_PROVIDERS as readonly string[]).includes(value);
 }
 
-export type ConnectionTokens = {
+export interface ConnectionTokens {
   accessToken?: string | null;
   refreshToken?: string | null;
   expiresAt?: Date | null;
-};
+}
 
 export type ConnectionProfile = {
   providerUserId: string;
@@ -24,7 +24,7 @@ export type ConnectionProfile = {
   externalUrl: string | null;
 } & ConnectionTokens;
 
-export type ProviderConnectionView = {
+export interface ProviderConnectionView {
   provider: ConnectionProvider;
   available: boolean;
   connected: boolean;
@@ -32,29 +32,29 @@ export type ProviderConnectionView = {
   externalUrl: string | null;
   shareOnProfile: boolean;
   expired: boolean;
-};
+}
 
-export type PublicConnectionView = {
+export interface PublicConnectionView {
   provider: ConnectionProvider;
   displayName: string | null;
   externalUrl: string | null;
-};
+}
 
-export type OAuthStatePayload = {
+export interface OAuthStatePayload {
   userId: string;
   returnTo: string;
   provider: ConnectionProvider;
   codeVerifier?: string;
-};
+}
 
-export type StartOAuthResult = {
+export interface StartOAuthResult {
   url: string;
-};
+}
 
-export type CompleteOAuthInput = {
+export interface CompleteOAuthInput {
   provider?: ConnectionProvider;
   state: string;
   code?: string;
   iss?: string;
   openid?: Record<string, string>;
-};
+}

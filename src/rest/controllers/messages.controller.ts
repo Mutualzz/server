@@ -37,12 +37,14 @@ import {
   execNormalized,
   execNormalizedMany,
   filterByBlockedAuthors,
+  filterVisibleChannelsForUser,
   fireAndForgetAll,
   getBlockedUserIds,
   getChannel,
   getChannels,
   getMember,
   getSpace,
+  getSpaceHydrated,
   getUser,
   incrementMentionCounts,
   isChannelRecipient,
@@ -72,8 +74,9 @@ import {
   validateMessageBodyPut,
   validateMessageParamsModify,
   validateMessageParamsPut,
+  validateSpaceGetOneParams,
 } from "@mutualzz/validators";
-import { and, asc, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import {
   BitField,
@@ -88,10 +91,16 @@ import {
   contentHasInviteLinks,
   resolveMessageCodedLinks,
 } from "../../util/codedLinks";
+import {
+  buildMessageSearchWhere,
+  combineMessageSearchWhere,
+} from "../../util/messageSearch";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { unavailableLike } from "@mutualzz/gateway/util/Calculations";
 import { z } from "zod";
+
+const messageSearchQuerySchema = z.string().trim().min(1).max(200);
 
 export default class MessagesController {
   static async create(req: Request, res: Response, next: NextFunction) {
@@ -1572,6 +1581,399 @@ export default class MessagesController {
       ]);
 
       res.status(HttpStatusCode.Success).json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async pin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { channelId, messageId } = validateMessageParamsModify.parse(
+        req.params,
+      );
+
+      const channel = await getChannel(channelId);
+      if (!channel) {
+        throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
+      }
+
+      if (channel.spaceId) {
+        await requireChannelPermissions({
+          channelId: channel.id,
+          userId: user.id,
+          needed: ["PinMessages"],
+        });
+      }
+
+      const message = await db.query.messagesTable.findFirst({
+        where: and(
+          eq(messagesTable.id, BigInt(messageId)),
+          eq(messagesTable.channelId, BigInt(channelId)),
+        ),
+      });
+
+      if (!message) {
+        throw new HttpException(HttpStatusCode.NotFound, "Message not found");
+      }
+
+      if (
+        !channel.spaceId &&
+        message.authorId?.toString() !== user.id
+      ) {
+        throw new HttpException(HttpStatusCode.Forbidden, "Missing permissions");
+      }
+
+      if (message.pinned) {
+        res.status(HttpStatusCode.NoContent).send();
+        return;
+      }
+
+      await db
+        .update(messagesTable)
+        .set({
+          pinned: true,
+          pinnedAt: new Date(),
+          pinnedBy: BigInt(user.id),
+        })
+        .where(eq(messagesTable.id, BigInt(messageId)));
+
+      res.status(HttpStatusCode.NoContent).send();
+
+      fireAndForgetAll([
+        {
+          label: "event:MessageUpdate:pinned",
+          run: async () => {
+            const updated = await execNormalized<APIMessage>(
+              db.query.messagesTable.findFirst({
+                where: eq(messagesTable.id, BigInt(messageId)),
+                with: {
+                  author: {
+                    columns: publicUserColumns,
+                  },
+                },
+              }),
+            );
+
+            if (!updated) return;
+
+            const [hydrated] = await hydrateMessagesForResponse(
+              [{ ...updated, channel }],
+              user.id,
+            );
+
+            await emitEvent({
+              event: "MessageUpdate",
+              channel_id: channel.id,
+              data: hydrated,
+            });
+          },
+        },
+        {
+          label: "event:MessageCreate:channelPinned",
+          run: async () => {
+            const noticeId = BigInt(Snowflake.generate());
+
+            const inserted = await execNormalized<APIMessage>(
+              db
+                .insert(messagesTable)
+                .values({
+                  id: noticeId,
+                  type: MessageType.ChannelPinned,
+                  authorId: BigInt(user.id),
+                  channelId: BigInt(channelId),
+                  spaceId: channel.spaceId ? BigInt(channel.spaceId) : undefined,
+                  content: messageId,
+                })
+                .returning()
+                .then((rows) => rows[0]),
+            );
+
+            if (!inserted) return;
+
+            const [hydrated] = await hydrateMessagesForResponse(
+              [
+                {
+                  ...inserted,
+                  channel,
+                  author: user,
+                },
+              ],
+              user.id,
+            );
+
+            await emitEvent({
+              event: "MessageCreate",
+              channel_id: channel.id,
+              data: hydrated,
+            });
+
+            await setChannelLastMessageId(channel.id, hydrated.id);
+          },
+        },
+        {
+          label: "cache:invalidate:messages",
+          run: () => invalidateCache("messages", channel.id),
+        },
+      ]);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async unpin(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { channelId, messageId } = validateMessageParamsModify.parse(
+        req.params,
+      );
+
+      const channel = await getChannel(channelId);
+      if (!channel) {
+        throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
+      }
+
+      if (channel.spaceId) {
+        await requireChannelPermissions({
+          channelId: channel.id,
+          userId: user.id,
+          needed: ["PinMessages"],
+        });
+      }
+
+      const message = await db.query.messagesTable.findFirst({
+        where: and(
+          eq(messagesTable.id, BigInt(messageId)),
+          eq(messagesTable.channelId, BigInt(channelId)),
+        ),
+      });
+
+      if (!message) {
+        throw new HttpException(HttpStatusCode.NotFound, "Message not found");
+      }
+
+      if (!message.pinned) {
+        res.status(HttpStatusCode.NoContent).send();
+        return;
+      }
+
+      await db
+        .update(messagesTable)
+        .set({
+          pinned: false,
+          pinnedAt: null,
+          pinnedBy: null,
+        })
+        .where(
+          and(
+            eq(messagesTable.id, BigInt(messageId)),
+            eq(messagesTable.channelId, BigInt(channelId)),
+          ),
+        );
+
+      res.status(HttpStatusCode.NoContent).send();
+
+      fireAndForgetAll([
+        {
+          label: "event:MessageUpdate:unpinned",
+          run: async () => {
+            const updated = await execNormalized<APIMessage>(
+              db.query.messagesTable.findFirst({
+                where: eq(messagesTable.id, BigInt(messageId)),
+                with: {
+                  author: {
+                    columns: publicUserColumns,
+                  },
+                },
+              }),
+            );
+
+            if (!updated) return;
+
+            const [hydrated] = await hydrateMessagesForResponse(
+              [{ ...updated, channel }],
+              user.id,
+            );
+
+            await emitEvent({
+              event: "MessageUpdate",
+              channel_id: channel.id,
+              data: hydrated,
+            });
+          },
+        },
+        {
+          label: "cache:invalidate:messages",
+          run: () => invalidateCache("messages", channel.id),
+        },
+      ]);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getPinned(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { channelId } = validateChannelParamsGet.parse(req.params);
+
+      const channel = await getChannel(channelId);
+      if (!channel) {
+        throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
+      }
+
+      if (channel.spaceId) {
+        await requireChannelPermissions({
+          channelId: channel.id,
+          userId: user.id,
+          needed: ["ViewChannel"],
+        });
+      }
+
+      const rows = await execNormalizedMany<APIMessage>(
+        db.query.messagesTable.findMany({
+          where: and(
+            eq(messagesTable.channelId, BigInt(channelId)),
+            eq(messagesTable.pinned, true),
+          ),
+          orderBy: asc(messagesTable.pinnedAt),
+          with: {
+            author: {
+              columns: publicUserColumns,
+            },
+            pinnedByUser: {
+              columns: publicUserColumns,
+            },
+          },
+        }),
+      );
+
+      const hydrated = await hydrateMessagesForResponse(rows, user.id);
+      res.status(HttpStatusCode.Success).json(hydrated);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async search(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { channelId } = validateChannelParamsGet.parse(req.params);
+      const query = messageSearchQuerySchema.parse(req.query.q);
+
+      const channel = await getChannel(channelId);
+      if (!channel) {
+        throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
+      }
+
+      if (channel.spaceId) {
+        await requireChannelPermissions({
+          channelId: channel.id,
+          userId: user.id,
+          needed: ["ViewChannel"],
+        });
+      }
+
+      if (
+        channel.type === ChannelType.DM ||
+        channel.type === ChannelType.GroupDM
+      ) {
+        if (!(await isChannelRecipient(channel.id, user.id))) {
+          throw new HttpException(
+            HttpStatusCode.Forbidden,
+            "You are not part of this DMChannel",
+          );
+        }
+      }
+
+      const whereConditions = await buildMessageSearchWhere(query, {
+        currentUserId: user.id,
+        channelId: BigInt(channelId),
+        allowChannelFilter: false,
+      });
+      const where = combineMessageSearchWhere(whereConditions);
+
+      const rows = await execNormalizedMany<APIMessage>(
+        db.query.messagesTable.findMany({
+          where,
+          orderBy: desc(messagesTable.createdAt),
+          limit: 25,
+          with: {
+            author: {
+              columns: publicUserColumns,
+            },
+          },
+        }),
+      );
+
+      const hydrated = await hydrateMessagesForResponse(rows, user.id);
+      res.status(HttpStatusCode.Success).json(hydrated);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async searchSpace(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { spaceId } = validateSpaceGetOneParams.parse(req.params);
+      const query = messageSearchQuerySchema.parse(req.query.q);
+
+      const space = await getSpaceHydrated(spaceId);
+      if (!space) {
+        throw new HttpException(HttpStatusCode.NotFound, "Space not found");
+      }
+
+      const member = await getMember(space.id, user.id, true);
+      if (!member) {
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "You are not a member of this space",
+        );
+      }
+
+      const visibleChannels = filterVisibleChannelsForUser(
+        space,
+        BigInt(user.id),
+      );
+      const textChannels = visibleChannels.filter(
+        (channel) => channel.type === ChannelType.Text,
+      );
+      const textChannelIds = textChannels.map((channel) => BigInt(channel.id));
+
+      if (textChannelIds.length === 0) {
+        res.status(HttpStatusCode.Success).json([]);
+        return;
+      }
+
+      const whereConditions = await buildMessageSearchWhere(query, {
+        currentUserId: user.id,
+        channelIds: textChannelIds,
+        visibleChannels: textChannels,
+        allowChannelFilter: true,
+      });
+      const where = combineMessageSearchWhere(whereConditions);
+
+      const rows = await execNormalizedMany<APIMessage>(
+        db.query.messagesTable.findMany({
+          where,
+          orderBy: desc(messagesTable.createdAt),
+          limit: 50,
+          with: {
+            author: {
+              columns: publicUserColumns,
+            },
+            channel: {
+              with: {
+                parent: true,
+              },
+            },
+          },
+        }),
+      );
+
+      const hydrated = await hydrateMessagesForResponse(rows, user.id);
+      res.status(HttpStatusCode.Success).json(hydrated);
     } catch (err) {
       next(err);
     }

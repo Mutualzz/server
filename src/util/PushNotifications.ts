@@ -649,7 +649,7 @@ export async function cancelCallPushNotifications(ctx: {
           collapseId: `call:${ctx.callId}`,
           data: sharedData,
           _contentAvailable: true,
-        } as ExpoPushMessage);
+        });
       } else {
         messages.push({
           to: token,

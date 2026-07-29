@@ -238,7 +238,9 @@ export const SessionRuntime = {
                     GatewayCloseCodes.SessionTimedOut,
                     "session taken over",
                 );
-            } catch {}
+            } catch {
+                // ignore
+            }
         }
 
         logger.debug(

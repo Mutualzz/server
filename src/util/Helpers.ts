@@ -35,6 +35,7 @@ import {
   ExpressionType,
   HttpException,
   HttpStatusCode,
+  normalizeUserSettings,
   type PresencePayload,
   ReadStateType,
   RelationshipType,
@@ -52,6 +53,7 @@ import {
 } from "@mutualzz/util/notificationSettings.ts";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
 import { VoiceStateRedis } from "@mutualzz/gateway/voice/VoiceState.redis.ts";
+import { mapUserProfileRow } from "./profileAssets.ts";
 
 export async function collectVisibleVoiceStates(userId: string): Promise<
   VoiceState[]
@@ -392,13 +394,15 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
 
     // Get user settings
     execNormalized<APIUserSettings>(
-      db.query.userSettingsTable.findFirst({
-        where: eq(userSettingsTable.userId, BigInt(user.id)),
-      }),
+      db.query.userSettingsTable
+        .findFirst({
+          where: eq(userSettingsTable.userId, BigInt(user.id)),
+        })
+        .then((row) => (row ? normalizeUserSettings(row) : null)),
     ),
     getReadStates(user.id),
 
-    execNormalized<APIUserProfile>(
+    execNormalized<typeof userProfilesTable.$inferSelect | null>(
       db.query.userProfilesTable.findFirst({
         where: eq(userProfilesTable.userId, BigInt(user.id)),
       }),
@@ -513,7 +517,9 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     readStates,
     spaceNotificationSettings,
     mergedPresences,
-    profile,
+    profile: profile
+      ? mapUserProfileRow(profile, user.pronouns ?? null)
+      : null,
     presenceSchedule,
     customStatusSchedule,
     users,

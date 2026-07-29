@@ -1,6 +1,7 @@
 import { scanUploads, upload } from "@mutualzz/rest";
 import { SpaceBridgeController } from "@mutualzz/rest/controllers/@me/bridges.controller.ts";
 import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts";
+import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
 import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller.ts";
 import SpaceNotificationSettingsController from "@mutualzz/rest/controllers/spaces/notificationSettings.controller.ts";
 import MembersController from "@mutualzz/rest/controllers/spaces/members.controller.ts";
@@ -29,6 +30,12 @@ router.delete("/:spaceId", createLimiter(60_000, 10), SpacesController.delete);
 router.get("/", createLimiter(60_000, 60), SpacesController.getAll);
 router.get("/bulk", createLimiter(60_000, 30), SpacesController.getBulk);
 router.get("/:spaceId", createLimiter(60_000, 60), SpacesController.getOne);
+
+router.get(
+  "/:spaceId/messages/search",
+  createLimiter(60_000, 30),
+  MessagesController.searchSpace,
+);
 
 router.get(
   "/:spaceId/notification-settings",

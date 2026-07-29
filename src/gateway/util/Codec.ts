@@ -22,7 +22,7 @@ export async function createCodec(encoding: Encoding): Promise<Codec> {
 
             return {
                 name: "etf",
-                encode: (data) => erl.pack(data) as ArrayBuffer,
+                encode: (data) => erl.pack(data),
                 decode: (bytes) => erl.unpack(toArrayBuffer(bytes)),
             };
         } catch (err: any) {

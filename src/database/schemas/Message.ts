@@ -39,6 +39,12 @@ export const messagesTable = pgTable(
 
     edited: boolean().default(false).notNull(),
 
+    pinned: boolean().default(false).notNull(),
+    pinnedAt: timestamp({ withTimezone: true, mode: "date" }),
+    pinnedBy: bigint({ mode: "bigint" }).references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+
     flags: bigint("flags", { mode: "bigint" })
       .notNull()
       .default(sql`0`),
@@ -75,6 +81,9 @@ export const messagesTable = pgTable(
       table.channelId,
       table.createdAt,
     ),
+    index("message_channel_pinned_idx")
+      .on(table.channelId, table.pinnedAt)
+      .where(sql`${table.pinned} = true`),
   ],
 );
 
@@ -90,6 +99,11 @@ export const messageRelations = relations(messagesTable, ({ one, many }) => ({
   author: one(usersTable, {
     fields: [messagesTable.authorId],
     references: [usersTable.id],
+  }),
+  pinnedByUser: one(usersTable, {
+    fields: [messagesTable.pinnedBy],
+    references: [usersTable.id],
+    relationName: "messagePinnedBy",
   }),
   repliedTo: one(messagesTable, {
     fields: [messagesTable.repliedToId],

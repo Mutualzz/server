@@ -1,7 +1,7 @@
 import { BitField, userFlags } from "@mutualzz/bitfield";
 import { HttpException, HttpStatusCode, type APIPrivateUser } from "@mutualzz/types";
 
-type UserWithFlags = { flags: string | number | bigint };
+interface UserWithFlags { flags: string | number | bigint }
 
 export const isFounder = (user: UserWithFlags) =>
     BitField.fromString(userFlags, user.flags.toString()).has("Founder");

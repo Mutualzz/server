@@ -116,7 +116,7 @@ async function getBuffer(sessionId: string): Promise<BufferedDispatch[]> {
     await flushSessionBufferWrites(sessionId);
 
     const local = localBuffers.get(sessionId) ?? [];
-    let remote: BufferedDispatch[] = [];
+    let remote: BufferedDispatch[];
     try {
         remote = await loadFromRedis(sessionId);
     } catch {
@@ -136,8 +136,8 @@ export async function appendSessionDispatch(
 
     appendLocal(sessionId, event);
     const write = persistToRedis(sessionId, event).then(
-        () => undefined,
-        () => undefined,
+        () => null,
+        () => null,
     );
     trackWrite(sessionId, write);
     await write;

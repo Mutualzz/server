@@ -48,7 +48,7 @@ export const encodeDownlinkFrame = (userId: string, pcm: Buffer) => {
 const toBuffer = (raw: RawData): Buffer => {
   if (Buffer.isBuffer(raw)) return raw;
   if (Array.isArray(raw)) return Buffer.concat(raw);
-  return Buffer.from(raw as ArrayBuffer);
+  return Buffer.from(raw);
 };
 
 const extractToken = (socket: WebSocket, request: IncomingMessage) => {
@@ -100,7 +100,9 @@ export const onMinecraftAudioConnection = (
               userId: record.userId,
             }),
           );
-        } catch {}
+        } catch {
+          // ignore
+        }
         socket.close(4003, "wrong_instance");
         return;
       }
@@ -134,6 +136,8 @@ export const onMinecraftAudioConnection = (
 
     try {
       socket.send(JSON.stringify({ t: "ready", userId: record.userId }));
-    } catch {}
+    } catch {
+      // ignore
+    }
   })();
 };

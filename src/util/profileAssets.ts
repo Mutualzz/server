@@ -7,6 +7,7 @@ import type {
   APIMobileProfileBlock,
   APIProfileBlock,
   APIProfileMusic,
+  APIUserProfile,
 } from "@mutualzz/types";
 import { generateHash } from "./Common";
 import { bucketName, s3Client } from "./S3";
@@ -26,6 +27,66 @@ export const PROFILE_IMAGE_KINDS = [
 ] as const;
 
 export type ProfileImageKind = (typeof PROFILE_IMAGE_KINDS)[number];
+
+export const isProfileConfigured = (profile: {
+  blocks: unknown[];
+  backgroundImage?: string | null;
+  backgroundColor?: string | null;
+  banner?: string | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  profileMusic?: APIProfileMusic | null;
+}) =>
+  profile.blocks.length > 0 ||
+  !!profile.backgroundImage ||
+  !!profile.backgroundColor ||
+  !!profile.banner ||
+  !!profile.bio ||
+  !!profile.pronouns ||
+  !!profile.profileMusic;
+
+export interface UserProfileRow {
+  userId: bigint;
+  configured: boolean;
+  backgroundColor: string | null;
+  backgroundImage: string | null;
+  banner: string | null;
+  bio: string | null;
+  pageFontFamily: string | null;
+  profileMusic: APIProfileMusic | null;
+  blocks: APIProfileBlock[];
+  mobileBlocks: APIMobileProfileBlock[];
+  updatedAt: Date;
+}
+
+export function mapUserProfileRow(
+  row: UserProfileRow,
+  pronouns?: string | null,
+): APIUserProfile {
+  const blocks = row.blocks ?? [];
+  return {
+    userId: row.userId.toString(),
+    configured: isProfileConfigured({
+      blocks,
+      backgroundImage: row.backgroundImage,
+      backgroundColor: row.backgroundColor,
+      banner: row.banner,
+      bio: row.bio,
+      pronouns: pronouns ?? null,
+      profileMusic: row.profileMusic,
+    }),
+    backgroundColor: row.backgroundColor,
+    backgroundImage: row.backgroundImage,
+    banner: row.banner,
+    bio: row.bio,
+    pronouns: pronouns ?? null,
+    pageFontFamily: row.pageFontFamily,
+    profileMusic: row.profileMusic,
+    blocks,
+    mobileBlocks: row.mobileBlocks ?? [],
+    updatedAt: row.updatedAt,
+  };
+}
 
 export interface ProfileAssetRefs {
   images: Set<string>;
@@ -191,6 +252,7 @@ export const fetchProfileImageSource = async (
       if (!Body) continue;
       return await Body.transformToByteArray();
     } catch {
+      // ignore
     }
   }
 

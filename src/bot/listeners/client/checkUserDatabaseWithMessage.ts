@@ -29,7 +29,7 @@ export default class CheckUserDatabaseWithMessageListener extends Listener {
             const birthdayMessage =
                 await this.container.client.metadata.channels.birthdays?.messages
                     .fetch(userExists.birthdayMessage?.toString() ?? "")
-                    .catch(() => undefined);
+                    .catch(() => { return; });
 
             if (birthdayMessage) user.birthdayMessage = birthdayMessage;
 

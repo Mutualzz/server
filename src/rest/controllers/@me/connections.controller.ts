@@ -80,7 +80,8 @@ export default class ConnectionsController {
         : undefined;
 
       const state = typeof req.body?.state === "string" ? req.body.state : "";
-      const code = typeof req.body?.code === "string" ? req.body.code : undefined;
+      const code =
+        typeof req.body?.code === "string" ? req.body.code : undefined;
       const iss = typeof req.body?.iss === "string" ? req.body.iss : undefined;
 
       let openid: Record<string, string> | undefined;
@@ -133,11 +134,7 @@ export default class ConnectionsController {
         );
       }
       res.json(
-        await updateConnectionShare(
-          user.id,
-          provider,
-          req.body.shareOnProfile,
-        ),
+        await updateConnectionShare(user.id, provider, req.body.shareOnProfile),
       );
     } catch (err) {
       next(err);

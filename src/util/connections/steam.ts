@@ -83,11 +83,11 @@ export async function completeSteamOpenId(
     if (summaryRes.ok) {
       const summary = (await summaryRes.json()) as {
         response?: {
-          players?: Array<{
+          players?: {
             steamid: string;
             personaname?: string;
             profileurl?: string;
-          }>;
+          }[];
         };
       };
       const player = summary.response?.players?.[0];
@@ -105,6 +105,7 @@ export async function completeSteamOpenId(
       }
     }
   } catch {
+    // ignore
   }
 
   return {

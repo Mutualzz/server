@@ -36,7 +36,11 @@ import type {
   APIUserSettings,
   StaffActionType,
 } from "@mutualzz/types";
-import { mergeExtendedSettings } from "@mutualzz/types";
+import {
+  denormalizeSettingsPatch,
+  flattenSettingsPatch,
+  normalizeUserSettings,
+} from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import {
@@ -291,11 +295,13 @@ export default class MeController {
       user.createdAt = new Date(user.createdAt);
       user.updatedAt = new Date();
 
+      const { discordId: _discordId, ...userUpdate } = user;
+
       const newUser = await execNormalized<APIPrivateUser | null>(
         db
           .update(usersTable)
           .set({
-            ...user,
+            ...userUpdate,
             id: BigInt(user.id),
           })
           .where(eq(usersTable.id, BigInt(user.id)))
@@ -343,8 +349,9 @@ export default class MeController {
     try {
       const { user } = req;
 
-      const { spacePositions, extendedSettings, ...validatedSettings } =
-        validateMeSettingsUpdate.parse(req.body);
+      const parsed = validateMeSettingsUpdate.parse(req.body);
+      const flatPatch = flattenSettingsPatch(parsed);
+      const { spacePositions, ...patchWithoutSpaceOrder } = flatPatch;
 
       await db
         .insert(userSettingsTable)
@@ -360,20 +367,13 @@ export default class MeController {
         where: eq(userSettingsTable.userId, BigInt(user.id)),
       });
 
-      const mergedExtended = extendedSettings
-        ? mergeExtendedSettings({
-            ...(existing?.extendedSettings ?? {}),
-            ...extendedSettings,
-          })
-        : undefined;
-
-      const newSettings = {
-        ...validatedSettings,
-        ...(spacePositions && {
-          spacePositions: spacePositions.map(BigInt),
-        }),
-        ...(mergedExtended && { extendedSettings: mergedExtended }),
-      };
+      const newSettings = denormalizeSettingsPatch(
+        {
+          ...patchWithoutSpaceOrder,
+          ...(spacePositions && { spacePositions }),
+        },
+        existing ?? { updatedAt: new Date() },
+      );
 
       const result = await execNormalized<APIUserSettings | null>(
         db
@@ -390,9 +390,11 @@ export default class MeController {
           "Failed to update user settings",
         );
 
-      res.status(HttpStatusCode.Success).json(result);
+      const normalized = normalizeUserSettings(result);
 
-      if (!result.shareActivity) {
+      res.status(HttpStatusCode.Success).json(normalized);
+
+      if (!normalized.shareActivity) {
         void PresenceService.clearAllMinecraftBridgeActivities(user.id).catch(
           () => null,
         );
@@ -405,7 +407,7 @@ export default class MeController {
             emitEvent({
               event: "UserSettingsUpdate",
               user_id: user.id,
-              data: result,
+              data: normalized,
             }),
           meta: {
             userId: user.id,
@@ -413,7 +415,7 @@ export default class MeController {
         },
         {
           label: "cache:set:userSettings",
-          run: () => setCache("userSettings", user.id, result),
+          run: () => setCache("userSettings", user.id, normalized),
           meta: { userId: user.id },
         },
       ]);

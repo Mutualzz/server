@@ -61,11 +61,13 @@ export class RabbitMQ {
     try {
       await channel?.close();
     } catch {
+      // ignore
     }
 
     try {
       await connection?.close();
     } catch {
+      // ignore
     }
   }
 

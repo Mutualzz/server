@@ -79,7 +79,7 @@ function consumePublicUserEvents(this: WebSocket, opts: EventOpts) {
   void Send(this, {
     op: "Dispatch",
     s: SessionRuntime.nextSequence(this.sessionId, this),
-    t: event as any,
+    t: event,
     d: data,
   }).finally(() => opts?.acknowledge?.());
 }

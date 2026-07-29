@@ -45,7 +45,7 @@ function mergeSessionPresences(sessions: SessionPresence[]): PresencePayload {
             return (STATUS_RANK[s.status] ?? 0) > (STATUS_RANK[best] ?? 0)
                 ? s.status
                 : best;
-        }, visible[0]!.status);
+        }, visible[0].status);
     }
 
     const sorted = [...sessions].sort(
@@ -132,7 +132,7 @@ export class PresenceStore {
                 "PX",
                 this.ttlMs,
             )
-            .catch(() => {});
+            .catch(() => { return; });
 
         return newEntry;
     }
@@ -195,6 +195,7 @@ export class PresenceStore {
                             : {}),
                     } satisfies SessionPresence);
                 } catch {
+                    // ignore
                 }
             }
         }
@@ -279,12 +280,12 @@ export class PresenceStore {
         entry.expiresAt = Date.now() + this.ttlMs;
 
         const id = String(userId);
-        void redis.pexpire(presenceKey(id), this.ttlMs).catch(() => {});
-        void redis.pexpire(sessionsKey(id), this.ttlMs).catch(() => {});
+        void redis.pexpire(presenceKey(id), this.ttlMs).catch(() => { return; });
+        void redis.pexpire(sessionsKey(id), this.ttlMs).catch(() => { return; });
     }
 
     async warmFromRedis(userId: string): Promise<void> {
-        const existing = await this.get(userId as any);
+        const existing = await this.get(userId);
         if (existing) return;
 
         const raw = await redis.get(presenceKey(userId)).catch(() => null);
@@ -294,7 +295,7 @@ export class PresenceStore {
             const parsed = JSON.parse(raw) as PresencePayload;
             if (!parsed) return;
 
-            this.entries.set(userId as any, {
+            this.entries.set(userId, {
                 presence: parsed,
                 expiresAt: Date.now() + this.ttlMs,
             });

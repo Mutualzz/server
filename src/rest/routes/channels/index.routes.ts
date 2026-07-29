@@ -90,6 +90,26 @@ router.patch(
   MessagesController.update,
 );
 router.get(
+  `/:channelId/messages/pins`,
+  createLimiter(60_000, 60),
+  MessagesController.getPinned,
+);
+router.put(
+  "/:channelId/messages/:messageId/pin",
+  createLimiter(60_000, 20),
+  MessagesController.pin,
+);
+router.delete(
+  "/:channelId/messages/:messageId/pin",
+  createLimiter(60_000, 20),
+  MessagesController.unpin,
+);
+router.get(
+  "/:channelId/messages/search",
+  createLimiter(60_000, 30),
+  MessagesController.search,
+);
+router.get(
   `/:channelId/messages`,
   createLimiter(60_000, 60),
   MessagesController.getAll,

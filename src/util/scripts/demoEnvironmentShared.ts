@@ -32,11 +32,11 @@ export function assertDemoScriptSafeToRun(action: "seed" | "clean") {
   }
 }
 
-export type DemoUserSummary = {
+export interface DemoUserSummary {
   id: bigint;
   username: string;
   email: string;
-};
+}
 
 export async function findDemoUsers(): Promise<DemoUserSummary[]> {
   return db

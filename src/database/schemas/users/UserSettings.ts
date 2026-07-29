@@ -8,9 +8,18 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 import { usersTable } from "./User";
-import type { UserExtendedSettings } from "@mutualzz/types";
+import type { ClientPreferences } from "@mutualzz/types";
 
-export const preferredModeEnum = pgEnum("preferred_mode", ["spaces", "feed"]);
+export const dmPrivacyEnum = pgEnum("dm_privacy", [
+  "everyone",
+  "friends",
+  "nobody",
+]);
+export const profileVisibilityEnum = pgEnum("profile_visibility", [
+  "everyone",
+  "friends",
+  "nobody",
+]);
 
 export const userSettingsTable = pgTable("user_settings", {
   userId: bigint({ mode: "bigint" })
@@ -23,7 +32,6 @@ export const userSettingsTable = pgTable("user_settings", {
   currentTheme: text().default("baseDark"),
   currentIcon: text(),
 
-  preferredMode: preferredModeEnum().default("spaces").notNull(),
   preferEmbossed: boolean().notNull().default(false),
 
   preferredSelfMute: boolean().notNull().default(false),
@@ -44,10 +52,13 @@ export const userSettingsTable = pgTable("user_settings", {
 
   lastSeenChangelogId: bigint({ mode: "bigint" }),
 
-  extendedSettings: jsonb()
-    .$type<UserExtendedSettings>()
+  whoCanDm: dmPrivacyEnum().notNull().default("everyone"),
+  profileVisibility: profileVisibilityEnum().notNull().default("everyone"),
+
+  clientPreferences: jsonb()
+    .$type<ClientPreferences>()
     .notNull()
-    .default({} as UserExtendedSettings),
+    .default({} as ClientPreferences),
 
   updatedAt: timestamp()
     .notNull()

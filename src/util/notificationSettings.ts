@@ -9,7 +9,7 @@ import {
   type APIReadState,
   type APISpaceNotificationSettings,
   DEFAULT_NOTIFICATION_LEVEL,
-  NotificationLevel,
+  type NotificationLevel,
   type NotificationMessageContext,
   type NotificationSuppressOptions,
   computeMutedUntilDuration,
@@ -43,11 +43,11 @@ export function serializeReadState(row: {
     badgeCount: row.badgeCount,
     lastPinTimestamp: row.lastPinTimestamp,
     flags: row.flags,
-    type: row.type as ReadStateType,
+    type: row.type,
     notificationLevel:
       row.notificationLevel == null
         ? null
-        : (row.notificationLevel as NotificationLevel),
+        : (row.notificationLevel),
     mutedUntil: row.mutedUntil,
   };
 }
@@ -61,7 +61,7 @@ export function serializeSpaceNotificationSettings(row: {
 }): APISpaceNotificationSettings {
   return {
     spaceId: row.spaceId.toString(),
-    level: row.level as NotificationLevel,
+    level: row.level,
     mutedUntil: row.mutedUntil,
     suppressEveryone: row.suppressEveryone,
     suppressRoles: row.suppressRoles,
@@ -164,10 +164,10 @@ export async function upsertSpaceNotificationSettings(
   return serializeSpaceNotificationSettings(row);
 }
 
-type ResolvedChannelNotification = {
+interface ResolvedChannelNotification {
   level: NotificationLevel;
   suppress: NotificationSuppressOptions;
-};
+}
 
 export async function resolveChannelNotificationForUser(
   userId: string,
@@ -192,7 +192,7 @@ export async function resolveChannelNotificationForUser(
     channelLevel:
       readState?.notificationLevel == null
         ? null
-        : (readState.notificationLevel as NotificationLevel),
+        : (readState.notificationLevel),
     channelMutedUntil: readState?.mutedUntil ?? null,
   });
 

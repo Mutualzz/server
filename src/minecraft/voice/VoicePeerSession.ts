@@ -428,7 +428,7 @@ export class VoicePeerSession {
                 `MC uplink RTP check userId=${this.userId} bytesSent=${bytesSent} packetsSent=${packetsSent} sendTransport=${this.sendTransport?.connectionState}`,
               );
             })
-            .catch(() => undefined);
+            .catch(() => { return; });
         }, 2000);
       }
     }
@@ -551,7 +551,7 @@ export class VoicePeerSession {
               );
             }
           })
-          .catch(() => undefined);
+          .catch(() => { return; });
       }, 8000);
     }
   }
@@ -649,7 +649,7 @@ export class VoicePeerSession {
     this.setupComplete = true;
     void this.rpc(VoiceOpcodes.VoiceSetRTPCapabilities, {
       rtpCapabilities: device.recvRtpCapabilities,
-    }).catch(() => undefined);
+    }).catch(() => { return; });
 
     await Promise.all(
       this.pendingProducers
@@ -666,7 +666,7 @@ export class VoicePeerSession {
     this.closed = true;
     try {
       if (this.socket?.readyState === WebSocket.OPEN) {
-        await this.rpc(VoiceOpcodes.VoiceLeave, {}).catch(() => undefined);
+        await this.rpc(VoiceOpcodes.VoiceLeave, {}).catch(() => { return; });
       }
     } catch {
       // ignore

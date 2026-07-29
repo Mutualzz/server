@@ -458,7 +458,7 @@ export class VoiceStateService {
             joinedAt:
                 isFirstJoin || isMove || shouldSupersede
                     ? now
-                    : (previous!.joinedAt ?? now),
+                    : (previous.joinedAt ?? now),
       client: body.client ?? previous?.client,
     };
 
@@ -608,7 +608,7 @@ export class VoiceStateService {
     void VoiceStateService.emitStatesAsUpdates(spaceId, existing.channelId);
 
     if (spaceId == null) {
-      void CallService.onVoiceOccupancyChanged(existing.channelId!);
+      void CallService.onVoiceOccupancyChanged(existing.channelId);
     }
 
     return true;
@@ -870,9 +870,9 @@ export class VoiceStateService {
     selfDeaf: boolean;
   }): Promise<boolean> {
     const { userId } = params;
-    const selfDeaf = params.selfDeaf === true;
+    const selfDeaf = params.selfDeaf;
     // Discord-style: deafen implies mute.
-    const selfMute = selfDeaf || params.selfMute === true;
+    const selfMute = selfDeaf || params.selfMute;
 
     const existing = await VoiceStateRedis.getState(userId);
     if (!existing?.channelId) return false;
@@ -1316,7 +1316,7 @@ export class VoiceStateService {
             spaceId: existing.spaceId ?? null,
             channelId: existing.channelId,
             userId,
-            sessionId: socket.sessionId!,
+            sessionId: socket.sessionId,
           });
         }
         return;

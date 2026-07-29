@@ -45,6 +45,6 @@ export function MessageMenuCommand(options: Command.Options) {
             constructor(...args: any[]) {
                 super(args[0], options);
             }
-        } as T;
+        };
     };
 }

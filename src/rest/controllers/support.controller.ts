@@ -88,7 +88,7 @@ const notifyUserOfStaffReply = async (
       TextBody: `Support replied to your ticket "${subject}".\n\n${messagePreview}\n\nView your ticket: ${ticketUrl}`,
       MessageStream: "outbound",
     })
-    .catch(() => undefined);
+    .catch(() => { return; });
 
   void sendSupportReplyPush(userId, ticketId, subject);
 };

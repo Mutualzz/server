@@ -7,7 +7,7 @@ export const getCache = async <T extends CacheName>(
 ): Promise<CacheValue<T> | null> => {
     cacheKey = cacheKeyPrefix(type, cacheKey);
     const value = caches[type]?.get(cacheKey);
-    if (value !== undefined) return value as unknown as CacheValue<T>;
+    if (value !== undefined) return value;
 
     if (!redis) return null;
     try {
@@ -19,7 +19,7 @@ export const getCache = async <T extends CacheName>(
         ) as unknown as CacheValue<T>;
         const cacheToSet = caches[type];
         if (!cacheToSet) return null;
-        // @ts-ignore
+        // @ts-expect-error cache map typing varies by cache type
         cacheToSet.set(cacheKey, parsed);
         return parsed;
     } catch {

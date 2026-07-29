@@ -8,6 +8,7 @@ import {
     pgTable,
     text,
     timestamp,
+    uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 interface DefaultAvatar {
@@ -33,6 +34,8 @@ export const usersTable = pgTable(
 
         hash: text().notNull(),
 
+        discordId: bigint({ mode: "bigint" }),
+
         flags: bigint("flags", { mode: "bigint" })
             .notNull()
             .default(sql`0`),
@@ -46,7 +49,12 @@ export const usersTable = pgTable(
             .defaultNow()
             .$onUpdate(() => new Date()),
     },
-    (table) => [index("user_created_at_idx").on(table.createdAt)],
+    (table) => [
+        index("user_created_at_idx").on(table.createdAt),
+        uniqueIndex("user_discord_id_idx")
+            .on(table.discordId)
+            .where(sql`${table.discordId} is not null`),
+    ],
 );
 
 export const toPublicUser = (user: APIPrivateUser) => {

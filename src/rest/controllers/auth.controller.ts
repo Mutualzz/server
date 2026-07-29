@@ -2,13 +2,31 @@ import { BitField, userFlags } from "@mutualzz/bitfield";
 import { db, userSettingsTable, usersTable } from "@mutualzz/database";
 import type { APIPrivateUser } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
-import { execNormalized, generateSessionId, genRandColor, postmark, redis, Snowflake, } from "@mutualzz/util";
-import { validateForgotPassword, validateLogin, validateRegister, validateResetPassword, } from "@mutualzz/validators";
+import {
+  execNormalized,
+  generateSessionId,
+  genRandColor,
+  postmark,
+  redis,
+  Snowflake,
+} from "@mutualzz/util";
+import {
+  validateForgotPassword,
+  validateLogin,
+  validateRegister,
+  validateResetPassword,
+} from "@mutualzz/validators";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { eq, or } from "drizzle-orm";
 import { type NextFunction, type Request, type Response } from "express";
-import { BCRYPT_SALT_ROUNDS, createSession, generateSessionToken, revokeAllSessions, revokeSession, } from "../util";
+import {
+  BCRYPT_SALT_ROUNDS,
+  createSession,
+  generateSessionToken,
+  revokeAllSessions,
+  revokeSession,
+} from "../util";
 
 export default class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
@@ -325,5 +343,4 @@ export default class AuthController {
       next(err);
     }
   }
-
 }
