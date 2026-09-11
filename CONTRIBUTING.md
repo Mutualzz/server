@@ -13,7 +13,7 @@ We want contributors to get credit for their work.
 - Your **git author name/email** stays on commits that land
 - Merged **pull requests** keep your GitHub attribution
 - Notable changes are called out in **changelogs / release notes** when we can
-- You're welcome to list Mutualzz contributions on your portfolio or résumé
+- You're welcome to list Mutualzz contributions on your portfolio or resume
 
 If we miss crediting something meaningful, open an issue or mention it on the
 PR and we'll fix it.
