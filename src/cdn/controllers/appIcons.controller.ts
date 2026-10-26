@@ -8,6 +8,7 @@ import { readFile } from "fs/promises";
 import path from "path";
 import sharp, { type FormatEnum } from "sharp";
 import { MIME_TYPES } from "../Constants";
+import { appIconsGetParams, appIconsGetQuery } from "@mutualzz/validators";
 
 const LOCAL_ASSETS_DIR = path.join(
   import.meta.dirname,
@@ -40,17 +41,11 @@ async function readS3Icon(id: string) {
 export default class AppIconsController {
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
-      const rawId = req.params.id as string;
-      const id = rawId.replace(/\.png$/i, "");
+      const { id } = appIconsGetParams.parse(req.params);
 
-      if (!id.match(/^[a-z0-9_-]+$/i)) {
-        throw new HttpException(HttpStatusCode.BadRequest, "Invalid app icon ID");
-      }
+      const { format, size } = appIconsGetQuery.parse(req.query);
 
-      const { format: formatQuery, size } = req.query;
-      const finalFormat = (formatQuery as string) || "png";
-
-      let cacheKey = `${id}:${finalFormat}`;
+      let cacheKey = `${id}:${format}`;
       if (size) cacheKey += `:${size}`;
 
       let outputBuffer = await getCache("appIcon", cacheKey);
@@ -60,16 +55,19 @@ export default class AppIconsController {
           (await readS3Icon(id)) ?? (await readLocalIcon(id));
 
         if (!originalBuffer) {
-          throw new HttpException(HttpStatusCode.NotFound, "App icon not found");
+          throw new HttpException(
+            HttpStatusCode.NotFound,
+            "App icon not found",
+          );
         }
 
-        if (!size && !formatQuery) {
+        if (!size && !format) {
           outputBuffer = originalBuffer;
         } else {
           let image = sharp(originalBuffer);
 
-          if (formatQuery) {
-            image = image.toFormat(formatQuery as keyof FormatEnum);
+          if (format) {
+            image = image.toFormat(format as keyof FormatEnum);
           }
 
           if (size && !isNaN(Number(size))) {
@@ -98,7 +96,7 @@ export default class AppIconsController {
       res.setHeader("ETag", etag);
       res.setHeader(
         "Content-Type",
-        MIME_TYPES[finalFormat] || "application/octet-stream",
+        MIME_TYPES[format] || "application/octet-stream",
       );
 
       res.status(HttpStatusCode.Success).end(outputBuffer);

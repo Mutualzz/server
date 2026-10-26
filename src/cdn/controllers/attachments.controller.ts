@@ -1,15 +1,13 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { bucketName, s3Client } from "@mutualzz/util";
+import { attachmentsGetParams } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 
 export default class AttachmentsController {
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
-      const { messageId, filename } = req.params as {
-        messageId: string;
-        filename: string;
-      };
+      const { messageId, filename } = attachmentsGetParams.parse(req.params);
 
       const key = `attachments/${messageId}/${filename}`;
 
@@ -33,10 +31,7 @@ export default class AttachmentsController {
       }
 
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      res.setHeader(
-        "Content-Type",
-        contentType || "application/octet-stream",
-      );
+      res.setHeader("Content-Type", contentType || "application/octet-stream");
       if (contentLength !== undefined)
         res.setHeader("Content-Length", contentLength);
 

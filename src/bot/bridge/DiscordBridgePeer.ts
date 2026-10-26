@@ -29,7 +29,7 @@ interface WebhookHandle {
 
 /**
  * Discord side of the three-way bridge.
- * - Bound channel messages → BridgeBus (Minecraft + app can receive)
+ * - Bound channel messages -> BridgeBus (Minecraft + app can receive)
  * - BridgeBus CHAT/JOIN/LEAVE → Discord via webhook (looks like the MC player)
  */
 export class DiscordBridgePeer {
@@ -75,13 +75,16 @@ export class DiscordBridgePeer {
       const guild =
         this.client.guilds.cache.get(guildId) ??
         (await this.client.guilds.fetch(guildId).catch(() => null));
+
       const channel =
         this.client.channels.cache.get(channelId) ??
         (await this.client.channels.fetch(channelId).catch(() => null));
+
       const channelName =
         channel && "name" in channel && typeof channel.name === "string"
           ? channel.name
           : undefined;
+
       return {
         guildName: guild?.name,
         channelName,
@@ -91,17 +94,18 @@ export class DiscordBridgePeer {
     }
   }
 
-  static async canAccessChannel(
-    guildId: string,
-    channelId: string,
-  ): Promise<boolean> {
+  static async canAccessChannel(guildId: string, channelId: string) {
     if (!this.client) return false;
     try {
       const channel =
         this.client.channels.cache.get(channelId) ??
         (await this.client.channels.fetch(channelId));
       if (!channel) return false;
-      if ("guildId" in channel && channel.guildId && channel.guildId !== guildId)
+      if (
+        "guildId" in channel &&
+        channel.guildId &&
+        channel.guildId !== guildId
+      )
         return false;
       return true;
     } catch {
@@ -109,7 +113,7 @@ export class DiscordBridgePeer {
     }
   }
 
-  static getInviteUrl(): string | null {
+  static getInviteUrl() {
     const clientId =
       process.env.DISCORD_CLIENT_ID?.trim() ||
       this.client?.application?.id ||
@@ -178,7 +182,6 @@ export class DiscordBridgePeer {
       avatarUrl: message.author.displayAvatarURL({
         size: 128,
         extension: "png",
-        forceStatic: true,
       }),
     };
 
@@ -190,7 +193,8 @@ export class DiscordBridgePeer {
     });
   }
 
-  /** Hub > Discord */
+  /** Hub → Discord */
+  /** TODO: Add advancement event */
   private static async onBridgeEvent(
     event: BridgeEvent<
       BridgeChatPayload | BridgePlayerPayload | BridgeVoicePayload
@@ -232,9 +236,7 @@ export class DiscordBridgePeer {
         await send({
           content: chat.content.slice(0, 2000),
           username: chat.name.slice(0, 80) || "Minecraft",
-          ...(chat.uuid
-            ? { avatarURL: minecraftAvatarUrl(chat.uuid) }
-            : {}),
+          ...(chat.uuid ? { avatarURL: minecraftAvatarUrl(chat.uuid) } : {}),
         });
         return;
       }
@@ -273,9 +275,7 @@ export class DiscordBridgePeer {
         await send({
           content: `**${voice.name}** ${verb} ${channelLabel}`,
           username: voice.name.slice(0, 80) || "Mutualzz Bridge",
-          ...(voice.uuid
-            ? { avatarURL: minecraftAvatarUrl(voice.uuid) }
-            : {}),
+          ...(voice.uuid ? { avatarURL: minecraftAvatarUrl(voice.uuid) } : {}),
         });
       }
     } catch (error) {

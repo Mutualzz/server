@@ -128,6 +128,16 @@ export class BotClient extends SapphireClient {
           },
         ],
       },
+      {
+        status: "online",
+        activities: [
+          {
+            name: "Our app is a combo of discord and old MySpace :0",
+            type: ActivityType.Streaming,
+            url: "https://mutualzz.com",
+          },
+        ],
+      },
     ];
   }
 

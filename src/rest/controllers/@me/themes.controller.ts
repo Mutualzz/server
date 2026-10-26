@@ -1,4 +1,4 @@
-import { deleteCache, getCache, setCache } from "@mutualzz/cache";
+import { deleteCache, setCache } from "@mutualzz/cache";
 import { db, themesTable } from "@mutualzz/database";
 import type { APITheme } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
