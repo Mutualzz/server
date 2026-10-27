@@ -27,14 +27,12 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
   const rawSession = await redis.get(`rest:sessions:${identify.token}`);
   if (!rawSession) {
-    logger.error(
-      `Invalid token for session ${this.sessionId}`,
-    );
+    logger.warn(`Identify failed: invalid token (ip: ${this.ipAddress})`);
     await Send(this, {
       op: "InvalidSession",
       d: false,
     });
-    return this.close(GatewayCloseCodes.InvalidSession, "Invalid token");
+    return this.close(GatewayCloseCodes.AuthenticationFailed, "Invalid token");
   }
 
   const session: RESTSession = JSON.parse(rawSession);
@@ -48,7 +46,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
       op: "InvalidSession",
       d: false,
     });
-    return this.close(GatewayCloseCodes.InvalidSession, "Invalid user");
+    return this.close(GatewayCloseCodes.AuthenticationFailed, "Invalid user");
   }
 
   this.userId = user.id.toString();
