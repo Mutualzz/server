@@ -3,30 +3,32 @@
 Thanks for wanting to help with **Mutualzz Server**.
 
 Contributions are welcome. Redistributing unofficial builds or hosting a
-competing Mutualzz service is still not allowed — see [`LICENSE`](https://github.com/Mutualzz/server/blob/master/LICENSE).
-
+competing Mutualzz service is still not allowed — see [`LICENSE`](https://git.mutualzz.com/mutualzz/server/src/branch/master/LICENSE).
 
 ## Credit
 
 We want contributors to get credit for their work.
 
 - Your **git author name/email** stays on commits that land
-- Merged **pull requests** keep your GitHub attribution
+- Merged **pull requests** keep your attribution
 - Notable changes are called out in **changelogs / release notes** when we can
 - You're welcome to list Mutualzz contributions on your portfolio or resume
 
-If we miss crediting something meaningful, open an issue or mention it on the
+If we miss crediting something meaningful, [open an issue](https://git.mutualzz.com/mutualzz/server/issues) or mention it on the
 PR and we'll fix it.
 
 ## How to contribute
 
-1. Fork this repository.
-2. Create a focused branch.
-3. Make your change and test what you can locally.
-4. Open a pull request describing **what** changed and **why**.
+1. Sign in to [git.mutualzz.com](https://git.mutualzz.com) with your GitHub account.
+2. Fork [this repository](https://git.mutualzz.com/mutualzz/server).
+3. Create a focused branch.
+4. Make your change and test what you can locally.
+5. Open a pull request describing **what** changed and **why**.
+
+GitHub is a read-only mirror — pull requests opened there are not monitored.
 
 If you work from the Mutualzz monorepo, this directory is a git submodule —
-open the PR against **this** repo’s remote, not only the monorepo wrapper.
+open the PR against **this** repo on git.mutualzz.com, not only the monorepo wrapper.
 
 ## Contribution license
 
