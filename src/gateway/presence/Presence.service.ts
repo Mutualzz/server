@@ -153,6 +153,10 @@ export class PresenceService {
   private static pubsubStarted = false;
   private static subscriber: Redis | null = null;
 
+  static get subscriberStatus() {
+    return this.subscriber?.status ?? "not started";
+  }
+
   static startBackgroundWorkers() {
     this.ensureGcLoop();
     this.ensureScheduleLoop();

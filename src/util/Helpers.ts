@@ -55,9 +55,9 @@ import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts"
 import { VoiceStateRedis } from "@mutualzz/gateway/voice/VoiceState.redis.ts";
 import { mapUserProfileRow } from "./profileAssets.ts";
 
-export async function collectVisibleVoiceStates(userId: string): Promise<
-  VoiceState[]
-> {
+export async function collectVisibleVoiceStates(
+  userId: string,
+): Promise<VoiceState[]> {
   const [spaces, dmRecipients] = await Promise.all([
     db.query.spaceMembersTable.findMany({
       where: eq(spaceMembersTable.userId, BigInt(userId)),
@@ -517,9 +517,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     readStates,
     spaceNotificationSettings,
     mergedPresences,
-    profile: profile
-      ? mapUserProfileRow(profile, user.pronouns ?? null)
-      : null,
+    profile: profile ? mapUserProfileRow(profile, user.pronouns ?? null) : null,
     presenceSchedule,
     customStatusSchedule,
     users,
@@ -1107,4 +1105,25 @@ export const getFriendIds = async (userId: string): Promise<string[]> => {
     );
 
   return rows.map((row) => row.otherUserId.toString());
+};
+
+export const withTimeout = <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Operation timed out"));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+  });
 };

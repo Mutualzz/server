@@ -145,6 +145,14 @@ export class Server {
 
   private initLoggerMiddleware() {
     this.app.use((req, res, next) => {
+      if (req.path === "/health") {
+        return next();
+      }
+
+      if (req.path === "/favicon.ico") {
+        return next();
+      }
+
       const start = process.hrtime.bigint();
 
       res.on("finish", () => {
