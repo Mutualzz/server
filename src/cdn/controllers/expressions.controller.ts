@@ -7,39 +7,32 @@ import { bucketName, s3Client } from "@mutualzz/util";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
+import {
+  expressionsGetParams,
+  expressionsGetQuery,
+} from "@mutualzz/validators";
 
 export default class ExpressionsController {
   static async getExpression(req: Request, res: Response, next: NextFunction) {
     try {
-      const { expressionId, assetHash } = req.params as {
-        expressionId: string;
-        assetHash: string;
-      };
+      const { expressionId, assetHash } = expressionsGetParams.parse(
+        req.params,
+      );
 
-      const {
-        format: formatQuery,
-        size: sizeQuery,
-        animated: animatedQueryRaw,
-      } = req.query as {
-        format?: string;
-        size?: string;
-        animated?: string;
-      };
+      const { format, size, animated } = expressionsGetQuery.parse(req.query);
 
       const baseName = path.basename(assetHash, path.extname(assetHash));
       const urlExt = path.extname(assetHash).replace(".", "").toLowerCase();
 
       const isAnimatedHash = baseName.startsWith("a_");
 
-      let targetFormat =
-        normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
+      let targetFormat = normalizeFormat(format) ?? normalizeFormat(urlExt);
 
-      const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
       const explicitAnimated = ["true", "1", "on", "yes"].includes(
-        animatedQuery,
+        animated?.toString() ?? "",
       );
       const explicitStatic = ["false", "0", "off", "no"].includes(
-        animatedQuery,
+        animated?.toString() ?? "",
       );
 
       if (!targetFormat)
@@ -54,14 +47,8 @@ export default class ExpressionsController {
 
       if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
-      const boundedSize = (() => {
-        const n = Number(sizeQuery);
-        if (!Number.isFinite(n)) return undefined as number | undefined;
-        return Math.max(1, Math.min(4096, Math.floor(n)));
-      })();
-
       let cacheKey = `${expressionId}:${baseName}:${targetFormat}`;
-      if (boundedSize) cacheKey += `:${boundedSize}`;
+      if (size) cacheKey += `:${size}`;
       if (willAnimate) cacheKey += `:a`;
 
       const cached = await getCache("expressions", cacheKey);
@@ -103,8 +90,8 @@ export default class ExpressionsController {
       if (typeof image.toColourspace === "function")
         image = image.toColourspace("srgb");
 
-      if (boundedSize)
-        image = image.resize(boundedSize, boundedSize, {
+      if (size)
+        image = image.resize(size, size, {
           fit: "cover",
         });
 
@@ -115,7 +102,7 @@ export default class ExpressionsController {
         if (targetFormat === "webp") {
           image = image.webp({ quality: 80, loop: 0 });
         } else if (targetFormat === "gif") {
-          if (!boundedSize) {
+          if (!size) {
             const etag = contentEtag(sourceBody);
             expressionsCache.set(cacheKey, sourceBody);
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");

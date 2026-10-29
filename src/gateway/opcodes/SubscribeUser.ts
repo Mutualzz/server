@@ -11,6 +11,7 @@ import {
   spaceMembersTable,
 } from "@mutualzz/database";
 import { and, eq, sql } from "drizzle-orm";
+import { gatewaySubscribeUserPayload } from "@mutualzz/validators";
 import type { WebSocket } from "../util/WebSocket";
 import { Send, SessionRuntime } from "../util";
 
@@ -87,8 +88,10 @@ function consumePublicUserEvents(this: WebSocket, opts: EventOpts) {
 export async function onSubscribeUser(this: WebSocket, { d }: GatewayPayload) {
   if (!this.userId) return;
 
-  const userId = String(d?.userId ?? "");
-  if (!userId) return;
+  const parsed = gatewaySubscribeUserPayload.safeParse(d);
+  if (!parsed.success) return;
+
+  const { userId } = parsed.data;
 
   this.userSubscriptions = this.userSubscriptions ?? {};
 
@@ -109,8 +112,10 @@ export async function onUnsubscribeUser(
   this: WebSocket,
   { d }: GatewayPayload,
 ) {
-  const userId = String(d?.userId ?? "");
-  if (!userId) return;
+  const parsed = gatewaySubscribeUserPayload.safeParse(d);
+  if (!parsed.success) return;
+
+  const { userId } = parsed.data;
 
   this.userSubscriptions?.[userId]?.();
   delete this.userSubscriptions?.[userId];

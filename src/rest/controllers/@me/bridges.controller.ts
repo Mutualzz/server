@@ -42,6 +42,26 @@ import {
   requireSpacePermissions,
   Snowflake,
 } from "@mutualzz/util";
+import {
+  bridgeAckBody,
+  bridgeBindingParams,
+  bridgeChatBody,
+  bridgeCreateBody,
+  bridgeDiscordBindBody,
+  bridgeIdParams,
+  bridgeLinkCodeBody,
+  bridgeMemberParams,
+  bridgeMessagesListQuery,
+  bridgeRedeemBody,
+  bridgeRotateTokenBody,
+  bridgeServerParams,
+  bridgeServerUpdateBody,
+  bridgesListQuery,
+  bridgeSpaceParams,
+  bridgeUpdateBody,
+  bridgeVoiceBindBody,
+} from "@mutualzz/validators";
+import { parseOrBadRequest } from "../../util/Validation";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
@@ -84,8 +104,9 @@ const roleForBridge = async (
 export class SpaceBridgeController {
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
-      const spaceId = String(req.params.spaceId);
-      const bridge = await SpaceBridgeController.requireSpaceBridge(spaceId);
+      const bridge = await SpaceBridgeController.requireSpaceBridge(
+        String(req.params.spaceId),
+      );
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
       return BridgesDetailHandler.get(req, res, next, bridge, "admin");
     } catch (error) {
@@ -96,7 +117,8 @@ export class SpaceBridgeController {
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      const spaceId = String(req.params.spaceId);
+      const { spaceId } = parseOrBadRequest(bridgeSpaceParams, req.params);
+      const body = parseOrBadRequest(bridgeCreateBody, req.body ?? {});
       const space = await getSpace(spaceId);
       if (!space) {
         throw new HttpException(HttpStatusCode.NotFound, "Space not found");
@@ -118,25 +140,8 @@ export class SpaceBridgeController {
         );
       }
 
-      const name = String(req.body?.name ?? `${space.name} Bridge`).trim();
-      if (!name || name.length > 64) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Name must be 1–64 characters",
-        );
-      }
-
-      const serverId = String(req.body?.serverId ?? "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "");
-
-      if (req.body?.serverId != null && !serverId) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "serverId must be letters, numbers, _ or -",
-        );
-      }
+      const name = body.name ?? `${space.name} Bridge`.trim().slice(0, 64);
+      const serverId = body.serverId ?? "";
 
       const bridgeId = BigInt(Snowflake.generate());
       const [bridge] = await db
@@ -154,7 +159,7 @@ export class SpaceBridgeController {
           id: BigInt(Snowflake.generate()),
           bridgeId,
           serverId,
-          displayName: String(req.body?.displayName ?? serverId),
+          displayName: body.displayName || serverId,
         });
       }
 
@@ -309,7 +314,10 @@ export class SpaceBridgeController {
     }
   }
 
-  static async requireSpaceBridge(spaceId: string) {
+  static async requireSpaceBridge(rawSpaceId: string) {
+    const { spaceId } = parseOrBadRequest(bridgeSpaceParams, {
+      spaceId: rawSpaceId,
+    });
     const bridge = await db.query.bridgesTable.findFirst({
       where: eq(bridgesTable.spaceId, BigInt(spaceId)),
     });
@@ -341,7 +349,7 @@ export class MeBridgesController {
       const { user } = req;
       const uid = BigInt(user.id);
       const includeArchived =
-        req.query.archived === "1" || req.query.archived === "true";
+        bridgesListQuery.parse(req.query).archived === true;
 
       const [memberships, spaceMemberships] = await Promise.all([
         db.query.bridgeMembersTable.findMany({
@@ -426,36 +434,10 @@ export class MeBridgesController {
     try {
       const bridge = await MeBridgesController.requireBridgeFromParams(req);
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
+      const body = parseOrBadRequest(bridgeUpdateBody, req.body ?? {});
       const patch: { name?: string; status?: number } = {};
-
-      if (req.body?.name != null) {
-        const name = String(req.body.name).trim();
-        if (!name || name.length > 64) {
-          throw new HttpException(
-            HttpStatusCode.BadRequest,
-            "Name must be 1–64 characters",
-          );
-        }
-        patch.name = name;
-      }
-
-      if (req.body?.status != null) {
-        const status = Number(req.body.status);
-        if (status !== 0 && status !== 1) {
-          throw new HttpException(
-            HttpStatusCode.BadRequest,
-            "status must be 0 (active) or 1 (archived)",
-          );
-        }
-        patch.status = status;
-      }
-
-      if (patch.name === undefined && patch.status === undefined) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Provide name and/or status",
-        );
-      }
+      if (body.name != null) patch.name = body.name;
+      if (body.status != null) patch.status = body.status;
 
       const [updated] = await db
         .update(bridgesTable)
@@ -478,22 +460,11 @@ export class MeBridgesController {
     try {
       const bridge = await MeBridgesController.requireBridgeFromParams(req);
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
-      const serverId = String(req.params.serverId ?? "").trim();
-      const displayName = String(req.body?.displayName ?? "").trim();
-
-      if (!serverId) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "serverId is required",
-        );
-      }
-
-      if (!displayName || displayName.length > 64) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "displayName must be 1–64 characters",
-        );
-      }
+      const { serverId } = parseOrBadRequest(bridgeServerParams, req.params);
+      const { displayName } = parseOrBadRequest(
+        bridgeServerUpdateBody,
+        req.body ?? {},
+      );
 
       const existing = await db.query.bridgeMinecraftServersTable.findFirst({
         where: and(
@@ -556,13 +527,7 @@ export class MeBridgesController {
     try {
       const { user } = req;
       const { bridge } = await MeBridgesController.requireAccessibleBridge(req);
-      const lastAckedId = String(req.body?.lastAckedId ?? "").trim();
-      if (!lastAckedId) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "lastAckedId is required",
-        );
-      }
+      const { lastAckedId } = parseOrBadRequest(bridgeAckBody, req.body ?? {});
 
       await db
         .insert(bridgeReadStatesTable)
@@ -596,12 +561,10 @@ export class MeBridgesController {
   static async listMessages(req: Request, res: Response, next: NextFunction) {
     try {
       const { bridge } = await MeBridgesController.requireAccessibleBridge(req);
-      const limitRaw = Number(req.query.limit);
-      const before =
-        typeof req.query.before === "string" ? req.query.before : undefined;
+      const { limit, before } = bridgeMessagesListQuery.parse(req.query);
 
       const messages = await listBridgeMessages(bridge.id.toString(), {
-        limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+        limit,
         before,
       });
 
@@ -657,10 +620,10 @@ export class MeBridgesController {
         name: "default",
       });
 
-      const serverId = String(req.body?.serverId ?? "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "");
+      const { serverId } = parseOrBadRequest(
+        bridgeRotateTokenBody,
+        req.body ?? {},
+      );
 
       res.json({
         token: token.plaintext,
@@ -675,16 +638,10 @@ export class MeBridgesController {
     try {
       const bridge = await MeBridgesController.requireBridgeFromParams(req);
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
-      const serverId = String(req.body?.serverId ?? "").trim();
-      const guildId = String(req.body?.guildId ?? "").trim();
-      const channelId = String(req.body?.channelId ?? "").trim();
-
-      if (!serverId || !guildId || !channelId) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "serverId, guildId, and channelId are required",
-        );
-      }
+      const { serverId, guildId, channelId } = parseOrBadRequest(
+        bridgeDiscordBindBody,
+        req.body ?? {},
+      );
 
       const existing = await db.query.bridgeDiscordBindingsTable.findFirst({
         where: and(
@@ -762,18 +719,11 @@ export class MeBridgesController {
         bridgeOverride ??
         (await MeBridgesController.requireBridgeFromParams(req));
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
-      const serverId = String(req.body?.serverId ?? "").trim();
-      const channelId = String(req.body?.channelId ?? "").trim();
-      const nameRaw = String(req.body?.name ?? "default").trim().toLowerCase();
-      const name = nameRaw.replace(/[^a-z0-9_-]/g, "") || "default";
+      const { serverId, channelId, name } = parseOrBadRequest(
+        bridgeVoiceBindBody,
+        req.body ?? {},
+      );
       const spaceId = bridge.spaceId.toString();
-
-      if (!serverId || !channelId) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "serverId and channelId are required",
-        );
-      }
 
       const channel = await db.query.channelsTable.findFirst({
         where: eq(channelsTable.id, BigInt(channelId)),
@@ -844,7 +794,9 @@ export class MeBridgesController {
     try {
       const bridge = await MeBridgesController.requireBridgeFromParams(req);
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
-      const bindingId = BigInt(String(req.params.bindingId));
+      const bindingId = BigInt(
+        parseOrBadRequest(bridgeBindingParams, req.params).bindingId,
+      );
       const existing = await db.query.bridgeDiscordBindingsTable.findFirst({
         where: and(
           eq(bridgeDiscordBindingsTable.id, bindingId),
@@ -870,7 +822,9 @@ export class MeBridgesController {
     try {
       const bridge = await MeBridgesController.requireBridgeFromParams(req);
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
-      const bindingId = BigInt(String(req.params.bindingId));
+      const bindingId = BigInt(
+        parseOrBadRequest(bridgeBindingParams, req.params).bindingId,
+      );
       const existing = await db.query.bridgeVoiceBindingsTable.findFirst({
         where: and(
           eq(bridgeVoiceBindingsTable.id, bindingId),
@@ -916,9 +870,7 @@ export class MeBridgesController {
       }
 
       const preferredId =
-        req.body?.bridgeId != null && String(req.body.bridgeId).trim() !== ""
-          ? String(req.body.bridgeId)
-          : null;
+        parseOrBadRequest(bridgeLinkCodeBody, req.body ?? {}).bridgeId || null;
 
       const preferred = preferredId
         ? accessible.find((b) => b.id.toString() === preferredId)
@@ -968,12 +920,7 @@ export class MeBridgesController {
   ) {
     try {
       const { user } = req;
-      const code = String(req.body?.code ?? "")
-        .trim()
-        .toUpperCase();
-      if (!code) {
-        throw new HttpException(HttpStatusCode.BadRequest, "code is required");
-      }
+      const { code } = parseOrBadRequest(bridgeRedeemBody, req.body ?? {});
 
       const already = await db.query.minecraftLinksTable.findFirst({
         where: eq(minecraftLinksTable.userId, BigInt(user.id)),
@@ -1096,7 +1043,9 @@ export class MeBridgesController {
   static async leave(req: Request, res: Response, next: NextFunction) {
     try {
       const { user } = req;
-      const bridgeId = BigInt(String(req.params.bridgeId));
+      const bridgeId = BigInt(
+        parseOrBadRequest(bridgeIdParams, req.params).bridgeId,
+      );
       const bridge = await db.query.bridgesTable.findFirst({
         where: eq(bridgesTable.id, bridgeId),
       });
@@ -1217,7 +1166,10 @@ export class MeBridgesController {
     try {
       const bridge = await MeBridgesController.requireBridgeFromParams(req);
       await SpaceBridgeController.requireBridgeAdmin(req, bridge);
-      const targetUserId = String(req.params.userId);
+      const { userId: targetUserId } = parseOrBadRequest(
+        bridgeMemberParams,
+        req.params,
+      );
 
       const removed = await removeMember(bridge.id, targetUserId);
       if (!removed) {
@@ -1234,28 +1186,15 @@ export class MeBridgesController {
     try {
       const { user } = req;
       const { bridge } = await MeBridgesController.requireAccessibleBridge(req);
-      const content = String(req.body?.content ?? "").trim();
-      if (!content) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "content is required",
-        );
-      }
-      if (content.length > 500) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "content must be 500 characters or less",
-        );
-      }
+      const body = parseOrBadRequest(bridgeChatBody, req.body ?? {});
+      const { content } = body;
 
       const connected = connectedServerIds(bridge.id.toString());
       const servers = await db.query.bridgeMinecraftServersTable.findMany({
         where: eq(bridgeMinecraftServersTable.bridgeId, bridge.id),
       });
       const serverId = sanitizeServerId(
-        String(
-          req.body?.serverId ?? connected[0] ?? servers[0]?.serverId ?? "",
-        ),
+        body.serverId ?? connected[0] ?? servers[0]?.serverId ?? "",
       );
       if (!serverId) {
         throw new HttpException(
@@ -1336,7 +1275,9 @@ export class MeBridgesController {
   }
 
   static async requireBridgeFromParams(req: Request) {
-    const bridgeId = BigInt(String(req.params.bridgeId));
+    const bridgeId = BigInt(
+      parseOrBadRequest(bridgeIdParams, req.params).bridgeId,
+    );
     const bridge = await db.query.bridgesTable.findFirst({
       where: eq(bridgesTable.id, bridgeId),
     });

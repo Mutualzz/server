@@ -44,15 +44,8 @@ export default class AvatarsController {
 
       if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
-      const boundedSize = (() => {
-        const n = Number(size);
-        if (!Number.isFinite(n)) return undefined as number | undefined;
-
-        return Math.max(1, Math.min(4096, Math.floor(n)));
-      })();
-
       let cacheKey = `${userId}:${baseName}:${targetFormat}`;
-      if (boundedSize) cacheKey += `:${boundedSize}`;
+      if (size) cacheKey += `:${size}`;
       if (willAnimate) cacheKey += `:a`;
 
       const cached = await getCache("avatar", cacheKey);
@@ -91,8 +84,8 @@ export default class AvatarsController {
       if (typeof image.toColourspace === "function")
         image = image.toColourspace("srgb");
 
-      if (boundedSize)
-        image = image.resize(boundedSize, boundedSize, {
+      if (size)
+        image = image.resize(size, size, {
           fit: "cover",
         });
 
@@ -103,7 +96,7 @@ export default class AvatarsController {
         if (targetFormat === "webp") {
           image = image.webp({ quality: 80, loop: 0 });
         } else if (targetFormat === "gif") {
-          if (!boundedSize) {
+          if (!size) {
             const etag = contentEtag(sourceBody);
             avatarCache.set(cacheKey, sourceBody);
             res.setHeader("Cache-Control", "public, max-age=86400, immutable");

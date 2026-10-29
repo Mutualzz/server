@@ -7,24 +7,16 @@ import path from "path";
 import sharp from "sharp";
 import { MIME_TYPES } from "../Constants";
 import { contentEtag, normalizeFormat } from "../utils";
+import { spacesGetIconParams, spacesGetIconQuery } from "@mutualzz/validators";
 
 export default class SpacesController {
     static async getIcon(req: Request, res: Response, next: NextFunction) {
         try {
-            const { spaceId, icon } = req.params as {
-                spaceId: string;
-                icon: string;
-            };
+            const { spaceId, icon } = spacesGetIconParams.parse(req.params);
 
-            const {
-                format: formatQuery,
-                size: sizeQuery,
-                animated: animatedQueryRaw,
-            } = req.query as {
-                format?: string;
-                size?: string;
-                animated?: string;
-            };
+            const { format, size, animated } = spacesGetIconQuery.parse(
+                req.query,
+            );
 
             const baseName = path.basename(icon, path.extname(icon));
             const urlExt = path.extname(icon).replace(".", "").toLowerCase();
@@ -33,14 +25,13 @@ export default class SpacesController {
 
             // Normalize caller intent: choose target format from ?format override or URL ext
             let targetFormat =
-                normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
+                normalizeFormat(format) ?? normalizeFormat(urlExt);
 
-            const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
             const explicitAnimated = ["true", "1", "on", "yes"].includes(
-                animatedQuery,
+                animated?.toString() ?? "",
             );
             const explicitStatic = ["false", "0", "off", "no"].includes(
-                animatedQuery,
+                animated?.toString() ?? "",
             );
 
             if (!targetFormat)
@@ -56,14 +47,8 @@ export default class SpacesController {
 
             if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
-            const boundedSize = (() => {
-                const n = Number(sizeQuery);
-                if (!Number.isFinite(n)) return undefined as number | undefined;
-                return Math.max(1, Math.min(4096, Math.floor(n)));
-            })();
-
             let cacheKey = `${spaceId}:${baseName}:${targetFormat}`;
-            if (boundedSize) cacheKey += `:${boundedSize}`;
+            if (size) cacheKey += `:${size}`;
             if (willAnimate) cacheKey += `:a`;
 
             const cached = await getCache("spaceIcon", cacheKey);
@@ -108,8 +93,8 @@ export default class SpacesController {
             if (typeof image.toColourspace === "function")
                 image = image.toColourspace("srgb");
 
-            if (boundedSize)
-                image = image.resize(boundedSize, boundedSize, {
+            if (size)
+                image = image.resize(size, size, {
                     fit: "cover",
                 });
 
@@ -120,7 +105,7 @@ export default class SpacesController {
                 if (targetFormat === "webp") {
                     image = image.webp({ quality: 80, loop: 0 });
                 } else if (targetFormat === "gif") {
-                    if (!boundedSize) {
+                    if (!size) {
                         const etag = contentEtag(sourceBody);
                         spaceIconCache.set(cacheKey, sourceBody);
                         res.setHeader(

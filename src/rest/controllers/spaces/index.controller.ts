@@ -37,6 +37,7 @@ import {
   validateSpaceGetOneParams,
   validateSpaceUpdate,
   validateSpaceUpdateParams,
+  zJsonString,
 } from "@mutualzz/validators";
 import { eq, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -48,11 +49,9 @@ export default class SpacesController {
     try {
       const { user } = req;
 
-      let rawCrop;
-      if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
       const { crop, name } = validateSpaceCreate.parse({
         ...req.body,
-        crop: rawCrop,
+        crop: zJsonString.optional().parse(req.body.crop || undefined),
       });
 
       const iconFile = imageFileValidator.optional().parse(req.file);
@@ -383,11 +382,9 @@ export default class SpacesController {
         needed: ["ManageSpace"],
       });
 
-      let rawCrop;
-      if (req.body.crop) rawCrop = JSON.parse(req.body.crop);
       const { name, description, crop, themeId } = validateSpaceUpdate.parse({
         ...req.body,
-        crop: rawCrop,
+        crop: zJsonString.optional().parse(req.body.crop || undefined),
       });
 
       const iconFile = imageFileValidator.optional().parse(req.file);

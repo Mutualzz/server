@@ -40,6 +40,15 @@ import {
 } from "./OnlinePlayers";
 import { ensureMember } from "./BridgeMembers";
 import { generateLinkCode, hashBridgeToken } from "./tokens";
+import {
+  minecraftChatData,
+  minecraftIdentifyData,
+  minecraftLinkData,
+  minecraftPlayerData,
+  minecraftVoiceJoinData,
+  minecraftVoiceStateData,
+} from "@mutualzz/validators";
+import type { z } from "zod";
 import type {
   BridgeChatPayload,
   BridgePlayerPayload,
@@ -137,6 +146,24 @@ const closeWithError = (
 ) => {
   sendToSocket(socket, { op: "error", d: { code, message } });
   socket.close(closeCode, message);
+};
+
+const parseData = <T extends z.ZodType>(
+  socket: WebSocket,
+  payload: MinecraftPayload,
+  schema: T,
+): z.output<T> | null => {
+  const result = schema.safeParse(payload.d);
+  if (result.success) return result.data;
+
+  sendToSocket(socket, {
+    op: "error",
+    d: {
+      code: "invalid_payload",
+      message: `Invalid ${String(payload.op)} payload`,
+    },
+  });
+  return null;
 };
 
 export const onMinecraftConnection = (
@@ -288,10 +315,8 @@ export const onMinecraftConnection = (
 };
 
 const handleIdentify = async (socket: WebSocket, payload: MinecraftPayload) => {
-  const token = String(payload.d?.token ?? "");
-  const serverId = String(payload.d?.serverId ?? "");
-
-  if (!token || !serverId) {
+  const parsed = minecraftIdentifyData.safeParse(payload.d);
+  if (!parsed.success) {
     closeWithError(
       socket,
       "missing_credentials",
@@ -299,6 +324,8 @@ const handleIdentify = async (socket: WebSocket, payload: MinecraftPayload) => {
     );
     return;
   }
+
+  const { token, serverId } = parsed.data;
 
   const tokenHash = hashBridgeToken(token);
   const tokenRow = await db.query.bridgeTokensTable.findFirst({
@@ -390,14 +417,13 @@ const handleChat = async (
   session: MinecraftSession,
   payload: MinecraftPayload,
 ) => {
-  const name = String(payload.d?.name ?? "Unknown");
-  const content = String(payload.d?.content ?? "").trim();
-  const uuid = payload.d?.uuid != null ? String(payload.d.uuid) : undefined;
+  const data = parseData(session.socket, payload, minecraftChatData);
+  if (!data) return;
 
-  if (!content) return;
+  const { name, content, uuid } = data;
 
   const messageId = `${session.sessionId}:${Snowflake.generate()}`;
-  const data: BridgeChatPayload = {
+  const chat: BridgeChatPayload = {
     bridgeId: session.bridgeId,
     serverId: session.serverId,
     source: "minecraft",
@@ -411,7 +437,7 @@ const handleChat = async (
     type: "CHAT",
     bridgeId: session.bridgeId,
     sourceId: messageId,
-    data,
+    data: chat,
   });
 };
 
@@ -420,9 +446,10 @@ const handlePlayerEvent = async (
   payload: MinecraftPayload,
   type: "JOIN" | "LEAVE",
 ) => {
-  const uuid = String(payload.d?.uuid ?? "");
-  const name = String(payload.d?.name ?? "Unknown");
-  if (!uuid) return;
+  const player = parseData(session.socket, payload, minecraftPlayerData);
+  if (!player) return;
+
+  const { uuid, name } = player;
 
   if (type === "JOIN") {
     playerJoined(session.bridgeId, {
@@ -482,18 +509,11 @@ const handleLink = async (
   session: MinecraftSession,
   payload: MinecraftPayload,
 ) => {
-  const uuid = String(payload.d?.uuid ?? "");
-  const name = String(payload.d?.name ?? "Unknown");
-  const code =
-    payload.d?.code != null ? String(payload.d.code).toUpperCase() : null;
+  const link = parseData(session.socket, payload, minecraftLinkData);
+  if (!link) return;
 
-  if (!uuid) {
-    sendToSocket(session.socket, {
-      op: "error",
-      d: { code: "missing_uuid", message: "uuid required for link" },
-    });
-    return;
-  }
+  const { uuid, name } = link;
+  const code = link.code || null;
 
   const existing = await db.query.minecraftLinksTable.findFirst({
     where: eq(minecraftLinksTable.minecraftUuid, uuid),
@@ -617,9 +637,11 @@ const handleVoiceJoin = async (
   session: MinecraftSession,
   payload: MinecraftPayload,
 ) => {
-  const uuid = String(payload.d?.uuid ?? "");
-  const name = String(payload.d?.name ?? "Unknown");
-  const room = sanitizeRoomName(String(payload.d?.room ?? "default"));
+  const join = parseData(session.socket, payload, minecraftVoiceJoinData);
+  if (!join) return;
+
+  const { uuid, name } = join;
+  const room = sanitizeRoomName(join.room);
 
   const reply = (d: Record<string, unknown>) => {
     sendToSocket(session.socket, {
@@ -628,15 +650,6 @@ const handleVoiceJoin = async (
       d: { action: "join", uuid, name, room, ...d },
     });
   };
-
-  if (!uuid) {
-    reply({
-      ok: false,
-      code: "missing_uuid",
-      message: "uuid required for voice join",
-    });
-    return;
-  }
 
   const link = await db.query.minecraftLinksTable.findFirst({
     where: eq(minecraftLinksTable.minecraftUuid, uuid),
@@ -775,8 +788,10 @@ const handleVoiceLeave = async (
   session: MinecraftSession,
   payload: MinecraftPayload,
 ) => {
-  const uuid = String(payload.d?.uuid ?? "");
-  const name = String(payload.d?.name ?? "Unknown");
+  const player = parseData(session.socket, payload, minecraftPlayerData);
+  if (!player) return;
+
+  const { uuid, name } = player;
 
   const reply = (d: Record<string, unknown>) => {
     sendToSocket(session.socket, {
@@ -785,15 +800,6 @@ const handleVoiceLeave = async (
       d: { action: "leave", uuid, name, ...d },
     });
   };
-
-  if (!uuid) {
-    reply({
-      ok: false,
-      code: "missing_uuid",
-      message: "uuid required for voice leave",
-    });
-    return;
-  }
 
   const link = await db.query.minecraftLinksTable.findFirst({
     where: eq(minecraftLinksTable.minecraftUuid, uuid),
@@ -865,16 +871,15 @@ const handleVoiceState = async (
   session: MinecraftSession,
   payload: MinecraftPayload,
 ) => {
-  const uuid = String(payload.d?.uuid ?? "");
-  if (!uuid) return;
+  const state = parseData(session.socket, payload, minecraftVoiceStateData);
+  if (!state) return;
+
+  const { uuid, selfMute, selfDeaf } = state;
 
   const link = await db.query.minecraftLinksTable.findFirst({
     where: eq(minecraftLinksTable.minecraftUuid, uuid),
   });
   if (!link) return;
-
-  const selfMute = payload.d?.selfMute === true;
-  const selfDeaf = payload.d?.selfDeaf === true;
 
   await VoiceStateService.updateMinecraftSelfState({
     userId: link.userId.toString(),

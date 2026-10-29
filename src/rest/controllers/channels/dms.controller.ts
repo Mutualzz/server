@@ -13,7 +13,7 @@ import { channelRecipientsTable, channelsTable, db, usersTable, } from "@mutualz
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { deleteCache, setCache } from "@mutualzz/cache";
-import { imageFileValidator, validateChannelParamsDelete, validateDmChannelCreateBody, } from "@mutualzz/validators";
+import { imageFileValidator, validateChannelParamsDelete, validateDmChannelCreateBody, zMultipartCrop, } from "@mutualzz/validators";
 import { BitField, channelFlags } from "@mutualzz/bitfield";
 import sharp from "sharp";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -225,9 +225,14 @@ export default class DMsController {
         if (isGif) {
           let iconSharp = sharp(buffer, { animated: true });
 
-          if (req.body.crop) {
-            const { x, y, width, height } = JSON.parse(req.body.crop);
-            iconSharp = iconSharp.extract({ left: x, top: y, width, height });
+          const crop = zMultipartCrop.optional().parse(req.body.crop || undefined);
+          if (crop) {
+            iconSharp = iconSharp.extract({
+              left: crop.x,
+              top: crop.y,
+              width: crop.width,
+              height: crop.height,
+            });
             buffer = await iconSharp.toBuffer();
           }
         }

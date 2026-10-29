@@ -16,6 +16,12 @@ import { resolveUserIdentifier } from "@mutualzz/util";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import type { NextFunction, Request, Response } from "express";
 import { assertCanViewUserProfile } from "@mutualzz/util/privacy.ts";
+import {
+  oauthStartBody,
+  spotifyOAuthCompleteBody,
+  spotifyPatchBody,
+} from "@mutualzz/validators";
+import { parseOrBadRequest } from "../../util/Validation";
 
 export default class SpotifyController {
   static async startOAuth(req: Request, res: Response, next: NextFunction) {
@@ -26,9 +32,8 @@ export default class SpotifyController {
       }
 
       const returnTo =
-        typeof req.body?.returnTo === "string" && req.body.returnTo.trim()
-          ? req.body.returnTo.trim()
-          : `${process.env.FRONTEND_URL?.replace(/\/$/, "") ?? ""}/@me?spotify=connected`;
+        oauthStartBody.parse(req.body ?? {}).returnTo ??
+        `${process.env.FRONTEND_URL?.replace(/\/$/, "") ?? ""}/@me?spotify=connected`;
 
       const url = await createSpotifyAuthorizeUrl({
         userId: user.id,
@@ -43,14 +48,10 @@ export default class SpotifyController {
 
   static async completeOAuth(req: Request, res: Response, next: NextFunction) {
     try {
-      const code = typeof req.body?.code === "string" ? req.body.code : "";
-      const state = typeof req.body?.state === "string" ? req.body.state : "";
-      if (!code || !state) {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Missing code or state",
-        );
-      }
+      const { code, state } = parseOrBadRequest(
+        spotifyOAuthCompleteBody,
+        req.body,
+      );
 
       const returnTo = await handleSpotifyOAuthCallback({ code, state });
       res.json({ returnTo });
@@ -77,13 +78,8 @@ export default class SpotifyController {
       if (!user) {
         throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
       }
-      if (typeof req.body?.shareSpotify !== "boolean") {
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "shareSpotify is required",
-        );
-      }
-      res.json(await updateShareSpotify(user.id, req.body.shareSpotify));
+      const { shareSpotify } = parseOrBadRequest(spotifyPatchBody, req.body);
+      res.json(await updateShareSpotify(user.id, shareSpotify));
     } catch (err) {
       next(err);
     }

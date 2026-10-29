@@ -7,6 +7,12 @@ import path from "path";
 import sharp from "sharp";
 import { MIME_TYPES } from "../Constants";
 import { contentEtag, normalizeFormat } from "../utils";
+import {
+  profilesGetFontParams,
+  profilesGetImageParams,
+  profilesGetImageQuery,
+  profilesGetMusicParams,
+} from "@mutualzz/validators";
 
 const FONT_HASH_RE = /^[a-f0-9]{64}$/i;
 const MUSIC_HASH_RE = /^[a-f0-9]{64}$/i;
@@ -53,31 +59,23 @@ async function getProfileImage(
   req: Request,
   res: Response,
 ) {
-  const { userId, asset } = req.params as {
-    userId: string;
-    asset: string;
-  };
+  const { userId, asset } = profilesGetImageParams.parse(req.params);
 
-  const {
-    format: formatQuery,
-    size: sizeQuery,
-    animated: animatedQueryRaw,
-  } = req.query as {
-    format?: string;
-    size?: string;
-    animated?: string;
-  };
+  const { format, size, animated } = profilesGetImageQuery.parse(req.query);
 
   const baseName = path.basename(asset, path.extname(asset));
   const urlExt = path.extname(asset).replace(".", "").toLowerCase();
 
   const isAnimatedHash = baseName.startsWith("a_");
 
-  let targetFormat = normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
+  let targetFormat = normalizeFormat(format) ?? normalizeFormat(urlExt);
 
-  const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
-  const explicitAnimated = ["true", "1", "on", "yes"].includes(animatedQuery);
-  const explicitStatic = ["false", "0", "off", "no"].includes(animatedQuery);
+  const explicitAnimated = ["true", "1", "on", "yes"].includes(
+    animated?.toString() ?? "",
+  );
+  const explicitStatic = ["false", "0", "off", "no"].includes(
+    animated?.toString() ?? "",
+  );
 
   if (!targetFormat) {
     targetFormat = isAnimatedHash && explicitAnimated ? "webp" : "png";
@@ -91,15 +89,8 @@ async function getProfileImage(
 
   if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
-  const boundedSize = (() => {
-    const n = Number(sizeQuery);
-    if (!Number.isFinite(n)) return undefined as number | undefined;
-
-    return Math.max(1, Math.min(4096, Math.floor(n)));
-  })();
-
   let cacheKey = `${kind}:${userId}:${baseName}:${targetFormat}`;
-  if (boundedSize) cacheKey += `:${boundedSize}`;
+  if (size) cacheKey += `:${size}`;
   if (willAnimate) cacheKey += `:a`;
 
   const cached = await getCache("profileImage", cacheKey);
@@ -129,8 +120,8 @@ async function getProfileImage(
   if (typeof image.toColourspace === "function")
     image = image.toColourspace("srgb");
 
-  if (boundedSize)
-    image = image.resize(boundedSize, boundedSize, {
+  if (size)
+    image = image.resize(size, size, {
       fit: "inside",
       withoutEnlargement: true,
     });
@@ -141,7 +132,7 @@ async function getProfileImage(
     if (targetFormat === "webp") {
       image = image.webp({ quality: 80, loop: 0 });
     } else if (targetFormat === "gif") {
-      if (!boundedSize) {
+      if (!size) {
         const etag = contentEtag(sourceBody);
         profileImageCache.set(cacheKey, sourceBody);
         res.setHeader("Cache-Control", "public, max-age=86400, immutable");
@@ -224,10 +215,7 @@ export default class ProfilesController {
 
   static async getFont(req: Request, res: Response, next: NextFunction) {
     try {
-      const { userId, font } = req.params as {
-        userId: string;
-        font: string;
-      };
+      const { userId, font } = profilesGetFontParams.parse(req.params);
 
       const hash = path.basename(font, path.extname(font));
       const ext = path.extname(font).replace(".", "").toLowerCase();
@@ -256,10 +244,7 @@ export default class ProfilesController {
 
   static async getMusic(req: Request, res: Response, next: NextFunction) {
     try {
-      const { userId, music } = req.params as {
-        userId: string;
-        music: string;
-      };
+      const { userId, music } = profilesGetMusicParams.parse(req.params);
 
       const hash = path.basename(music, path.extname(music));
       if (!MUSIC_HASH_RE.test(hash)) {

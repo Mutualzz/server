@@ -68,6 +68,7 @@ import { patchChannelNotificationSettingsSchema } from "@mutualzz/validators";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import {
+  messagesGetQuery,
   validateChannelParamsGet,
   validateMessageAckParams,
   validateMessageBodyPatch,
@@ -1012,24 +1013,11 @@ export default class MessagesController {
           needed: ["ViewChannel", "ReadMessageHistory"],
         });
 
-      const aroundRaw = req.query.around ? `${req.query.around}` : undefined;
-      const beforeRaw = req.query.before ? `${req.query.before}` : undefined;
-      const afterRaw = req.query.after ? `${req.query.after}` : undefined;
-
-      const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 100));
+      const { around, before, after, limit } = messagesGetQuery.parse(
+        req.query,
+      );
 
       const nowSnowflake = BigInt(Snowflake.generate());
-      const parseSnow = (v?: string) => (v ? BigInt(v).toString() : undefined);
-
-      const around = aroundRaw ? parseSnow(aroundRaw) : undefined;
-      const before = beforeRaw ? parseSnow(beforeRaw) : undefined;
-      const after = afterRaw ? parseSnow(afterRaw) : undefined;
-
-      if (limit < 1 || limit > 100)
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Limit must be between 1 and 100",
-        );
 
       if (before && BigInt(before) > nowSnowflake)
         throw new HttpException(

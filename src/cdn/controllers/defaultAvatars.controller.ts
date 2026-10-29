@@ -7,11 +7,15 @@ import type { NextFunction, Request, Response } from "express";
 import path from "path";
 import sharp, { type FormatEnum } from "sharp";
 import { MIME_TYPES } from "../Constants";
+import {
+  defaultAvatarsGetParams,
+  defaultAvatarsGetQuery,
+} from "@mutualzz/validators";
 
 export default class DefaultAvatarsController {
   static async get(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params as { id: string };
+      const { id } = defaultAvatarsGetParams.parse(req.params);
 
       if (!id.match(/^[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/))
         throw new HttpException(
@@ -19,18 +23,10 @@ export default class DefaultAvatarsController {
           "Invalid default avatar ID",
         );
 
-      const { format: formatQuery, size, version: versionQuery } = req.query;
-
-      const version = versionQuery ?? "light";
-
-      if (version !== "light" && version !== "dark")
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Invalid version query parameter",
-        );
+      const { format, size, version } = defaultAvatarsGetQuery.parse(req.query);
 
       const ext = path.extname(id).replace(".", "").toLowerCase();
-      const finalFormat = (formatQuery as string) || ext;
+      const finalFormat = format || ext;
       const name = id.replace(/\.[^/.]+$/, "");
 
       let cacheKey = `${name}:${finalFormat}:${version}`;
@@ -56,13 +52,13 @@ export default class DefaultAvatarsController {
 
         const originalBuffer = await Body.transformToByteArray();
 
-        if (!size && !formatQuery) {
+        if (!size && !format) {
           outputBuffer = originalBuffer;
         } else {
           let image = sharp(originalBuffer);
 
-          if (formatQuery) {
-            image = image.toFormat(formatQuery as keyof FormatEnum);
+          if (format) {
+            image = image.toFormat(format as keyof FormatEnum);
           }
 
           if (size && !isNaN(Number(size))) {

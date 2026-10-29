@@ -3,6 +3,7 @@ import { type MemberListRange, Send, SessionRuntime } from "../util";
 import type { GatewayPayload } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
 import { getChannelOverwrites, getMember, getSpace } from "@mutualzz/util";
+import { gatewayLazyRequestPayload } from "@mutualzz/validators";
 import {
   canViewChannel,
   computeListIdFromOverwrites,
@@ -16,20 +17,24 @@ import {
 export async function onLazyRequest(this: WebSocket, { d }: GatewayPayload) {
   if (!this.userId) return;
 
-  const { spaceId, channels } = d;
-  if (!spaceId || !channels) throw new Error("Must provide channel ranges");
+  const parsed = gatewayLazyRequestPayload.safeParse(d);
+  if (!parsed.success) {
+    logger.warn(`Invalid LazyRequest payload (session: ${this.sessionId})`);
+    return;
+  }
+
+  const { spaceId, channels } = parsed.data;
 
   const channelId = Object.keys(channels)[0];
   if (!channelId) return;
 
-  const ranges = channels[channelId] as MemberListRange[];
-  if (!Array.isArray(ranges)) throw new Error("Not a valid Array");
+  const ranges: MemberListRange[] = channels[channelId];
 
-  const space = await getSpace(String(spaceId));
+  const space = await getSpace(spaceId);
   if (!space) return;
 
   const isOwner = BigInt(this.userId) === BigInt(space.ownerId);
-  const member = await getMember(String(spaceId), this.userId);
+  const member = await getMember(spaceId, this.userId);
   if (!isOwner && !member) return;
 
   const { allow: everyoneAllow, deny: everyoneDeny } =

@@ -25,6 +25,7 @@ import {
   validateChannelParamsGet,
   validateChannelParamsUpdate,
   validateChannelQueryDelete,
+  zMultipartCrop,
 } from "@mutualzz/validators";
 import { and, eq, isNull, max, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
@@ -131,13 +132,13 @@ export default class ChannelsController {
             animated: true,
           });
 
-          if (req.body.crop) {
-            const { x, y, width, height } = JSON.parse(req.body.crop);
+          const crop = zMultipartCrop.optional().parse(req.body.crop || undefined);
+          if (crop) {
             iconSharp = iconSharp.extract({
-              left: x,
-              top: y,
-              width,
-              height,
+              left: crop.x,
+              top: crop.y,
+              width: crop.width,
+              height: crop.height,
             });
 
             buffer = await iconSharp.toBuffer();
@@ -306,9 +307,16 @@ export default class ChannelsController {
           if (isGif) {
             let iconSharp = sharp(buffer, { animated: true });
 
-            if (req.body.crop) {
-              const { x, y, width, height } = JSON.parse(req.body.crop);
-              iconSharp = iconSharp.extract({ left: x, top: y, width, height });
+            const crop = zMultipartCrop
+              .optional()
+              .parse(req.body.crop || undefined);
+            if (crop) {
+              iconSharp = iconSharp.extract({
+                left: crop.x,
+                top: crop.y,
+                width: crop.width,
+                height: crop.height,
+              });
               buffer = await iconSharp.toBuffer();
             }
           }

@@ -1,14 +1,9 @@
-import type { GatewayPayload, PresenceActivityEmoji } from "@mutualzz/types";
+import type { GatewayPayload } from "@mutualzz/types";
 import { GatewayCloseCodes } from "@mutualzz/types";
+import { gatewayCustomStatusScheduleSetPayload } from "@mutualzz/validators";
 import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "../presence/Presence.service.ts";
-import { MAX_STR } from "../presence/Presence.validator.ts";
-
-interface Payload {
-  text: string;
-  emoji?: PresenceActivityEmoji | null;
-  durationMs: number;
-}
+import { sanitizeActivityEmoji } from "../presence/Presence.validator.ts";
 
 export async function onCustomStatusScheduleSet(
   this: WebSocket,
@@ -19,22 +14,14 @@ export async function onCustomStatusScheduleSet(
     return;
   }
 
-  const body = (data.d ?? {}) as Partial<Payload>;
-  const text = typeof body.text === "string" ? body.text.trim() : "";
-  const emoji = body.emoji ?? null;
-  const durationMs = Number(body.durationMs);
+  const parsed = gatewayCustomStatusScheduleSetPayload.safeParse(data.d);
+  if (!parsed.success) return;
 
-  if (!text && !emoji) return;
-  if (!Number.isFinite(durationMs)) return;
-
-  const clampedDurationMs = Math.max(
-    0,
-    Math.min(durationMs, 7 * 24 * 60 * 60_000),
-  );
+  const { text, emoji, durationMs } = parsed.data;
 
   await PresenceService.setScheduledCustomStatus(this.userId, {
-    text: text.slice(0, MAX_STR),
-    emoji,
-    durationMs: clampedDurationMs,
+    text,
+    emoji: sanitizeActivityEmoji(emoji) ?? null,
+    durationMs,
   });
 }

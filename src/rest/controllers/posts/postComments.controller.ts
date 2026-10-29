@@ -23,6 +23,7 @@ import {
   isBlockedBetween,
 } from "@mutualzz/util";
 import {
+  postCommentsGetQuery,
   validatePostCommentBodyPatch,
   validatePostCommentBodyPut,
   validatePostCommentParams,
@@ -180,37 +181,29 @@ export default class PostCommentsController {
       )
         throw new HttpException(HttpStatusCode.NotFound, "Post not found");
 
-      const beforeRaw = req.query.before ? `${req.query.before}` : undefined;
-      const afterRaw = req.query.after ? `${req.query.after}` : undefined;
-      const limit = Math.max(1, Math.min(Number(req.query.limit) || 25, 50));
-
-      if (beforeRaw && afterRaw)
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Cannot use both before and after",
-        );
+      const { before, after, limit } = postCommentsGetQuery.parse(req.query);
 
       let comments: APIPostComment[];
 
-      if (beforeRaw) {
+      if (before) {
         comments = await execNormalizedMany<APIPostComment>(
           db.query.postCommentsTable.findMany({
             with: { author: { columns: publicUserColumns } },
             where: and(
               eq(postCommentsTable.postId, BigInt(postId)),
-              lt(postCommentsTable.id, BigInt(beforeRaw)),
+              lt(postCommentsTable.id, BigInt(before)),
             ),
             orderBy: desc(postCommentsTable.createdAt),
             limit,
           }),
         );
-      } else if (afterRaw) {
+      } else if (after) {
         comments = await execNormalizedMany<APIPostComment>(
           db.query.postCommentsTable.findMany({
             with: { author: { columns: publicUserColumns } },
             where: and(
               eq(postCommentsTable.postId, BigInt(postId)),
-              gte(postCommentsTable.id, BigInt(afterRaw)),
+              gte(postCommentsTable.id, BigInt(after)),
             ),
             orderBy: asc(postCommentsTable.createdAt),
             limit,

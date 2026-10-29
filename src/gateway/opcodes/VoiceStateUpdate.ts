@@ -1,9 +1,8 @@
 import type { GatewayPayload } from "@mutualzz/types";
 import { GatewayCloseCodes } from "@mutualzz/types";
 import type { WebSocket } from "../util/WebSocket";
-import type { VoiceStateUpdateBody } from "../voice/VoiceState.types";
 import { VoiceStateService } from "../voice/VoiceState.service";
-import { normalizeJSON } from "@mutualzz/util";
+import { gatewayVoiceStateUpdatePayload } from "@mutualzz/validators";
 
 export async function onVoiceStateUpdate(
     this: WebSocket,
@@ -14,17 +13,13 @@ export async function onVoiceStateUpdate(
         return;
     }
 
-    const body = normalizeJSON<Partial<VoiceStateUpdateBody>>(data.d ?? {});
+    const parsed = gatewayVoiceStateUpdatePayload.safeParse(data.d ?? {});
+    if (!parsed.success) return;
+
+    const body = parsed.data;
     const channelId = body.channelId ?? null;
     const spaceId = body.spaceId ?? null;
-
-    const client =
-        body.client === "desktop" ||
-        body.client === "mobile" ||
-        body.client === "web" ||
-        body.client === "minecraft"
-            ? body.client
-            : undefined;
+    const client = body.client;
 
     // leave
     if (!channelId) {

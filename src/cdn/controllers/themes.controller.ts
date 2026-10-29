@@ -7,38 +7,31 @@ import path from "path";
 import sharp from "sharp";
 import { MIME_TYPES } from "../Constants";
 import { contentEtag, normalizeFormat } from "../utils";
+import {
+  themesGetBackgroundParams,
+  themesGetBackgroundQuery,
+} from "@mutualzz/validators";
 
 export default class ThemesController {
   static async getBackground(req: Request, res: Response, next: NextFunction) {
     try {
-      const { themeId, asset } = req.params as {
-        themeId: string;
-        asset: string;
-      };
+      const { themeId, asset } = themesGetBackgroundParams.parse(req.params);
 
-      const {
-        format: formatQuery,
-        size: sizeQuery,
-        animated: animatedQueryRaw,
-      } = req.query as {
-        format?: string;
-        size?: string;
-        animated?: string;
-      };
+      const { format, size, animated } = themesGetBackgroundQuery.parse(
+        req.query,
+      );
 
       const baseName = path.basename(asset, path.extname(asset));
       const urlExt = path.extname(asset).replace(".", "").toLowerCase();
       const isAnimatedHash = baseName.startsWith("a_");
 
-      let targetFormat =
-        normalizeFormat(formatQuery) ?? normalizeFormat(urlExt);
+      let targetFormat = normalizeFormat(format) ?? normalizeFormat(urlExt);
 
-      const animatedQuery = String(animatedQueryRaw ?? "").toLowerCase();
       const explicitAnimated = ["true", "1", "on", "yes"].includes(
-        animatedQuery,
+        animated?.toString() ?? "",
       );
       const explicitStatic = ["false", "0", "off", "no"].includes(
-        animatedQuery,
+        animated?.toString() ?? "",
       );
 
       if (!targetFormat)
@@ -53,14 +46,8 @@ export default class ThemesController {
 
       if (!willAnimate && targetFormat === "gif") targetFormat = "png";
 
-      const boundedSize = (() => {
-        const n = Number(sizeQuery);
-        if (!Number.isFinite(n)) return undefined as number | undefined;
-        return Math.max(1, Math.min(4096, Math.floor(n)));
-      })();
-
       let cacheKey = `${themeId}:${baseName}:${targetFormat}`;
-      if (boundedSize) cacheKey += `:${boundedSize}`;
+      if (size) cacheKey += `:${size}`;
       if (willAnimate) cacheKey += `:a`;
 
       const cached = await getCache("themeBackground", cacheKey);
@@ -102,8 +89,8 @@ export default class ThemesController {
       if (typeof image.toColourspace === "function")
         image = image.toColourspace("srgb");
 
-      if (boundedSize)
-        image = image.resize(boundedSize, boundedSize, {
+      if (size)
+        image = image.resize(size, size, {
           fit: "inside",
           withoutEnlargement: true,
         });
@@ -114,7 +101,7 @@ export default class ThemesController {
         if (targetFormat === "webp") {
           image = image.webp({ quality: 82, loop: 0 });
         } else if (targetFormat === "gif") {
-          if (!boundedSize) {
+          if (!size) {
             const etag = contentEtag(sourceBody);
             themeBackgroundCache.set(cacheKey, sourceBody);
             res.setHeader(

@@ -6,6 +6,7 @@ import {
   validateExpressionParams,
   validateExpressionPatchBody,
   validateExpressionPutBody,
+  zJsonString,
 } from "@mutualzz/validators";
 import { db, expressionsTable } from "@mutualzz/database";
 import {
@@ -37,12 +38,9 @@ export default class ExpressionsController {
     try {
       const { user } = req;
 
-      let parsedCrop;
-      if (req.body.crop) parsedCrop = JSON.parse(req.body.crop);
-
       const { spaceId, type, name, crop } = validateExpressionPutBody.parse({
         ...req.body,
-        crop: parsedCrop,
+        crop: zJsonString.optional().parse(req.body.crop || undefined),
       });
 
       const expressionFile = imageFileValidator.parse(req.file);

@@ -36,6 +36,9 @@ import {
   syncPostHashtags,
 } from "@mutualzz/util";
 import {
+  postsFeedQuery,
+  postsForYouQuery,
+  postsScheduledQuery,
   validatePostBodyPatch,
   validatePostBodyPut,
   validatePostParams,
@@ -306,15 +309,7 @@ export default class PostsController {
     try {
       const { user } = req;
 
-      const beforeRaw = req.query.before ? `${req.query.before}` : undefined;
-      const afterRaw = req.query.after ? `${req.query.after}` : undefined;
-      const limit = Math.max(1, Math.min(Number(req.query.limit) || 25, 50));
-
-      if (beforeRaw && afterRaw)
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Cannot use both before and after",
-        );
+      const { before, after, limit } = postsFeedQuery.parse(req.query);
 
       const friendIds = await getFriendIds(user.id);
       const authorIds = [BigInt(user.id), ...friendIds.map((id) => BigInt(id))];
@@ -322,26 +317,26 @@ export default class PostsController {
 
       let posts: APIPost[];
 
-      if (beforeRaw) {
+      if (before) {
         posts = await execNormalizedMany<APIPost>(
           db.query.postsTable.findMany({
             with: { author: { columns: publicUserColumns } },
             where: and(
               inArray(postsTable.authorId, authorIds),
-              lt(postsTable.id, BigInt(beforeRaw)),
+              lt(postsTable.id, BigInt(before)),
               publishedFilter(),
             ),
             orderBy: desc(postsTable.createdAt),
             limit,
           }),
         );
-      } else if (afterRaw) {
+      } else if (after) {
         posts = await execNormalizedMany<APIPost>(
           db.query.postsTable.findMany({
             with: { author: { columns: publicUserColumns } },
             where: and(
               inArray(postsTable.authorId, authorIds),
-              gte(postsTable.id, BigInt(afterRaw)),
+              gte(postsTable.id, BigInt(after)),
               publishedFilter(),
             ),
             orderBy: asc(postsTable.createdAt),
@@ -564,8 +559,7 @@ export default class PostsController {
     try {
       const { user } = req;
 
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const limit = Math.max(1, Math.min(Number(req.query.limit) || 25, 50));
+      const { page, limit } = postsForYouQuery.parse(req.query);
 
       const windowStart = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
 
@@ -629,15 +623,7 @@ export default class PostsController {
     try {
       const { user } = req;
 
-      const beforeRaw = req.query.before ? `${req.query.before}` : undefined;
-      const afterRaw = req.query.after ? `${req.query.after}` : undefined;
-      const limit = Math.max(1, Math.min(Number(req.query.limit) || 25, 50));
-
-      if (beforeRaw && afterRaw)
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Cannot use both before and after",
-        );
+      const { before, after, limit } = postsFeedQuery.parse(req.query);
 
       const savedRows = await db
         .select({ postId: postSavesTable.postId })
@@ -654,26 +640,26 @@ export default class PostsController {
 
       let posts: APIPost[];
 
-      if (beforeRaw) {
+      if (before) {
         posts = await execNormalizedMany<APIPost>(
           db.query.postsTable.findMany({
             with: { author: { columns: publicUserColumns } },
             where: and(
               inArray(postsTable.id, savedPostIds),
-              lt(postsTable.id, BigInt(beforeRaw)),
+              lt(postsTable.id, BigInt(before)),
               publishedFilter(),
             ),
             orderBy: desc(postsTable.createdAt),
             limit,
           }),
         );
-      } else if (afterRaw) {
+      } else if (after) {
         posts = await execNormalizedMany<APIPost>(
           db.query.postsTable.findMany({
             with: { author: { columns: publicUserColumns } },
             where: and(
               inArray(postsTable.id, savedPostIds),
-              gte(postsTable.id, BigInt(afterRaw)),
+              gte(postsTable.id, BigInt(after)),
               publishedFilter(),
             ),
             orderBy: asc(postsTable.createdAt),
@@ -710,7 +696,7 @@ export default class PostsController {
     try {
       const { user } = req;
 
-      const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 100));
+      const { limit } = postsScheduledQuery.parse(req.query);
 
       const posts = await execNormalizedMany<APIPost>(
         db.query.postsTable.findMany({

@@ -115,12 +115,6 @@ async function processOAuthCallback(
   }
 
   if (existingByDiscord) {
-    await importDiscordProfile(
-      existingByDiscord.id.toString(),
-      discordUser,
-      profile.bio ?? null,
-    );
-
     const token = generateSessionToken(existingByDiscord.id.toString());
     const sessionId = generateSessionId();
     await createSession(token, existingByDiscord.id.toString(), sessionId);
@@ -249,12 +243,15 @@ async function importDiscordProfile(
   const avatarUrl = discordAvatarUrl(discordUser);
   const bannerUrl = discordBannerUrl(discordUser);
 
-  const avatarHash = avatarUrl
-    ? await uploadDiscordImage(userId, avatarUrl, "avatars")
-    : null;
-  const bannerHash = bannerUrl
-    ? await uploadDiscordImage(userId, bannerUrl, "banners")
-    : null;
+  // Discord only fills empty fields, it never replaces what the user set
+  const avatarHash =
+    avatarUrl && !existingUser?.avatar
+      ? await uploadDiscordImage(userId, avatarUrl, "avatars")
+      : null;
+  const bannerHash =
+    bannerUrl && !existing?.banner
+      ? await uploadDiscordImage(userId, bannerUrl, "banners")
+      : null;
 
   if (avatarHash) {
     await db
@@ -263,17 +260,9 @@ async function importDiscordProfile(
       .where(eq(usersTable.id, BigInt(userId)));
   }
 
-  if (discordUser.accent_color != null) {
-    const accent = `#${discordUser.accent_color.toString(16).padStart(6, "0")}`;
-    await db
-      .update(usersTable)
-      .set({ accentColor: accent })
-      .where(eq(usersTable.id, BigInt(userId)));
-  }
-
   const discordBio = bio?.trim() || null;
-  const nextBio = discordBio ?? existing?.bio ?? null;
-  const nextBanner = bannerHash ?? existing?.banner ?? null;
+  const nextBio = existing?.bio ?? discordBio;
+  const nextBanner = existing?.banner ?? bannerHash;
   const blocks = existing?.blocks ?? [];
   const configured = isProfileConfigured({
     blocks,
@@ -389,7 +378,10 @@ export default class DiscordAuthController {
               globalName:
                 globalName ?? discordUser.global_name ?? discordUser.username,
               hash,
-              accentColor: genRandColor(),
+              accentColor:
+                discordUser.accent_color != null
+                  ? `#${discordUser.accent_color.toString(16).padStart(6, "0")}`
+                  : genRandColor(),
               defaultAvatar: {
                 type: crypto.randomInt(0, 5),
                 color: null,

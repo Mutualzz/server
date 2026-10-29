@@ -4,6 +4,7 @@ import {
     type RESTSession,
 } from "@mutualzz/types";
 import { getUser, redis } from "@mutualzz/util";
+import { gatewayResumePayload } from "@mutualzz/validators";
 import { setupListener } from "../Listener";
 import { logger } from "../Logger";
 import {
@@ -30,10 +31,15 @@ async function failResume(socket: WebSocket, reason: string) {
 }
 
 export async function onResume(this: WebSocket, data: GatewayPayload) {
-    const resume = data.d;
-    const clientSeq = Number(resume.seq ?? 0);
-
     clearTimeout(this.readyTimeout);
+
+    const parsed = gatewayResumePayload.safeParse(data.d);
+    if (!parsed.success) {
+        return failResume(this, "Invalid payload");
+    }
+
+    const resume = parsed.data;
+    const clientSeq = resume.seq ?? 0;
 
     const rawSession = await redis.get(`rest:sessions:${resume.token}`);
     if (!rawSession) {

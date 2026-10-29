@@ -8,6 +8,7 @@ import {
 } from "./audioTokens.ts";
 import { MinecraftVoicePeers } from "./MinecraftVoicePeers.ts";
 import { VoiceStateService } from "../../gateway/voice/VoiceState.service.ts";
+import { minecraftAudioControl } from "@mutualzz/validators";
 
 const logger = new Logger({
   tag: "MinecraftAudioWS",
@@ -16,19 +17,19 @@ const logger = new Logger({
 
 const handleAudioControl = async (userId: string, buf: Buffer) => {
   try {
-    const msg = JSON.parse(buf.toString("utf8")) as {
-      t?: string;
-      selfMute?: boolean;
-      selfDeaf?: boolean;
-    };
-    if (msg?.t !== "voice_state") return;
+    const parsed = minecraftAudioControl.safeParse(
+      JSON.parse(buf.toString("utf8")),
+    );
+    if (!parsed.success) return;
+
+    const { selfMute, selfDeaf } = parsed.data;
     logger.debug(
-      `voice_state userId=${userId} mute=${msg.selfMute === true} deaf=${msg.selfDeaf === true}`,
+      `voice_state userId=${userId} mute=${selfMute} deaf=${selfDeaf}`,
     );
     await VoiceStateService.updateMinecraftSelfState({
       userId,
-      selfMute: msg.selfMute === true,
-      selfDeaf: msg.selfDeaf === true,
+      selfMute,
+      selfDeaf,
     });
   } catch (err) {
     logger.debug(`audio control parse failed userId=${userId}: ${err}`);

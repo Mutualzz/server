@@ -13,7 +13,7 @@ import {
   db,
   messagesTable,
 } from "@mutualzz/database";
-import { emitEvent, normalizeJSON } from "@mutualzz/util";
+import { emitEvent } from "@mutualzz/util";
 import { and, eq } from "drizzle-orm";
 import { messageFlags } from "@mutualzz/bitfield";
 import { Logger } from "@mutualzz/logger";
@@ -1160,43 +1160,4 @@ export class CallService {
 
     return rows.map((row) => row.userId.toString());
   }
-}
-
-export function parseCallCreateBody(data: unknown) {
-  const body = normalizeJSON<{
-    channelId?: Snowflake;
-    silent?: boolean;
-    selfMute?: boolean;
-    selfDeaf?: boolean;
-  }>(data ?? {});
-  return {
-    channelId: body.channelId ? String(body.channelId) : null,
-    silent: body.silent === true,
-    selfMute: typeof body.selfMute === "boolean" ? body.selfMute : undefined,
-    selfDeaf: typeof body.selfDeaf === "boolean" ? body.selfDeaf : undefined,
-  };
-}
-
-export function parseCallRespondBody(data: unknown) {
-  const body = normalizeJSON<{
-    callId?: Snowflake;
-    action?: CallRespondAction;
-    selfMute?: boolean;
-    selfDeaf?: boolean;
-  }>(data ?? {});
-  const action = body.action;
-  if (action !== "accept" && action !== "decline" && action !== "cancel") {
-    return {
-      callId: null,
-      action: null,
-      selfMute: undefined,
-      selfDeaf: undefined,
-    };
-  }
-  return {
-    callId: body.callId ? String(body.callId) : null,
-    action,
-    selfMute: typeof body.selfMute === "boolean" ? body.selfMute : undefined,
-    selfDeaf: typeof body.selfDeaf === "boolean" ? body.selfDeaf : undefined,
-  };
 }

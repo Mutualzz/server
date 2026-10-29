@@ -5,6 +5,7 @@ import {
   type RESTSession,
 } from "@mutualzz/types";
 import { getUser, prepareReadyData, redis } from "@mutualzz/util";
+import { gatewayIdentifyPayload } from "@mutualzz/validators";
 import { randomUUID } from "crypto";
 import { setupListener } from "../Listener";
 import { logger } from "../Logger";
@@ -23,9 +24,11 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
   clearTimeout(this.readyTimeout);
 
-  const identify = data.d;
+  const identify = gatewayIdentifyPayload.safeParse(data.d);
 
-  const rawSession = await redis.get(`rest:sessions:${identify.token}`);
+  const rawSession = identify.success
+    ? await redis.get(`rest:sessions:${identify.data.token}`)
+    : null;
   if (!rawSession) {
     logger.warn(`Identify failed: invalid token (ip: ${this.ipAddress})`);
     await Send(this, {
