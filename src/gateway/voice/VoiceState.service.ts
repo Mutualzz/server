@@ -455,10 +455,10 @@ export class VoiceStateService {
       spaceDeaf: moderation.spaceDeaf,
       sessionId,
       updatedAt: now,
-            joinedAt:
-                isFirstJoin || isMove || shouldSupersede
-                    ? now
-                    : (previous.joinedAt ?? now),
+      joinedAt:
+        isFirstJoin || isMove || shouldSupersede
+          ? now
+          : (previous.joinedAt ?? now),
       client: body.client ?? previous?.client,
     };
 
@@ -510,11 +510,15 @@ export class VoiceStateService {
           channelId: requestedChannelId,
           sessionId,
         });
-        await VoiceStateService.emitVoiceStateUpdate(spaceId, requestedChannelId, {
-          userId,
+        await VoiceStateService.emitVoiceStateUpdate(
           spaceId,
-          channelId: null,
-        });
+          requestedChannelId,
+          {
+            userId,
+            spaceId,
+            channelId: null,
+          },
+        );
         if (isMove && previous?.channelId) {
           void VoiceStateService.emitStatesAsUpdates(
             previous.spaceId ?? null,
@@ -1030,10 +1034,9 @@ export class VoiceStateService {
 
     if (isMinecraft) {
       if (!minecraftUuid) {
-        logger.warn(
-          "Minecraft voice move aborted: peer uuid unavailable",
-          { userId: String(targetUserId) },
-        );
+        logger.warn("Minecraft voice move aborted: peer uuid unavailable", {
+          userId: String(targetUserId),
+        });
         await this.kickMemberFromVoice(
           spaceId,
           targetUserId,
@@ -1182,6 +1185,16 @@ export class VoiceStateService {
       }
     }
 
+    if (active && active.sessionId === sessionId) {
+      void VoiceStateService.streamStatesToSocket(
+        socket,
+        existing.spaceId,
+        existing.channelId,
+        socket.userId,
+      );
+      return;
+    }
+
     const hasSpeak = isDmVoice
       ? true
       : await canVoiceSpeak({
@@ -1246,13 +1259,15 @@ export class VoiceStateService {
   static async applyMemberVoiceModeration(
     spaceId: Snowflake,
     targetUserId: Snowflake,
-    patch: { spaceMute?: boolean | null; spaceDeaf?: boolean | null },
   ) {
     const existing = await VoiceStateRedis.getState(targetUserId);
     if (!existing?.channelId) return;
     if (String(existing.spaceId) !== String(spaceId)) return;
 
-    const moderation = await this.getMemberVoiceModeration(spaceId, targetUserId);
+    const moderation = await this.getMemberVoiceModeration(
+      spaceId,
+      targetUserId,
+    );
     const hasSpeak = await canVoiceSpeak({
       spaceId,
       channelId: existing.channelId,
@@ -1282,7 +1297,11 @@ export class VoiceStateService {
       );
     }
 
-    await VoiceStateService.emitVoiceStateUpdate(spaceId, existing.channelId, existing);
+    await VoiceStateService.emitVoiceStateUpdate(
+      spaceId,
+      existing.channelId,
+      existing,
+    );
   }
 
   private static async rejectVoiceJoin(
@@ -1341,10 +1360,7 @@ export class VoiceStateService {
     });
   }
 
-  private static async canJoinDmVoice(
-    channelId: Snowflake,
-    userId: Snowflake,
-  ) {
+  private static async canJoinDmVoice(channelId: Snowflake, userId: Snowflake) {
     const channel = await db.query.channelsTable.findFirst({
       where: eq(channelsTable.id, BigInt(channelId)),
     });
