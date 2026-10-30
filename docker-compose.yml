@@ -1,12 +1,7 @@
 services:
-    server:
-        build:
-            context: ../..
-            dockerfile: apps/server/Dockerfile
-        env_file: .env
-        ports:
-            - "6000:3000"
-            - "3001:3001"
-            - "4000:4000"
-            - "3015:3015"
-        restart: unless-stopped
+  server:
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    env_file: .env
+    restart: unless-stopped
