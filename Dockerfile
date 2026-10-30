@@ -1,8 +1,7 @@
 FROM node:lts AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
-RUN corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm@11.5.2
 
 FROM base AS build
 WORKDIR /app
