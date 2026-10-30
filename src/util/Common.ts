@@ -21,6 +21,7 @@ import MurmurHash from "imurmurhash";
 import { getExpression, getMember } from "@mutualzz/util/Helpers.ts";
 import { klipyFetch } from "@mutualzz/util/Klipy.ts";
 import { isSafeFetchUrl, isSafeFetchUrlAsync } from "./urlSafety";
+import { linkPreviewAgent, linkPreviewFetch } from "./LinkPreviewProxy";
 
 type Services =
   | "spotify"
@@ -187,7 +188,6 @@ export const createLimiter = (ms: number, limit: number) =>
     }),
 
     keyGenerator: (req) => {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (req.user?.id) {
         const route = req.originalUrl.split("?")[0];
         return `u:${req.user.id}:${route}`;
@@ -301,7 +301,9 @@ export const fetchTenorMetadata = async (
       };
     }
 
-    const metadata = await urlMetadata(url).catch(() => null);
+    const metadata = await urlMetadata(url, { agent: linkPreviewAgent }).catch(
+      () => null,
+    );
     if (!metadata) return null;
 
     const media =
@@ -342,7 +344,9 @@ export const fetchGiphyMetadata = async (
       };
     }
 
-    const metadata = await urlMetadata(url).catch(() => null);
+    const metadata = await urlMetadata(url, { agent: linkPreviewAgent }).catch(
+      () => null,
+    );
     if (!metadata) return null;
 
     const media =
@@ -374,12 +378,11 @@ export const fetchImgurMetadata = async (
   try {
     if (/i\.imgur\.com/.test(url)) {
       if (!(await isSafeFetchUrlAsync(url))) return null;
-      const res = await fetch(url, { method: "HEAD", redirect: "follow" });
-      if (
-        res.url &&
-        res.url !== url &&
-        !(await isSafeFetchUrlAsync(res.url))
-      )
+      const res = await linkPreviewFetch(url, {
+        method: "HEAD",
+        redirect: "follow",
+      });
+      if (res.url && res.url !== url && !(await isSafeFetchUrlAsync(res.url)))
         return null;
       const ct = res.headers.get("content-type") ?? "";
       if (!ct.includes("image/gif") && !ct.includes("video/mp4")) return null;
@@ -394,7 +397,9 @@ export const fetchImgurMetadata = async (
       };
     }
 
-    const metadata = await urlMetadata(url).catch(() => null);
+    const metadata = await urlMetadata(url, { agent: linkPreviewAgent }).catch(
+      () => null,
+    );
     if (!metadata) return null;
 
     const media =
@@ -425,7 +430,9 @@ export const fetchRedgifsMetadata = async (
   spoiler = false,
 ): Promise<APIMessageEmbed | null> => {
   try {
-    const metadata = await urlMetadata(url).catch(() => null);
+    const metadata = await urlMetadata(url, {
+      agent: linkPreviewAgent,
+    }).catch(() => null);
     if (!metadata) return null;
 
     const media =
@@ -456,12 +463,12 @@ export const fetchDirectGifMetadata = async (
 ): Promise<APIMessageEmbed | null> => {
   try {
     if (!(await isSafeFetchUrlAsync(url))) return null;
-    const res = await fetch(url, { method: "HEAD", redirect: "follow" });
-    if (
-      res.url &&
-      res.url !== url &&
-      !(await isSafeFetchUrlAsync(res.url))
-    )
+    const res = await linkPreviewFetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+    });
+
+    if (res.url && res.url !== url && !(await isSafeFetchUrlAsync(res.url)))
       return null;
     const ct = res.headers.get("content-type") ?? "";
     if (!ct.includes("image/gif")) return null;
@@ -549,11 +556,7 @@ export const fetchYoutubeMetadata = async (
   try {
     if (!(await isSafeFetchUrlAsync(apiUrl))) return null;
     const res = await fetch(apiUrl, { redirect: "follow" });
-    if (
-      res.url &&
-      res.url !== apiUrl &&
-      !(await isSafeFetchUrlAsync(res.url))
-    )
+    if (res.url && res.url !== apiUrl && !(await isSafeFetchUrlAsync(res.url)))
       return null;
     if (!res.ok) return null;
     const data = await res.json();
@@ -770,7 +773,9 @@ export const buildEmbed = async (
       .replaceAll("__", "")
       .replaceAll("~~", "");
 
-    const metadata = await urlMetadata(normalizedUrl).catch(() => null);
+    const metadata = await urlMetadata(normalizedUrl, {
+      agent: linkPreviewAgent,
+    }).catch(() => null);
     if (!metadata) return null;
 
     const limit = 500;
