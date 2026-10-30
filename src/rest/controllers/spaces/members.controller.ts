@@ -1304,12 +1304,7 @@ export default class MembersController {
       const { spaceMute, spaceDeaf, disconnect, channelId } =
         validateMemberVoiceModerationBody.parse(req.body);
 
-      if (
-        spaceMute == null &&
-        spaceDeaf == null &&
-        !disconnect &&
-        !channelId
-      )
+      if (spaceMute == null && spaceDeaf == null && !disconnect && !channelId)
         throw new HttpException(
           HttpStatusCode.BadRequest,
           "No voice moderation action specified",
@@ -1514,10 +1509,7 @@ export default class MembersController {
         {
           label: "event:applyMemberVoiceModeration",
           run: () =>
-            VoiceStateService.applyMemberVoiceModeration(space.id, userId, {
-              spaceMute,
-              spaceDeaf,
-            }),
+            VoiceStateService.applyMemberVoiceModeration(space.id, userId),
         },
         {
           label: "cache:delete:spaceMember",
