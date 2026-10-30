@@ -95,9 +95,11 @@ export class Server {
         initCallState();
       });
       this.pingInterval = setInterval(() => {
+        let terminated = 0;
         for (const client of this.ws.clients) {
           const socket = client as WebSocket;
           if (socket.isAlive === false) {
+            terminated++;
             socket.terminate();
             continue;
           }
@@ -107,6 +109,11 @@ export class Server {
           } catch {
             socket.terminate();
           }
+        }
+        if (terminated > 0) {
+          logger.warn(
+            `Ping sweep terminated ${terminated}/${this.ws.clients.size} clients (no pong in ${PING_INTERVAL_MS}ms)`,
+          );
         }
       }, PING_INTERVAL_MS);
       this.pingInterval.unref?.();
