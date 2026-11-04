@@ -1,19 +1,19 @@
 import { bridgeDiscordBindingsTable, db } from "@mutualzz/database";
 import {
+  GAME_EVENT_EMOJI,
   publishBridgeEvent,
   subscribeBridge,
   minecraftAvatarUrl,
   type BridgeChatPayload,
   type BridgeEvent,
-  type BridgePlayerPayload,
-  type BridgeVoicePayload,
+  type PersistedBridgeEvent,
+  isPersistedBridgeEvent,
 } from "@mutualzz/minecraft";
 import { Logger } from "@mutualzz/logger";
 import {
   ChannelType,
   type Client,
   type Message,
-  type MessageCreateOptions,
   WebhookClient,
 } from "discord.js";
 import { eq } from "drizzle-orm";
@@ -27,9 +27,29 @@ interface WebhookHandle {
   threadId?: string;
 }
 
+const voiceChannelLabel = (channelName?: string) =>
+  channelName ? `#${channelName}` : "Mutualzz voice";
+
+const discordContent = (event: PersistedBridgeEvent): string => {
+  switch (event.type) {
+    case "CHAT":
+      return event.data.content.slice(0, 2000);
+    case "JOIN":
+      return `**${event.data.name}** joined the game`;
+    case "LEAVE":
+      return `**${event.data.name}** left the game`;
+    case "VOICE_JOIN":
+      return `**${event.data.name}** joined voice in ${voiceChannelLabel(event.data.channelName)}`;
+    case "VOICE_LEAVE":
+      return `**${event.data.name}** left voice in ${voiceChannelLabel(event.data.channelName)}`;
+    case "GAME_EVENT":
+      return `${GAME_EVENT_EMOJI[event.data.kind]} ${event.data.message}`;
+  }
+};
+
 /**
  * Discord side of the three-way bridge.
- * - Bound channel messages -> BridgeBus (Minecraft + app can receive)
+ * - Bound channel messages → BridgeBus (Minecraft + app can receive)
  * - BridgeBus CHAT/JOIN/LEAVE → Discord via webhook (looks like the MC player)
  */
 export class DiscordBridgePeer {
@@ -152,11 +172,7 @@ export class DiscordBridgePeer {
     for (const bridgeId of bridgeIds) {
       if (this.unsubscribers.has(bridgeId)) continue;
       const unsub = subscribeBridge(bridgeId, (event) => {
-        void this.onBridgeEvent(
-          event as BridgeEvent<
-            BridgeChatPayload | BridgePlayerPayload | BridgeVoicePayload
-          >,
-        );
+        void this.onBridgeEvent(event);
       });
       this.unsubscribers.set(bridgeId, unsub);
     }
@@ -194,22 +210,11 @@ export class DiscordBridgePeer {
   }
 
   /** Hub → Discord */
-  /** TODO: Add advancement event */
-  private static async onBridgeEvent(
-    event: BridgeEvent<
-      BridgeChatPayload | BridgePlayerPayload | BridgeVoicePayload
-    >,
-  ) {
-    // App-only snapshot; Discord does not need player presence lists.
-    if (event.type === "PRESENCE") return;
+  private static async onBridgeEvent(event: BridgeEvent) {
+    if (!isPersistedBridgeEvent(event)) return;
+    if (event.type === "CHAT" && event.data.source === "discord") return;
 
-    if (
-      event.type === "CHAT" &&
-      (event.data as BridgeChatPayload).source === "discord"
-    )
-      return;
-
-    const data = event.data;
+    const { data } = event;
     const binding = this.bindingsByBridgeServer.get(
       `${event.bridgeId}:${data.serverId}`,
     );
@@ -219,65 +224,15 @@ export class DiscordBridgePeer {
       const handle = await this.getWebhook(binding);
       if (!handle) return;
 
-      const send = (
-        options: MessageCreateOptions & {
-          username?: string;
-          avatarURL?: string;
-        },
-      ) =>
-        handle.client.send({
-          ...options,
-          ...(handle.threadId ? { threadId: handle.threadId } : {}),
-          allowedMentions: { parse: [] },
-        });
-
-      if (event.type === "CHAT") {
-        const chat = data as BridgeChatPayload;
-        await send({
-          content: chat.content.slice(0, 2000),
-          username: chat.name.slice(0, 80) || "Minecraft",
-          ...(chat.uuid ? { avatarURL: minecraftAvatarUrl(chat.uuid) } : {}),
-        });
-        return;
-      }
-
-      if (event.type === "JOIN") {
-        const player = data as BridgePlayerPayload;
-        await send({
-          content: `**${player.name}** joined the game`,
-          username: player.name.slice(0, 80) || "Mutualzz Bridge",
-          ...(player.uuid
-            ? { avatarURL: minecraftAvatarUrl(player.uuid) }
-            : {}),
-        });
-        return;
-      }
-
-      if (event.type === "LEAVE") {
-        const player = data as BridgePlayerPayload;
-        await send({
-          content: `**${player.name}** left the game`,
-          username: player.name.slice(0, 80) || "Mutualzz Bridge",
-          ...(player.uuid
-            ? { avatarURL: minecraftAvatarUrl(player.uuid) }
-            : {}),
-        });
-        return;
-      }
-
-      if (event.type === "VOICE_JOIN" || event.type === "VOICE_LEAVE") {
-        const voice = data as BridgeVoicePayload;
-        const channelLabel = voice.channelName
-          ? `#${voice.channelName}`
-          : "Mutualzz voice";
-        const verb =
-          event.type === "VOICE_JOIN" ? "joined voice in" : "left voice in";
-        await send({
-          content: `**${voice.name}** ${verb} ${channelLabel}`,
-          username: voice.name.slice(0, 80) || "Mutualzz Bridge",
-          ...(voice.uuid ? { avatarURL: minecraftAvatarUrl(voice.uuid) } : {}),
-        });
-      }
+      const fallbackName =
+        event.type === "CHAT" ? "Minecraft" : "Mutualzz Bridge";
+      await handle.client.send({
+        content: discordContent(event),
+        username: data.name.slice(0, 80) || fallbackName,
+        ...(data.uuid ? { avatarURL: minecraftAvatarUrl(data.uuid) } : {}),
+        ...(handle.threadId ? { threadId: handle.threadId } : {}),
+        allowedMentions: { parse: [] },
+      });
     } catch (error) {
       logger.error(`Failed to post bridge event to Discord: ${error}`);
     }

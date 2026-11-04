@@ -76,7 +76,7 @@ export const dispatchToBridgePlugins = (event: BridgeEvent) => {
     sendToSocket(session.socket, {
       op: "dispatch",
       t: event.type,
-      d: event.data as Record<string, unknown>,
+      d: { ...event.data },
     });
   }
 };

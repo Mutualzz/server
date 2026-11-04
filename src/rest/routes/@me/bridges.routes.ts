@@ -15,11 +15,7 @@ router.post(
   createLimiter(60_000, 10),
   MeBridgesController.redeemMinecraftCode,
 );
-router.delete(
-  "/link",
-  createLimiter(60_000, 10),
-  MeBridgesController.unlink,
-);
+router.delete("/link", createLimiter(60_000, 10), MeBridgesController.unlink);
 router.get("/discord/status", MeBridgesController.discordStatus);
 router.get("/:bridgeId", MeBridgesController.get);
 router.post(
@@ -33,6 +29,7 @@ router.delete(
   MeBridgesController.leave,
 );
 router.get("/:bridgeId/messages", MeBridgesController.listMessages);
+router.get("/:bridgeId/inventories/@me", MeBridgesController.myInventories);
 router.post(
   "/:bridgeId/chat",
   createLimiter(60_000, 60),

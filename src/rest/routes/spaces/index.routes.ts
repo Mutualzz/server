@@ -236,6 +236,21 @@ router.get(
   createLimiter(60_000, 60),
   SpaceBridgeController.listMembers,
 );
+router.get(
+  "/:spaceId/bridge/inventories",
+  createLimiter(60_000, 60),
+  SpaceBridgeController.listInventories,
+);
+router.get(
+  "/:spaceId/bridge/inventories/:minecraftUuid",
+  createLimiter(60_000, 60),
+  SpaceBridgeController.getInventory,
+);
+router.delete(
+  "/:spaceId/bridge/inventories/:minecraftUuid",
+  createLimiter(60_000, 20),
+  SpaceBridgeController.deleteInventory,
+);
 router.delete(
   "/:spaceId/bridge/members/:userId",
   createLimiter(60_000, 20),

@@ -11,27 +11,33 @@ import { onCustomStatusScheduleSet } from "./CustomStatusScheduleSet.ts";
 import { onCustomStatusScheduleClear } from "./CustomStatusScheduleClear.ts";
 import { onVoiceStateUpdate } from "@mutualzz/gateway/opcodes/VoiceStateUpdate.ts";
 import {
-    onSubscribeUser,
-    onUnsubscribeUser,
+  onSubscribeUser,
+  onUnsubscribeUser,
 } from "@mutualzz/gateway/opcodes/SubscribeUser.ts";
 import { onCallCreate } from "./CallCreate";
 import { onCallRespond } from "./CallRespond";
+import {
+  onInventorySubscribe,
+  onInventoryUnsubscribe,
+} from "./InventorySubscribe.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
 export default {
-    [GatewayOpcodes.Heartbeat]: onHeartbeat,
-    [GatewayOpcodes.Resume]: onResume,
-    [GatewayOpcodes.Identify]: onIdentify,
-    [GatewayOpcodes.LazyRequest]: onLazyRequest,
-    [GatewayOpcodes.PresenceUpdate]: onPresenceUpdate,
-    [GatewayOpcodes.PresenceScheduleSet]: onPresenceScheduleSet,
-    [GatewayOpcodes.PresenceScheduleClear]: onPresenceScheduleClear,
-    [GatewayOpcodes.CustomStatusScheduleSet]: onCustomStatusScheduleSet,
-    [GatewayOpcodes.CustomStatusScheduleClear]: onCustomStatusScheduleClear,
-    [GatewayOpcodes.VoiceStateUpdate]: onVoiceStateUpdate,
-    [GatewayOpcodes.SubscribeUser]: onSubscribeUser,
-    [GatewayOpcodes.UnsubscribeUser]: onUnsubscribeUser,
-    [GatewayOpcodes.CallCreate]: onCallCreate,
-    [GatewayOpcodes.CallRespond]: onCallRespond,
+  [GatewayOpcodes.Heartbeat]: onHeartbeat,
+  [GatewayOpcodes.Resume]: onResume,
+  [GatewayOpcodes.Identify]: onIdentify,
+  [GatewayOpcodes.LazyRequest]: onLazyRequest,
+  [GatewayOpcodes.PresenceUpdate]: onPresenceUpdate,
+  [GatewayOpcodes.PresenceScheduleSet]: onPresenceScheduleSet,
+  [GatewayOpcodes.PresenceScheduleClear]: onPresenceScheduleClear,
+  [GatewayOpcodes.CustomStatusScheduleSet]: onCustomStatusScheduleSet,
+  [GatewayOpcodes.CustomStatusScheduleClear]: onCustomStatusScheduleClear,
+  [GatewayOpcodes.VoiceStateUpdate]: onVoiceStateUpdate,
+  [GatewayOpcodes.SubscribeUser]: onSubscribeUser,
+  [GatewayOpcodes.UnsubscribeUser]: onUnsubscribeUser,
+  [GatewayOpcodes.CallCreate]: onCallCreate,
+  [GatewayOpcodes.CallRespond]: onCallRespond,
+  [GatewayOpcodes.InventorySubscribe]: onInventorySubscribe,
+  [GatewayOpcodes.InventoryUnsubscribe]: onInventoryUnsubscribe,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

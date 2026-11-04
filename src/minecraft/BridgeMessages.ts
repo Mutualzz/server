@@ -2,12 +2,7 @@ import { bridgeMessagesTable, bridgesTable, db } from "@mutualzz/database";
 import { Logger } from "@mutualzz/logger";
 import { Snowflake } from "@mutualzz/util";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
-import type {
-  BridgeChatPayload,
-  BridgeEvent,
-  BridgePlayerPayload,
-  BridgeVoicePayload,
-} from "./types";
+import type { PersistedBridgeEvent } from "./types";
 
 const logger = new Logger({ tag: "BridgeMessages" });
 
@@ -20,7 +15,14 @@ export interface StoredBridgeMessage {
   bridgeId: string;
   serverId: string;
   source: "minecraft" | "discord" | "app";
-  kind: "chat" | "join" | "leave" | "voice_join" | "voice_leave";
+  kind:
+    | "chat"
+    | "join"
+    | "leave"
+    | "voice_join"
+    | "voice_leave"
+    | "death"
+    | "advancement";
   name: string;
   content?: string;
   uuid?: string;
@@ -45,44 +47,35 @@ const trimHistory = async (bridgeId: bigint) => {
   }
 };
 
-export const persistBridgeEvent = async (
-  event: BridgeEvent,
-  opts?: { skipPersist?: boolean },
-) => {
-  if (opts?.skipPersist) return;
-  if (
-    event.type !== "CHAT" &&
-    event.type !== "JOIN" &&
-    event.type !== "LEAVE" &&
-    event.type !== "VOICE_JOIN" &&
-    event.type !== "VOICE_LEAVE"
-  ) {
-    return;
+const storedFields = (
+  event: PersistedBridgeEvent,
+): Pick<StoredBridgeMessage, "kind" | "content" | "avatarUrl"> => {
+  switch (event.type) {
+    case "CHAT":
+      return {
+        kind: "chat",
+        content: event.data.content,
+        avatarUrl: event.data.avatarUrl,
+      };
+    case "JOIN":
+      return { kind: "join" };
+    case "LEAVE":
+      return { kind: "leave" };
+    case "VOICE_JOIN":
+      return { kind: "voice_join", content: event.data.channelName };
+    case "VOICE_LEAVE":
+      return { kind: "voice_leave", content: event.data.channelName };
+    case "GAME_EVENT":
+      return { kind: event.data.kind, content: event.data.message };
   }
+};
 
-  const data = event.data as
-    | BridgeChatPayload
-    | BridgePlayerPayload
-    | BridgeVoicePayload;
+export const persistBridgeEvent = async (event: PersistedBridgeEvent) => {
+  const { data } = event;
   const sourceKey =
     event.sourceId ?? data.sourceId ?? `${event.type}:${Snowflake.generate()}`;
   const id = BigInt(Snowflake.generate());
-  const kind =
-    event.type === "CHAT"
-      ? "chat"
-      : event.type === "JOIN"
-        ? "join"
-        : event.type === "LEAVE"
-          ? "leave"
-          : event.type === "VOICE_JOIN"
-            ? "voice_join"
-            : "voice_leave";
-  const content =
-    event.type === "CHAT"
-      ? (data as BridgeChatPayload).content
-      : event.type === "VOICE_JOIN" || event.type === "VOICE_LEAVE"
-        ? ((data as BridgeVoicePayload).channelName ?? "")
-        : "";
+  const { kind, content, avatarUrl } = storedFields(event);
 
   try {
     await db
@@ -95,13 +88,10 @@ export const persistBridgeEvent = async (
         source: data.source,
         kind,
         name: data.name,
-        content,
+        content: content ?? "",
         uuid: data.uuid ?? null,
         userId: data.userId ?? null,
-        avatarUrl:
-          event.type === "CHAT"
-            ? ((data as BridgeChatPayload).avatarUrl ?? null)
-            : null,
+        avatarUrl: avatarUrl ?? null,
       })
       .onConflictDoNothing({ target: bridgeMessagesTable.sourceKey });
 
@@ -112,13 +102,12 @@ export const persistBridgeEvent = async (
 
     await trimHistory(BigInt(data.bridgeId));
   } catch (error) {
-    logger.error(`Failed to persist bridge ${event.type}: ${error}`);
+    logger.error(
+      `Failed to persist bridge ${event.type}: ${error}`,
+      (error as { cause?: unknown }).cause,
+    );
   }
 };
-
-/** @deprecated use persistBridgeEvent */
-export const persistBridgeChat = (event: BridgeEvent) =>
-  persistBridgeEvent(event);
 
 export const listBridgeMessages = async (
   bridgeId: string,

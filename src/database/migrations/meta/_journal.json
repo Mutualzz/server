@@ -567,6 +567,20 @@
       "when": 1785054485121,
       "tag": "0080_growth_strategy_pins_discord",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1793603944094,
+      "tag": "0081_rpc_applications",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793764742064,
+      "tag": "0082_smiling_wrecker",
+      "breakpoints": true
     }
   ],
   "version": "7"

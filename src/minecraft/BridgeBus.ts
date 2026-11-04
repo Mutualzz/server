@@ -1,7 +1,7 @@
 import { Logger } from "@mutualzz/logger";
 import { RabbitMQ } from "@mutualzz/util";
 import { persistBridgeEvent } from "./BridgeMessages";
-import type { BridgeEvent, BridgeEventType } from "./types";
+import { isPersistedBridgeEvent, type BridgeEvent } from "./types";
 
 const logger = new Logger({ tag: "BridgeBus" });
 
@@ -17,14 +17,8 @@ export const publishBridgeEvent = async (
   event: BridgeEvent,
   opts?: { skipPersist?: boolean },
 ) => {
-  if (
-    event.type === "CHAT" ||
-    event.type === "JOIN" ||
-    event.type === "LEAVE" ||
-    event.type === "VOICE_JOIN" ||
-    event.type === "VOICE_LEAVE"
-  ) {
-    await persistBridgeEvent(event, opts);
+  if (!opts?.skipPersist && isPersistedBridgeEvent(event)) {
+    await persistBridgeEvent(event);
   }
 
   const locals = localListeners.get(event.bridgeId);
@@ -72,15 +66,3 @@ export const subscribeBridge = (bridgeId: string, listener: BridgeListener) => {
     if (set.size === 0) localListeners.delete(bridgeId);
   };
 };
-
-export const isBridgeEventType = (value: string): value is BridgeEventType =>
-  [
-    "CHAT",
-    "JOIN",
-    "LEAVE",
-    "LINK_RESULT",
-    "VOICE_RESULT",
-    "VOICE_JOIN",
-    "VOICE_LEAVE",
-    "PRESENCE",
-  ].includes(value);

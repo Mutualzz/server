@@ -5,6 +5,7 @@ import {
   bridgeVoiceBindingsTable,
   channelsTable,
   db,
+  minecraftInventoriesTable,
   minecraftLinkCodesTable,
   minecraftLinksTable,
 } from "@mutualzz/database";
@@ -42,21 +43,47 @@ import { ensureMember } from "./BridgeMembers";
 import { generateLinkCode, hashBridgeToken } from "./tokens";
 import {
   minecraftChatData,
+  minecraftGameEventData,
   minecraftIdentifyData,
+  minecraftInventoryData,
   minecraftLinkData,
   minecraftPlayerData,
+  minecraftServerStatusData,
   minecraftVoiceJoinData,
   minecraftVoiceStateData,
 } from "@mutualzz/validators";
 import type { z } from "zod";
 import type {
   BridgeChatPayload,
+  BridgeGameEventPayload,
   BridgePlayerPayload,
+  BridgeServerStatus,
   BridgeVoicePayload,
   MinecraftPayload,
 } from "./types";
+import { emitInventoryUpdate, serializeInventory } from "./Inventories.ts";
+import {
+  inventoryViewers,
+  startInventoryWatchIfViewed,
+} from "./InventoryViewers.ts";
+import { clearServerStatus, setServerStatus } from "./ServerStatuses.ts";
 
 const logger = new Logger({ tag: "MinecraftWS" });
+
+const findLinkByUuid = (minecraftUuid: string) =>
+  db.query.minecraftLinksTable.findFirst({
+    where: eq(minecraftLinksTable.minecraftUuid, minecraftUuid),
+  });
+
+const makeEventId = (session: MinecraftSession, kind: string, uuid: string) =>
+  `${session.sessionId}:${kind}:${uuid}:${Snowflake.generate()}`;
+
+const fromSession = (session: MinecraftSession, sourceId: string) => ({
+  bridgeId: session.bridgeId,
+  serverId: session.serverId,
+  source: "minecraft" as const,
+  sourceId,
+});
 
 const resolveBridgePresenceLabels = async (
   bridgeId: string,
@@ -67,18 +94,10 @@ const resolveBridgePresenceLabels = async (
       eq(bridgeMinecraftServersTable.bridgeId, BigInt(bridgeId)),
       eq(bridgeMinecraftServersTable.serverId, serverId),
     ),
-    columns: { displayName: true, serverId: true },
+    columns: { displayName: true },
   });
 
-  const rawDisplay = server?.displayName?.trim() || "";
-  const customizedServerName =
-    rawDisplay && rawDisplay.toLowerCase() !== serverId.toLowerCase()
-      ? rawDisplay
-      : null;
-
-  return {
-    serverName: customizedServerName,
-  };
+  return { serverName: customServerName(serverId, server?.displayName) };
 };
 
 const syncMinecraftPresence = async (
@@ -87,9 +106,7 @@ const syncMinecraftPresence = async (
   serverId: string,
   type: "JOIN" | "LEAVE",
 ) => {
-  const link = await db.query.minecraftLinksTable.findFirst({
-    where: eq(minecraftLinksTable.minecraftUuid, uuid),
-  });
+  const link = await findLinkByUuid(uuid);
   if (!link) return;
 
   const userId = link.userId.toString();
@@ -253,6 +270,15 @@ export const onMinecraftConnection = (
         case "voice_state":
           await handleVoiceState(session, payload);
           break;
+        case "inventory":
+          await handleInventory(session, payload);
+          break;
+        case "game_event":
+          await handleGameEvent(session, payload);
+          break;
+        case "server_status":
+          await handleServerStatus(session, payload);
+          break;
         default:
           sendToSocket(socket, {
             op: "error",
@@ -277,9 +303,7 @@ export const onMinecraftConnection = (
     if (session) {
       const removed = clearServerPlayers(session.bridgeId, session.serverId);
       for (const player of removed) {
-        const link = await db.query.minecraftLinksTable.findFirst({
-          where: eq(minecraftLinksTable.minecraftUuid, player.uuid),
-        });
+        const link = await findLinkByUuid(player.uuid);
         if (link) {
           await VoiceStateService.leaveFromMinecraft(
             link.userId.toString(),
@@ -296,6 +320,17 @@ export const onMinecraftConnection = (
           logger.debug(`presence clear on disconnect failed: ${err}`),
         );
       }
+      clearServerStatus(session.bridgeId, session.serverId);
+      await publishBridgeEvent({
+        type: "SERVER_STATUS",
+        bridgeId: session.bridgeId,
+        sourceId: session.sessionId,
+        data: {
+          bridgeId: session.bridgeId,
+          serverId: session.serverId,
+          status: null,
+        },
+      });
       await publishBridgeEvent({
         type: "PRESENCE",
         bridgeId: session.bridgeId,
@@ -424,10 +459,7 @@ const handleChat = async (
 
   const messageId = `${session.sessionId}:${Snowflake.generate()}`;
   const chat: BridgeChatPayload = {
-    bridgeId: session.bridgeId,
-    serverId: session.serverId,
-    source: "minecraft",
-    sourceId: messageId,
+    ...fromSession(session, messageId),
     uuid,
     name,
     content,
@@ -457,20 +489,17 @@ const handlePlayerEvent = async (
       name,
       serverId: session.serverId,
     });
-    const link = await db.query.minecraftLinksTable.findFirst({
-      where: eq(minecraftLinksTable.minecraftUuid, uuid),
-    });
-    if (link) {
-      void ensureMember(session.bridgeId, link.userId);
-    }
+    startInventoryWatchIfViewed(session.bridgeId, session.serverId, uuid);
   } else {
     playerLeft(session.bridgeId, uuid);
-    const link = await db.query.minecraftLinksTable.findFirst({
-      where: eq(minecraftLinksTable.minecraftUuid, uuid),
-    });
-    if (link) {
-      void VoiceStateService.leaveFromMinecraft(link.userId.toString());
-    }
+  }
+
+  const link = await findLinkByUuid(uuid);
+  if (link && type === "JOIN") {
+    void ensureMember(session.bridgeId, link.userId);
+  }
+  if (link && type === "LEAVE") {
+    void VoiceStateService.leaveFromMinecraft(link.userId.toString());
   }
 
   void syncMinecraftPresence(
@@ -480,13 +509,9 @@ const handlePlayerEvent = async (
     type,
   ).catch((err) => logger.debug(`presence sync failed: ${err}`));
 
-  const eventId = `${session.sessionId}:${type.toLowerCase()}:${uuid}:${Snowflake.generate()}`;
-
+  const eventId = makeEventId(session, type.toLowerCase(), uuid);
   const data: BridgePlayerPayload = {
-    bridgeId: session.bridgeId,
-    serverId: session.serverId,
-    source: "minecraft",
-    sourceId: eventId,
+    ...fromSession(session, eventId),
     uuid,
     name,
   };
@@ -505,6 +530,52 @@ const handlePlayerEvent = async (
   );
 };
 
+const handleGameEvent = async (
+  session: MinecraftSession,
+  payload: MinecraftPayload,
+) => {
+  const event = parseData(session.socket, payload, minecraftGameEventData);
+  if (!event) return;
+
+  const eventId = makeEventId(session, event.kind, event.uuid);
+  const data: BridgeGameEventPayload = {
+    ...fromSession(session, eventId),
+    uuid: event.uuid,
+    name: event.name,
+    kind: event.kind,
+    message: event.message,
+  };
+
+  await publishBridgeEvent({
+    type: "GAME_EVENT",
+    bridgeId: session.bridgeId,
+    sourceId: eventId,
+    data,
+  });
+};
+
+const handleServerStatus = async (
+  session: MinecraftSession,
+  payload: MinecraftPayload,
+) => {
+  const data = parseData(session.socket, payload, minecraftServerStatusData);
+  if (!data) return;
+
+  const status: BridgeServerStatus = {
+    serverId: session.serverId,
+    ...data,
+    updatedAt: new Date().toISOString(),
+  };
+  setServerStatus(session.bridgeId, status);
+
+  await publishBridgeEvent({
+    type: "SERVER_STATUS",
+    bridgeId: session.bridgeId,
+    sourceId: session.sessionId,
+    data: { bridgeId: session.bridgeId, serverId: session.serverId, status },
+  });
+};
+
 const handleLink = async (
   session: MinecraftSession,
   payload: MinecraftPayload,
@@ -515,9 +586,7 @@ const handleLink = async (
   const { uuid, name } = link;
   const code = link.code || null;
 
-  const existing = await db.query.minecraftLinksTable.findFirst({
-    where: eq(minecraftLinksTable.minecraftUuid, uuid),
-  });
+  const existing = await findLinkByUuid(uuid);
   if (existing) {
     sendToSocket(session.socket, {
       op: "dispatch",
@@ -651,9 +720,7 @@ const handleVoiceJoin = async (
     });
   };
 
-  const link = await db.query.minecraftLinksTable.findFirst({
-    where: eq(minecraftLinksTable.minecraftUuid, uuid),
-  });
+  const link = await findLinkByUuid(uuid);
   if (!link) {
     reply({
       ok: false,
@@ -763,12 +830,9 @@ const handleVoiceJoin = async (
     audioToken: audio.token,
   });
 
-  const eventId = `${session.sessionId}:voice_join:${uuid}:${Snowflake.generate()}`;
+  const eventId = makeEventId(session, "voice_join", uuid);
   const voiceData: BridgeVoicePayload = {
-    bridgeId: session.bridgeId,
-    serverId: session.serverId,
-    source: "minecraft",
-    sourceId: eventId,
+    ...fromSession(session, eventId),
     uuid,
     name,
     userId,
@@ -801,9 +865,7 @@ const handleVoiceLeave = async (
     });
   };
 
-  const link = await db.query.minecraftLinksTable.findFirst({
-    where: eq(minecraftLinksTable.minecraftUuid, uuid),
-  });
+  const link = await findLinkByUuid(uuid);
   if (!link) {
     reply({
       ok: false,
@@ -832,27 +894,21 @@ const handleVoiceLeave = async (
 
   await revokeMinecraftAudioTokenForUser(userId);
   const left = await VoiceStateService.leaveFromMinecraft(userId);
+  const channelLabel = channelName ? `#${channelName}` : "Mutualzz voice";
   reply({
     ok: true,
     left,
     channelId: channelId || undefined,
     channelName: channelName || undefined,
-    message: left
-      ? channelName
-        ? `Left #${channelName}`
-        : "Left Mutualzz voice"
-      : "You were not in Mutualzz voice",
+    message: left ? `Left ${channelLabel}` : "You were not in Mutualzz voice",
     userId,
   });
 
   if (!left) return;
 
-  const eventId = `${session.sessionId}:voice_leave:${uuid}:${Snowflake.generate()}`;
+  const eventId = makeEventId(session, "voice_leave", uuid);
   const voiceData: BridgeVoicePayload = {
-    bridgeId: session.bridgeId,
-    serverId: session.serverId,
-    source: "minecraft",
-    sourceId: eventId,
+    ...fromSession(session, eventId),
     uuid,
     name,
     userId,
@@ -876,9 +932,7 @@ const handleVoiceState = async (
 
   const { uuid, selfMute, selfDeaf } = state;
 
-  const link = await db.query.minecraftLinksTable.findFirst({
-    where: eq(minecraftLinksTable.minecraftUuid, uuid),
-  });
+  const link = await findLinkByUuid(uuid);
   if (!link) return;
 
   await VoiceStateService.updateMinecraftSelfState({
@@ -886,4 +940,48 @@ const handleVoiceState = async (
     selfMute,
     selfDeaf,
   });
+};
+
+const handleInventory = async (
+  session: MinecraftSession,
+  payload: MinecraftPayload,
+) => {
+  const snapshot = parseData(session.socket, payload, minecraftInventoryData);
+  if (!snapshot) return;
+
+  const capturedAt = new Date();
+
+  const [row] = await db
+    .insert(minecraftInventoriesTable)
+    .values({
+      id: BigInt(Snowflake.generate()),
+      bridgeId: BigInt(session.bridgeId),
+      serverId: session.serverId,
+      minecraftUuid: snapshot.uuid,
+      minecraftName: snapshot.name,
+      inventory: snapshot.inventory,
+      enderChest: snapshot.enderChest,
+      capturedAt,
+    })
+    .onConflictDoUpdate({
+      target: [
+        minecraftInventoriesTable.bridgeId,
+        minecraftInventoriesTable.serverId,
+        minecraftInventoriesTable.minecraftUuid,
+      ],
+      set: {
+        minecraftName: snapshot.name,
+        inventory: snapshot.inventory,
+        enderChest: snapshot.enderChest,
+        capturedAt,
+      },
+    })
+    .returning();
+
+  if (!row) return;
+
+  const update = { bridgeId: session.bridgeId, ...serializeInventory(row) };
+  for (const userId of inventoryViewers(session.bridgeId, snapshot.uuid)) {
+    emitInventoryUpdate(userId, update);
+  }
 };

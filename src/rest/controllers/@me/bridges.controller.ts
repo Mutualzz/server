@@ -8,6 +8,7 @@ import {
   bridgeVoiceBindingsTable,
   channelsTable,
   db,
+  minecraftInventoriesTable,
   minecraftLinkCodesTable,
   minecraftLinksTable,
   spaceMembersTable,
@@ -17,6 +18,7 @@ import {
   AppBridgePeer,
   buildPluginConfig,
   connectedServerIds,
+  customServerName,
   emitMinecraftLinkUpdate,
   ensureMember,
   findOnlineBridgesForUuid,
@@ -30,6 +32,8 @@ import {
   publishBridgeEvent,
   removeAllMembershipsForUser,
   removeMember,
+  serializeInventory,
+  serverStatusesForBridge,
   userCanManageBridge,
   type BridgeChatPayload,
   type BridgeRole,
@@ -37,11 +41,7 @@ import {
 import { DiscordBridgePeer } from "@mutualzz/bot/bridge/DiscordBridgePeer";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { ChannelType, HttpException, HttpStatusCode } from "@mutualzz/types";
-import {
-  getSpace,
-  requireSpacePermissions,
-  Snowflake,
-} from "@mutualzz/util";
+import { getSpace, requireSpacePermissions, Snowflake } from "@mutualzz/util";
 import {
   bridgeAckBody,
   bridgeBindingParams,
@@ -49,6 +49,7 @@ import {
   bridgeCreateBody,
   bridgeDiscordBindBody,
   bridgeIdParams,
+  bridgeInventoryParams,
   bridgeLinkCodeBody,
   bridgeMemberParams,
   bridgeMessagesListQuery,
@@ -288,6 +289,127 @@ export class SpaceBridgeController {
     }
   }
 
+  static async getInventory(req: Request, res: Response, next: NextFunction) {
+    try {
+      const bridge = await SpaceBridgeController.requireSpaceBridge(
+        String(req.params.spaceId),
+      );
+      await SpaceBridgeController.requireBridgeAdmin(req, bridge);
+
+      const { minecraftUuid } = parseOrBadRequest(
+        bridgeInventoryParams,
+        req.params,
+      );
+
+      const rows = await db.query.minecraftInventoriesTable.findMany({
+        where: and(
+          eq(minecraftInventoriesTable.bridgeId, bridge.id),
+          eq(minecraftInventoriesTable.minecraftUuid, minecraftUuid),
+        ),
+      });
+      if (rows.length === 0) {
+        throw new HttpException(
+          HttpStatusCode.NotFound,
+          "No inventory snapshot for this player",
+        );
+      }
+
+      res.json(rows.map(serializeInventory));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async deleteInventory(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const bridge = await SpaceBridgeController.requireSpaceBridge(
+        String(req.params.spaceId),
+      );
+      await SpaceBridgeController.requireBridgeAdmin(req, bridge);
+
+      const { minecraftUuid } = parseOrBadRequest(
+        bridgeInventoryParams,
+        req.params,
+      );
+
+      await db
+        .delete(minecraftInventoriesTable)
+        .where(
+          and(
+            eq(minecraftInventoriesTable.bridgeId, bridge.id),
+            eq(minecraftInventoriesTable.minecraftUuid, minecraftUuid),
+          ),
+        );
+
+      res.status(HttpStatusCode.NoContent).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async listInventories(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const bridge = await SpaceBridgeController.requireSpaceBridge(
+        String(req.params.spaceId),
+      );
+      await SpaceBridgeController.requireBridgeAdmin(req, bridge);
+
+      const rows = await db
+        .select({
+          minecraftUuid: minecraftInventoriesTable.minecraftUuid,
+          minecraftName: minecraftInventoriesTable.minecraftName,
+          serverId: minecraftInventoriesTable.serverId,
+          capturedAt: minecraftInventoriesTable.capturedAt,
+        })
+        .from(minecraftInventoriesTable)
+        .where(eq(minecraftInventoriesTable.bridgeId, bridge.id))
+        .orderBy(desc(minecraftInventoriesTable.capturedAt))
+        .limit(500);
+      const bridgeId = bridge.id.toString();
+      const online = new Set(
+        playersForBridge(bridgeId).map((player) => player.uuid.toLowerCase()),
+      );
+
+      const players = new Map<
+        string,
+        {
+          minecraftUuid: string;
+          minecraftName: string;
+          servers: string[];
+          lastSeenAt: Date;
+          online: boolean;
+        }
+      >();
+      for (const row of rows) {
+        const key = row.minecraftUuid.toLowerCase();
+        const existing = players.get(key);
+        if (existing) {
+          existing.servers.push(row.serverId);
+          continue;
+        }
+        players.set(key, {
+          minecraftUuid: row.minecraftUuid,
+          minecraftName: row.minecraftName,
+          servers: [row.serverId],
+          lastSeenAt: row.capturedAt,
+          online: online.has(key),
+        });
+      }
+
+      res.json([...players.values()]);
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async kickMember(req: Request, res: Response, next: NextFunction) {
     try {
       const bridge = await SpaceBridgeController.requireSpaceBridge(
@@ -492,10 +614,7 @@ export class MeBridgesController {
         .returning();
 
       const bridgeId = bridge.id.toString();
-      const presenceServerName =
-        displayName.toLowerCase() !== serverId.toLowerCase()
-          ? displayName
-          : null;
+      const presenceServerName = customServerName(serverId, displayName);
 
       const onlineOnServer = playersForBridge(bridgeId).filter(
         (p) => p.serverId === serverId,
@@ -506,10 +625,13 @@ export class MeBridgesController {
           where: eq(minecraftLinksTable.minecraftUuid, player.uuid),
         });
         if (!link) continue;
-        void PresenceService.setMinecraftBridgeActivity(link.userId.toString(), {
-          bridgeId,
-          serverName: presenceServerName,
-        }).catch(() => null);
+        void PresenceService.setMinecraftBridgeActivity(
+          link.userId.toString(),
+          {
+            bridgeId,
+            serverName: presenceServerName,
+          },
+        ).catch(() => null);
       }
 
       res.json({
@@ -591,6 +713,25 @@ export class MeBridgesController {
           };
         }),
       );
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async myInventories(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { bridge } = await MeBridgesController.requireAccessibleBridge(req);
+
+      const link = await MeBridgesController.requireMyMinecraftLink(req);
+
+      const rows = await db.query.minecraftInventoriesTable.findMany({
+        where: and(
+          eq(minecraftInventoriesTable.bridgeId, bridge.id),
+          eq(minecraftInventoriesTable.minecraftUuid, link.minecraftUuid),
+        ),
+      });
+
+      res.json(rows.map(serializeInventory));
     } catch (error) {
       next(error);
     }
@@ -1055,10 +1196,7 @@ export class MeBridgesController {
 
       const removed = await removeMember(bridgeId, user.id);
       if (!removed) {
-        throw new HttpException(
-          HttpStatusCode.NotFound,
-          "Not a bridge member",
-        );
+        throw new HttpException(HttpStatusCode.NotFound, "Not a bridge member");
       }
 
       res.status(HttpStatusCode.NoContent).send();
@@ -1297,6 +1435,20 @@ export class MeBridgesController {
     return { bridge, role };
   }
 
+  static async requireMyMinecraftLink(req: Request) {
+    const link = await db.query.minecraftLinksTable.findFirst({
+      where: eq(minecraftLinksTable.userId, BigInt(req.user.id)),
+    });
+
+    if (!link)
+      throw new HttpException(
+        HttpStatusCode.NotFound,
+        "No linked Minecraft account",
+      );
+
+    return link;
+  }
+
   static async listAccessibleBridges(userId: bigint) {
     const [memberships, spaceMemberships] = await Promise.all([
       db.query.bridgeMembersTable.findMany({
@@ -1403,6 +1555,7 @@ class BridgesDetailHandler {
         }),
         hubConnected: isBridgeOnline(bridge.id.toString()),
         connectedServers: connectedServerIds(bridge.id.toString()),
+        serverStatuses: serverStatusesForBridge(bridge.id.toString()),
         onlinePlayers: onlinePlayers.map((p) => {
           const link =
             linkedByUuid.get(p.uuid.toLowerCase()) ??
