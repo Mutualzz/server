@@ -41,6 +41,7 @@ import {
   channelIconCache,
   defaultAvatarCache,
   expressionsCache,
+  externalImageCache,
   profileImageCache,
   spaceIconCache,
   themeBackgroundCache,
@@ -56,6 +57,7 @@ export const caches = {
   profileImage: profileImageCache,
   themeBackground: themeBackgroundCache,
   appIcon: appIconCache,
+  externalImage: externalImageCache,
 
   // REST
   authUser: authUserLRU,

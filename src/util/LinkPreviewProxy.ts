@@ -13,6 +13,8 @@ const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
 interface LinkPreviewInit {
   method?: string;
   redirect?: "follow" | "manual" | "error";
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
 }
 
 // For plain fetches of user-posted URLs (HEAD checks).

@@ -9,6 +9,7 @@ import type {
   PresenceActivityType,
 } from "@mutualzz/types";
 import { and, desc, eq, gt, lt, notInArray } from "drizzle-orm";
+import { proxyActivityAssets } from "./activityImageProxy";
 
 export const ACTIVITY_HISTORY_MAX = 5;
 export const ACTIVITY_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -229,7 +230,7 @@ export async function listRecentActivities(
       ...(row.details ? { details: row.details } : {}),
       ...(row.state ? { state: row.state } : {}),
       ...(row.url ? { url: row.url } : {}),
-      ...(row.assets ? { assets: row.assets } : {}),
+      ...(row.assets ? { assets: proxyActivityAssets(row.assets) } : {}),
       startedAt: row.startedAt ? row.startedAt.getTime() : null,
       endedAt: row.endedAt.getTime(),
     });

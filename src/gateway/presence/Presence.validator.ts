@@ -4,6 +4,10 @@ import type {
     PresenceActivityEmoji,
     PresencePayload,
 } from "@mutualzz/types";
+import {
+    isProxiedActivityImageUrl,
+    proxyActivityImageUrl,
+} from "@mutualzz/util/activityImageProxy.ts";
 
 export const MAX_ACTIVITIES = 5;
 export const MAX_STR = 128;
@@ -46,13 +50,18 @@ function sanitizeHttpsUrl(raw: unknown, max = MAX_URL): string | undefined {
     }
 }
 
+function sanitizeActivityImageUrl(raw: unknown): string | undefined {
+    if (isProxiedActivityImageUrl(raw)) return raw;
+    return proxyActivityImageUrl(sanitizeHttpsUrl(raw));
+}
+
 export function sanitizeActivityAssets(
     raw: unknown,
 ): PresenceActivityAssets | undefined {
     if (!raw || typeof raw !== "object") return undefined;
     const assumed = raw as PresenceActivityAssets;
-    const largeImageUrl = sanitizeHttpsUrl(assumed.largeImageUrl);
-    const smallImageUrl = sanitizeHttpsUrl(assumed.smallImageUrl);
+    const largeImageUrl = sanitizeActivityImageUrl(assumed.largeImageUrl);
+    const smallImageUrl = sanitizeActivityImageUrl(assumed.smallImageUrl);
     const largeText = clampStr(assumed.largeText);
     const smallText = clampStr(assumed.smallText);
     if (!largeImageUrl && !smallImageUrl && !largeText && !smallText) {

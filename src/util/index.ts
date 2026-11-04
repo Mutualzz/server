@@ -26,4 +26,6 @@ export * from "./reportReason";
 export * from "./PushNotifications";
 export * from "./notificationSettings";
 export * from "./themeBackground";
+export * from "./applicationIcon";
+export * from "./activityImageProxy";
 export * from "./semver";

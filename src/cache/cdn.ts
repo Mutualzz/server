@@ -35,6 +35,13 @@ export const themeBackgroundCache = new LRUCache<string, Uint8Array>({
     ttl: 1000 * 60 * 60 * 24,
 });
 
+export const externalImageCache = new LRUCache<string, Uint8Array>({
+    max: 500,
+    maxSize: 64 * 1024 * 1024,
+    sizeCalculation: (value) => value.byteLength || 1,
+    ttl: 1000 * 60 * 60 * 6,
+});
+
 export const appIconCache = new LRUCache<string, Uint8Array>({
     max: 500,
     ttl: 1000 * 60 * 60 * 24 * 365,
