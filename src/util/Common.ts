@@ -269,6 +269,7 @@ export const fetchKlipyMetadata = async (
     const previewUrl = String(preview.gif?.url ?? preview.mp4?.url ?? "").split(
       "?",
     )[0];
+    const smallUrl = String(preview.mp4?.url ?? "").split("?")[0];
 
     if (!mediaUrl) return null;
 
@@ -277,6 +278,7 @@ export const fetchKlipyMetadata = async (
       url,
       spoiler,
       media: mediaUrl,
+      mediaSmall: smallUrl && smallUrl !== mediaUrl ? smallUrl : null,
       image: previewUrl || null,
       title: gif.title ?? null,
     };
