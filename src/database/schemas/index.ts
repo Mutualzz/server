@@ -19,3 +19,4 @@ export * from "./SupportTicket";
 export * from "./SupportMessage";
 export * from "./SupportRelations";
 export * from "./Changelog";
+export * from "./Application";

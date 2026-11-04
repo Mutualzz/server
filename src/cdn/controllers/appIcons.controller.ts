@@ -9,6 +9,11 @@ import path from "path";
 import sharp, { type FormatEnum } from "sharp";
 import { MIME_TYPES } from "../Constants";
 import { appIconsGetParams, appIconsGetQuery } from "@mutualzz/validators";
+import {
+  findApplicationIconHash,
+  renderApplicationIcon,
+  sendIcon,
+} from "./applications.controller";
 
 const LOCAL_ASSETS_DIR = path.join(
   import.meta.dirname,
@@ -44,6 +49,24 @@ export default class AppIconsController {
       const { id } = appIconsGetParams.parse(req.params);
 
       const { format, size } = appIconsGetQuery.parse(req.query);
+
+      const applicationIcon = await findApplicationIconHash(id);
+      if (applicationIcon !== undefined) {
+        if (!applicationIcon)
+          throw new HttpException(
+            HttpStatusCode.NotFound,
+            "App icon not found",
+          );
+
+        const result = await renderApplicationIcon(
+          id,
+          applicationIcon,
+          format,
+          size,
+        );
+        sendIcon(res, result.buffer, result.format, "public, max-age=3600");
+        return;
+      }
 
       let cacheKey = `${id}:${format}`;
       if (size) cacheKey += `:${size}`;
