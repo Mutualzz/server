@@ -1,5 +1,7 @@
 import { scanUploads, upload } from "@mutualzz/rest";
-import { SpaceBridgeController } from "@mutualzz/rest/controllers/@me/bridges.controller.ts";
+import SpaceBridgeController from "@mutualzz/rest/controllers/spaces/bridge.controller.ts";
+import SpaceBridgeInventoriesController from "@mutualzz/rest/controllers/spaces/bridgeInventories.controller.ts";
+import SpaceBridgeModerationController from "@mutualzz/rest/controllers/spaces/bridgeModeration.controller.ts";
 import InvitesController from "@mutualzz/rest/controllers/invites.controller.ts";
 import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
 import SpacesController from "@mutualzz/rest/controllers/spaces/index.controller.ts";
@@ -239,22 +241,42 @@ router.get(
 router.get(
   "/:spaceId/bridge/inventories",
   createLimiter(60_000, 60),
-  SpaceBridgeController.listInventories,
+  SpaceBridgeInventoriesController.listInventories,
 );
 router.get(
   "/:spaceId/bridge/inventories/:minecraftUuid",
   createLimiter(60_000, 60),
-  SpaceBridgeController.getInventory,
+  SpaceBridgeInventoriesController.getInventory,
 );
 router.delete(
   "/:spaceId/bridge/inventories/:minecraftUuid",
   createLimiter(60_000, 20),
-  SpaceBridgeController.deleteInventory,
+  SpaceBridgeInventoriesController.deleteInventory,
 );
 router.delete(
   "/:spaceId/bridge/members/:userId",
   createLimiter(60_000, 20),
   SpaceBridgeController.kickMember,
+);
+router.post(
+  "/:spaceId/bridge/players/:minecraftUuid/kick",
+  createLimiter(60_000, 20),
+  SpaceBridgeModerationController.kickPlayer,
+);
+router.post(
+  "/:spaceId/bridge/players/:minecraftUuid/ban",
+  createLimiter(60_000, 10),
+  SpaceBridgeModerationController.banPlayer,
+);
+router.delete(
+  "/:spaceId/bridge/players/:minecraftUuid/ban",
+  createLimiter(60_000, 10),
+  SpaceBridgeModerationController.unbanPlayer,
+);
+router.get(
+  "/:spaceId/bridge/bans",
+  createLimiter(60_000, 30),
+  SpaceBridgeModerationController.listBans,
 );
 
 router.get(

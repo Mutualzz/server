@@ -94,7 +94,9 @@ export type BridgeEvent =
 export type BridgeEventType =
   | BridgeEvent["type"]
   | "VOICE_RESULT"
-  | "INVENTORY_WATCH";
+  | "INVENTORY_WATCH"
+  | "MODERATE"
+  | "INVENTORY_EDIT_BATCH";
 
 const PERSISTED_EVENT_TYPES: ReadonlySet<BridgeEvent["type"]> = new Set([
   "CHAT",
@@ -127,7 +129,9 @@ export type MinecraftClientOp =
   | "voice_state"
   | "inventory"
   | "game_event"
-  | "server_status";
+  | "server_status"
+  | "moderation_result"
+  | "inventory_edit_results";
 
 export type MinecraftServerOp =
   | "hello"

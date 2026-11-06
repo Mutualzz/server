@@ -10,6 +10,8 @@ export interface MinecraftSession {
   tokenId: string;
   lastHeartbeatAt: number;
   readyAt: number;
+  remoteModeration: boolean;
+  remoteInventoryEdit: boolean;
 }
 
 const sessions = new Map<WebSocket, MinecraftSession>();

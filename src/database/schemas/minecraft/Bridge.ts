@@ -1,7 +1,9 @@
 import { relations } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   index,
+  jsonb,
   pgTable,
   primaryKey,
   smallint,
@@ -11,6 +13,10 @@ import {
 } from "drizzle-orm/pg-core";
 import { spacesTable } from "../spaces/Space";
 import { usersTable } from "../users";
+import type {
+  InventoryEditExpected,
+  InventoryEditOp,
+} from "@mutualzz/validators";
 
 export const bridgesTable = pgTable(
   "bridges",
@@ -71,6 +77,7 @@ export const bridgeMinecraftServersTable = pgTable(
       .references(() => bridgesTable.id, { onDelete: "cascade" }),
     serverId: text().notNull(),
     displayName: text().notNull(),
+    remoteInventoryEdit: boolean().notNull().default(false),
     lastSeenAt: timestamp({ withTimezone: true, mode: "date" }),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .notNull()
@@ -109,7 +116,10 @@ export const bridgeDiscordBindingsTable = pgTable(
   (table) => [
     index("bridge_discord_binding_bridge_id_idx").on(table.bridgeId),
     index("bridge_discord_binding_channel_idx").on(table.channelId),
-    index("bridge_discord_binding_server_idx").on(table.bridgeId, table.serverId),
+    index("bridge_discord_binding_server_idx").on(
+      table.bridgeId,
+      table.serverId,
+    ),
   ],
 );
 
@@ -229,6 +239,43 @@ export const bridgeRelations = relations(bridgesTable, ({ one, many }) => ({
   members: many(bridgeMembersTable),
   messages: many(bridgeMessagesTable),
 }));
+
+export type InventoryEditStatus =
+  | "pending"
+  | "applied"
+  | "rejected"
+  | "cancelled";
+
+export const minecraftInventoryEditsTable = pgTable(
+  "minecraft_inventory_edits",
+  {
+    id: bigint({ mode: "bigint" }).primaryKey(),
+    bridgeId: bigint({ mode: "bigint" })
+      .notNull()
+      .references(() => bridgesTable.id, { onDelete: "cascade" }),
+    serverId: text().notNull(),
+    minecraftUuid: text().notNull(),
+    op: jsonb().$type<InventoryEditOp>().notNull(),
+    expected: jsonb().$type<InventoryEditExpected>().notNull(),
+    status: text().$type<InventoryEditStatus>().notNull().default("pending"),
+    message: text(),
+    createdById: bigint({ mode: "bigint" }).references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp({ withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    resolvedAt: timestamp({ withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    index("minecraft_inventory_edit_player_idx").on(
+      table.bridgeId,
+      table.serverId,
+      table.minecraftUuid,
+      table.status,
+    ),
+  ],
+);
 
 export const bridgeTokenRelations = relations(bridgeTokensTable, ({ one }) => ({
   bridge: one(bridgesTable, {

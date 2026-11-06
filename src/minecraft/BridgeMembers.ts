@@ -2,11 +2,17 @@ import {
   bridgeMembersTable,
   bridgesTable,
   db,
+  minecraftLinksTable,
   spaceMembersTable,
 } from "@mutualzz/database";
-import { emitEvent, fireAndForget, requireSpacePermissions } from "@mutualzz/util";
+import {
+  emitEvent,
+  fireAndForget,
+  requireSpacePermissions,
+} from "@mutualzz/util";
 import { and, eq } from "drizzle-orm";
 import { AppBridgePeer } from "./AppBridgePeer";
+import { isBannedFromBridge } from "./Bans";
 
 export type BridgeRole = "admin" | "member";
 
@@ -70,6 +76,12 @@ export const ensureMember = async (
   if (!bridge) return false;
 
   if (await userIsSpaceMember(uid, bridge.spaceId)) return false;
+
+  const link = await db.query.minecraftLinksTable.findFirst({
+    where: eq(minecraftLinksTable.userId, uid),
+    columns: { minecraftUuid: true },
+  });
+  if (link && (await isBannedFromBridge(bid, link.minecraftUuid))) return false;
 
   const existing = await db.query.bridgeMembersTable.findFirst({
     where: and(

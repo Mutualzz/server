@@ -1,16 +1,25 @@
-import { bridgesTable, db, minecraftLinksTable } from "@mutualzz/database";
+import {
+  bridgeMinecraftServersTable,
+  bridgesTable,
+  db,
+  minecraftLinksTable,
+} from "@mutualzz/database";
 import {
   addInventoryViewer,
   bridgeRoleForUser,
   isBridgeMember,
+  pendingEditsForPlayer,
   playersForBridge,
   removeInventoryViewer,
   requestInventoryWatch,
+  serializeInventoryEdit,
 } from "@mutualzz/minecraft";
 import type { GatewayPayload } from "@mutualzz/types";
 import { gatewayInventorySubscribePayload } from "@mutualzz/validators";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { WebSocket } from "../util/WebSocket";
+import { SessionRuntime } from "../util/SessionRuntime";
+import { Send } from "../util/Send";
 
 const canViewInventory = async (
   userId: string,
@@ -54,6 +63,28 @@ export async function onInventorySubscribe(
     (player) => player.uuid.toLowerCase() === minecraftUuid,
   );
   if (online) requestInventoryWatch(bridgeId, online.serverId, minecraftUuid);
+
+  const [edits, editableServers] = await Promise.all([
+    pendingEditsForPlayer(BigInt(bridgeId), minecraftUuid),
+    db.query.bridgeMinecraftServersTable.findMany({
+      where: and(
+        eq(bridgeMinecraftServersTable.bridgeId, BigInt(bridgeId)),
+        eq(bridgeMinecraftServersTable.remoteInventoryEdit, true),
+      ),
+      columns: { serverId: true },
+    }),
+  ]);
+  await Send(this, {
+    op: "Dispatch",
+    t: "BridgeInventoryEdits",
+    s: SessionRuntime.nextSequence(this.sessionId, this),
+    d: {
+      bridgeId,
+      minecraftUuid,
+      edits: edits.map(serializeInventoryEdit),
+      editableServers: editableServers.map((server) => server.serverId),
+    },
+  });
 }
 
 export async function onInventoryUnsubscribe(

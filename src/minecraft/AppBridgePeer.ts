@@ -68,7 +68,8 @@ type GatewayBridgeEventName =
   | "BridgeVoiceLeave"
   | "BridgePresence"
   | "BridgeGameEvent"
-  | "BridgeServerStatus";
+  | "BridgeServerStatus"
+  | "BridgeUpdate";
 
 const GATEWAY_EVENT_BY_TYPE = {
   JOIN: "BridgeJoin",
@@ -125,6 +126,13 @@ export class AppBridgePeer {
     if (!set) return;
     set.delete(userId);
     if (set.size === 0) this.recipientsByBridge.delete(bridgeId);
+  }
+
+  static emitBridgeUpdate(
+    bridgeId: string,
+    data: { id: string; name: string; status: number },
+  ) {
+    this.emitToRecipients(bridgeId, "BridgeUpdate", data);
   }
 
   static async reloadBridges() {

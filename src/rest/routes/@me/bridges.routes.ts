@@ -1,21 +1,26 @@
 import MeBridgesController from "@mutualzz/rest/controllers/@me/bridges.controller.ts";
+import MeBridgeLinkController from "@mutualzz/rest/controllers/@me/bridgeLink.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 
 const router = createRouter();
 
 router.get("/", MeBridgesController.list);
-router.get("/link", MeBridgesController.getLink);
+router.get("/link", MeBridgeLinkController.getLink);
 router.post(
   "/link/code",
   createLimiter(60_000, 10),
-  MeBridgesController.createLinkCode,
+  MeBridgeLinkController.createLinkCode,
 );
 router.post(
   "/link/redeem",
   createLimiter(60_000, 10),
-  MeBridgesController.redeemMinecraftCode,
+  MeBridgeLinkController.redeemMinecraftCode,
 );
-router.delete("/link", createLimiter(60_000, 10), MeBridgesController.unlink);
+router.delete(
+  "/link",
+  createLimiter(60_000, 10),
+  MeBridgeLinkController.unlink,
+);
 router.get("/discord/status", MeBridgesController.discordStatus);
 router.get("/:bridgeId", MeBridgesController.get);
 router.post(
