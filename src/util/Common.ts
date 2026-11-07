@@ -789,9 +789,9 @@ export const buildEmbed = async (
       description = description.slice(0, limit) + "...";
 
     const ogVideo =
-      metadata["og:video:secure_url"] ?? metadata["og:video:url"] ?? null;
+      metadata["og:video:secure_url"] || metadata["og:video:url"] || null;
 
-    const ogImage = metadata["og:image"] ?? null;
+    const ogImage = metadata["og:image"] || null;
 
     // Coerce to gifv if the OG tags indicate GIF-like content on an unknown host
     const isGifLike =
@@ -799,30 +799,32 @@ export const buildEmbed = async (
       (ogImage && /\.gif(\?|$)/i.test(ogImage)) ||
       metadata["og:type"] === "video.other";
 
+    const pageUrl = metadata["og:url"] || url;
+    const title = metadata["og:title"] || metadata.title || null;
+    const image = ogImage || metadata.image || null;
+
+    if (!isGifLike && !title && !description && !image) return null;
+
     embed = {
       type: isGifLike ? "gifv" : "rich",
-      title: isGifLike ? (metadata["og:title"] ?? null) : metadata["og:title"],
-      description: isGifLike ? undefined : description,
-      url: metadata["og:url"] ?? url,
-      image: ogImage,
+      title,
+      description: isGifLike ? undefined : description || undefined,
+      url: pageUrl,
+      image,
       spoiler,
-      media: isGifLike ? (ogVideo ?? ogImage) : ogVideo,
+      media: isGifLike ? ogVideo || ogImage || null : ogVideo || null,
       author: isGifLike
         ? undefined
         : {
-            name: metadata["og:site_name"]?.split(",")[0] ?? "",
-            url: metadata["og:url"] ?? url,
+            name: metadata["og:site_name"]?.split(",")[0] || "",
+            url: pageUrl,
             iconUrl:
               metadata.favicons?.[0]?.href &&
               !metadata.favicons[0].href.startsWith("/")
                 ? metadata.favicons[0].href
                 : null,
           },
-      color: isGifLike
-        ? undefined
-        : metadata["theme-color"] && metadata["theme-color"].length > 0
-          ? metadata["theme-color"]
-          : undefined,
+      color: isGifLike ? undefined : metadata["theme-color"] || undefined,
     };
   }
 
