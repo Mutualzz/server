@@ -11,14 +11,12 @@ import {
   customServerName,
   generateBridgeToken,
   playersForBridge,
-  removeMember,
 } from "@mutualzz/minecraft";
 import { DiscordBridgePeer } from "@mutualzz/bot/bridge/DiscordBridgePeer";
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { Snowflake } from "@mutualzz/util";
 import {
-  bridgeMemberParams,
   bridgeRotateTokenBody,
   bridgeServerParams,
   bridgeServerUpdateBody,
@@ -166,26 +164,6 @@ export default class BridgeManageController {
         token: token.plaintext,
         pluginConfig: buildPluginConfig(token.plaintext, serverId || undefined),
       });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async kickMember(req: Request, res: Response, next: NextFunction) {
-    try {
-      const bridge = await requireBridgeFromParams(req);
-      await requireBridgeAdmin(req, bridge);
-      const { userId: targetUserId } = parseOrBadRequest(
-        bridgeMemberParams,
-        req.params,
-      );
-
-      const removed = await removeMember(bridge.id, targetUserId);
-      if (!removed) {
-        throw new HttpException(HttpStatusCode.NotFound, "Member not found");
-      }
-
-      res.status(HttpStatusCode.NoContent).send();
     } catch (error) {
       next(error);
     }

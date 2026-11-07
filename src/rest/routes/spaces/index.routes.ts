@@ -253,11 +253,6 @@ router.delete(
   createLimiter(60_000, 20),
   SpaceBridgeInventoriesController.deleteInventory,
 );
-router.delete(
-  "/:spaceId/bridge/members/:userId",
-  createLimiter(60_000, 20),
-  SpaceBridgeController.kickMember,
-);
 router.post(
   "/:spaceId/bridge/players/:minecraftUuid/kick",
   createLimiter(60_000, 20),

@@ -281,17 +281,6 @@ export default class SpaceBridgeController {
     }
   }
 
-  static async kickMember(req: Request, res: Response, next: NextFunction) {
-    try {
-      const bridge = await requireSpaceBridge(String(req.params.spaceId));
-      await requireBridgeAdmin(req, bridge);
-      req.params.bridgeId = bridge.id.toString();
-      return BridgeManageController.kickMember(req, res, next);
-    } catch (error) {
-      next(error);
-    }
-  }
-
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const bridge = await requireSpaceBridge(String(req.params.spaceId));
