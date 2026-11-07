@@ -602,6 +602,13 @@
       "when": 1793866673656,
       "tag": "0085_dapper_joystick",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794016669785,
+      "tag": "0086_zippy_thaddeus_ross",
+      "breakpoints": true
     }
   ],
   "version": "7"

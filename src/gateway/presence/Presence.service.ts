@@ -787,8 +787,12 @@ export class PresenceService {
     this.started = true;
 
     setInterval(() => {
-      for (const ws of PresenceBucket.authenticatedSockets())
-        if (ws.userId) this.store.touch(ws.userId);
+      const liveSessionIds: string[] = [];
+      for (const socket of PresenceBucket.authenticatedSockets()) {
+        if (socket.userId) this.store.touch(socket.userId);
+        if (socket.sessionId) liveSessionIds.push(socket.sessionId);
+      }
+      void this.store.markSessionsAlive(liveSessionIds);
 
       this.store.gc();
     }, 30_000).unref?.();

@@ -13,4 +13,5 @@ export const OPCODE_LIMITS: Record<number, { limit: number; window: number }> =
     [GatewayOpcodes.PresenceUpdate]: { limit: 6, window: 10_000 }, // Presence
     [GatewayOpcodes.InventoryEdit]: { limit: 120, window: 60_000 }, // InventoryEdit
     [GatewayOpcodes.InventoryEditCancel]: { limit: 30, window: 60_000 }, // InventoryEditCancel
+    [GatewayOpcodes.LyricsRequest]: { limit: 240, window: 60_000 }, // LyricsRequest
   };

@@ -21,6 +21,8 @@ import {
   onInventoryUnsubscribe,
 } from "./InventorySubscribe.ts";
 import { onInventoryEdit, onInventoryEditCancel } from "./InventoryEdit.ts";
+import { onLyricsRequest } from "./LyricsRequest.ts";
+import { onActivityArtUpload } from "./ActivityArtUpload.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -43,4 +45,6 @@ export default {
   [GatewayOpcodes.InventoryUnsubscribe]: onInventoryUnsubscribe,
   [GatewayOpcodes.InventoryEdit]: onInventoryEdit,
   [GatewayOpcodes.InventoryEditCancel]: onInventoryEditCancel,
+  [GatewayOpcodes.LyricsRequest]: onLyricsRequest,
+  [GatewayOpcodes.ActivityArtUpload]: onActivityArtUpload,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

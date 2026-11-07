@@ -1,7 +1,4 @@
-import {
-  db,
-  userConnectionsTable,
-} from "@mutualzz/database";
+import { db, userConnectionsTable } from "@mutualzz/database";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { redis } from "@mutualzz/util";
 import { and, eq } from "drizzle-orm";
@@ -38,7 +35,6 @@ import {
   isAllowedReturnTo,
   providerEnvConfigured,
 } from "./shared.ts";
-import { isSpotifyAvailable } from "../SpotifyUser.ts";
 
 export {
   CONNECTION_PROVIDERS,
@@ -333,8 +329,5 @@ export function providerConfiguredFlags() {
 }
 
 export function connectionsHealth() {
-  return {
-    ...providerConfiguredFlags(),
-    spotify: isSpotifyAvailable(),
-  };
+  return providerConfiguredFlags();
 }
