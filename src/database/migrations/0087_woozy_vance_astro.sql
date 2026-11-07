@@ -1,0 +1,1 @@
+ALTER TABLE "bridge_messages" ADD COLUMN "details" jsonb;

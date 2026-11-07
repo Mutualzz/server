@@ -609,6 +609,13 @@
       "when": 1794016669785,
       "tag": "0086_zippy_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794019508869,
+      "tag": "0087_woozy_vance_astro",
+      "breakpoints": true
     }
   ],
   "version": "7"

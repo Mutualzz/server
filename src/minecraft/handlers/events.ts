@@ -131,6 +131,7 @@ export const handleGameEvent = async (
     name: event.name,
     kind: event.kind,
     message: event.message,
+    advancement: event.advancement,
   };
 
   await publishBridgeEvent({

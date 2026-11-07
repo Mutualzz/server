@@ -11,6 +11,7 @@ import {
 } from "@mutualzz/minecraft";
 import { Logger } from "@mutualzz/logger";
 import {
+  type APIEmbed,
   ChannelType,
   type Client,
   type Message,
@@ -45,6 +46,34 @@ const discordContent = (event: PersistedBridgeEvent): string => {
     case "GAME_EVENT":
       return `${GAME_EVENT_EMOJI[event.data.kind]} ${event.data.message}`;
   }
+};
+
+const ITEM_TEXTURE_BASE =
+  "https://assets.mcasset.cloud/26.1.2/assets/minecraft/textures/item";
+
+const ADVANCEMENT_FRAME_COLORS = {
+  task: 0xffaa00,
+  goal: 0xffaa00,
+  challenge: 0xa855f7,
+} as const;
+
+const discordEmbeds = (event: PersistedBridgeEvent): APIEmbed[] => {
+  if (event.type !== "GAME_EVENT" || !event.data.advancement) return [];
+  const { title, description, frame, icon } = event.data.advancement;
+  if (!title) return [];
+
+  return [
+    {
+      color: ADVANCEMENT_FRAME_COLORS[frame],
+      title: title.slice(0, 256),
+      ...(description && { description: description.slice(0, 4096) }),
+      ...(icon && {
+        thumbnail: {
+          url: `${ITEM_TEXTURE_BASE}/${icon.replace(/^minecraft:/, "")}.png`,
+        },
+      }),
+    },
+  ];
 };
 
 /**
@@ -228,6 +257,7 @@ export class DiscordBridgePeer {
         event.type === "CHAT" ? "Minecraft" : "Mutualzz Bridge";
       await handle.client.send({
         content: discordContent(event),
+        embeds: discordEmbeds(event),
         username: data.name.slice(0, 80) || fallbackName,
         ...(data.uuid ? { avatarURL: minecraftAvatarUrl(data.uuid) } : {}),
         ...(handle.threadId ? { threadId: handle.threadId } : {}),

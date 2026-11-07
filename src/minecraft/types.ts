@@ -1,3 +1,5 @@
+import type { MinecraftAdvancementDetails } from "@mutualzz/validators";
+
 export type BridgeSource = "minecraft" | "discord" | "app";
 
 export interface BridgeChatPayload {
@@ -26,6 +28,7 @@ export interface BridgePlayerPayload {
 export interface BridgeGameEventPayload extends BridgePlayerPayload {
   kind: "death" | "advancement";
   message: string;
+  advancement?: MinecraftAdvancementDetails;
 }
 
 /** Quiet announce when a player joins/leaves Mutualzz voice from Minecraft. */

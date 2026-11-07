@@ -8,6 +8,7 @@ import { Logger } from "@mutualzz/logger";
 import { emitEvent, fireAndForget, Snowflake } from "@mutualzz/util";
 import { eq, inArray } from "drizzle-orm";
 import { subscribeBridge } from "./BridgeBus";
+import type { MinecraftAdvancementDetails } from "@mutualzz/validators";
 import type { BridgeEvent, BridgeSource, PersistedBridgeEvent } from "./types";
 
 const logger = new Logger({ tag: "AppBridgePeer" });
@@ -39,6 +40,7 @@ export interface GatewayBridgePlayerPayload {
 export interface GatewayBridgeGameEventPayload extends GatewayBridgePlayerPayload {
   kind: "death" | "advancement";
   content: string;
+  advancement?: MinecraftAdvancementDetails;
 }
 
 export interface GatewayBridgeVoicePayload {
@@ -266,6 +268,7 @@ export class AppBridgePeer {
           ...gatewayBase(event),
           kind: event.data.kind,
           content: event.data.message,
+          advancement: event.data.advancement,
         } satisfies GatewayBridgeGameEventPayload);
         return;
       case "PRESENCE":

@@ -16,7 +16,12 @@ import { usersTable } from "../users";
 import type {
   InventoryEditExpected,
   InventoryEditOp,
+  MinecraftAdvancementDetails,
 } from "@mutualzz/validators";
+
+export interface BridgeMessageDetails {
+  advancement?: MinecraftAdvancementDetails;
+}
 
 export const bridgesTable = pgTable(
   "bridges",
@@ -210,6 +215,7 @@ export const bridgeMessagesTable = pgTable(
     uuid: text(),
     userId: text(),
     avatarUrl: text(),
+    details: jsonb().$type<BridgeMessageDetails>(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),

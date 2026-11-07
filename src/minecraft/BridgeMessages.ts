@@ -2,6 +2,7 @@ import { bridgeMessagesTable, bridgesTable, db } from "@mutualzz/database";
 import { Logger } from "@mutualzz/logger";
 import { Snowflake } from "@mutualzz/util";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
+import type { MinecraftAdvancementDetails } from "@mutualzz/validators";
 import type { PersistedBridgeEvent } from "./types";
 
 const logger = new Logger({ tag: "BridgeMessages" });
@@ -28,6 +29,7 @@ export interface StoredBridgeMessage {
   uuid?: string;
   userId?: string;
   avatarUrl?: string;
+  advancement?: MinecraftAdvancementDetails;
   at: string;
 }
 
@@ -49,7 +51,10 @@ const trimHistory = async (bridgeId: bigint) => {
 
 const storedFields = (
   event: PersistedBridgeEvent,
-): Pick<StoredBridgeMessage, "kind" | "content" | "avatarUrl"> => {
+): Pick<
+  StoredBridgeMessage,
+  "kind" | "content" | "avatarUrl" | "advancement"
+> => {
   switch (event.type) {
     case "CHAT":
       return {
@@ -66,7 +71,11 @@ const storedFields = (
     case "VOICE_LEAVE":
       return { kind: "voice_leave", content: event.data.channelName };
     case "GAME_EVENT":
-      return { kind: event.data.kind, content: event.data.message };
+      return {
+        kind: event.data.kind,
+        content: event.data.message,
+        advancement: event.data.advancement,
+      };
   }
 };
 
@@ -75,7 +84,7 @@ export const persistBridgeEvent = async (event: PersistedBridgeEvent) => {
   const sourceKey =
     event.sourceId ?? data.sourceId ?? `${event.type}:${Snowflake.generate()}`;
   const id = BigInt(Snowflake.generate());
-  const { kind, content, avatarUrl } = storedFields(event);
+  const { kind, content, avatarUrl, advancement } = storedFields(event);
 
   try {
     await db
@@ -92,6 +101,7 @@ export const persistBridgeEvent = async (event: PersistedBridgeEvent) => {
         uuid: data.uuid ?? null,
         userId: data.userId ?? null,
         avatarUrl: avatarUrl ?? null,
+        details: advancement ? { advancement } : null,
       })
       .onConflictDoNothing({ target: bridgeMessagesTable.sourceKey });
 
@@ -145,6 +155,7 @@ export const listBridgeMessages = async (
     uuid: row.uuid ?? undefined,
     userId: row.userId ?? undefined,
     avatarUrl: row.avatarUrl ?? undefined,
+    advancement: row.details?.advancement,
     at: row.createdAt.toISOString(),
   }));
 };
