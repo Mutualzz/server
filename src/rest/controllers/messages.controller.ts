@@ -4,35 +4,18 @@ import {
   invalidateCache,
   setCache,
 } from "@mutualzz/cache";
+import { db, messagesTable } from "@mutualzz/database";
 import {
-  channelRecipientsTable,
-  db,
-  messagesTable,
-  postsTable,
-  relationshipsTable,
-  spaceMembersTable,
-  spaceMemberRolesTable,
-} from "@mutualzz/database";
-import {
-  type APIAttachment,
   type APIMessage,
-  type APIMessageEmbed,
-  type APIPost,
-  type APIRelationship,
   ChannelType,
   HttpException,
   HttpStatusCode,
-  type MentionType,
   MessageType,
   ReadStateType,
-  RelationshipType,
   NotificationLevel,
-  shouldIncrementMentionCount,
 } from "@mutualzz/types";
 import {
-  attachHashtagsToPosts,
   buildEmbeds,
-  bucketName,
   emitEvent,
   execNormalized,
   execNormalizedMany,
@@ -43,30 +26,21 @@ import {
   getChannel,
   getChannels,
   getMember,
-  getSpace,
   getSpaceHydrated,
   getUser,
-  incrementMentionCounts,
   isChannelRecipient,
   publicUserColumns,
   requireChannelPermissions,
-  requireNotRestricted,
   resolveExpressions,
   attachReactionsToMessages,
   hydrateMessagesForResponse,
-  s3Client,
   sanitizeContent,
-  sendMessagePushNotifications,
   setChannelLastMessageId,
   Snowflake,
-  validateMessageStickers,
   serializeReadState,
   computeMutedUntilDuration,
-  resolveChannelNotificationForUser,
 } from "@mutualzz/util";
 import { patchChannelNotificationSettingsSchema } from "@mutualzz/validators";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import sharp from "sharp";
 import {
   messagesGetQuery,
   validateChannelParamsGet,
@@ -77,28 +51,20 @@ import {
   validateMessageParamsPut,
   validateSpaceGetOneParams,
 } from "@mutualzz/validators";
-import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import {
   BitField,
-  messageFlags,
   readStateFlags,
   type PermissionFlags,
 } from "@mutualzz/bitfield";
-import { createSystemMessage } from "@mutualzz/util/systemUser";
-import { isBlockedBetween } from "@mutualzz/util/blocks.ts";
-import { assertCanDm } from "@mutualzz/util/privacy.ts";
-import {
-  contentHasInviteLinks,
-  resolveMessageCodedLinks,
-} from "../../util/codedLinks";
+import { createMessage } from "@mutualzz/util/messages/createMessage";
+import { readAttachmentSpoilers } from "@mutualzz/util/messages/attachments";
 import {
   buildMessageSearchWhere,
   combineMessageSearchWhere,
 } from "../../util/messageSearch";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState";
-import { PresenceService } from "@mutualzz/gateway/presence/Presence.service";
-import { unavailableLike } from "@mutualzz/gateway/util/Calculations";
 import { z } from "zod";
 
 const messageSearchQuerySchema = z.string().trim().min(1).max(200);
@@ -106,702 +72,31 @@ const messageSearchQuerySchema = z.string().trim().min(1).max(200);
 export default class MessagesController {
   static async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const { user } = req;
-
-      requireNotRestricted(user);
-
       const { channelId } = validateMessageParamsPut.parse(req.params);
 
-      const channel = await getChannel(channelId);
+      const { attachmentSpoilers: validatedAttachmentSpoilers = [], ...body } =
+        validateMessageBodyPut.parse(req.body);
 
-      if (!channel)
-        throw new HttpException(HttpStatusCode.NotFound, "Channel not found");
+      const spoilers = readAttachmentSpoilers(
+        req.body,
+        validatedAttachmentSpoilers,
+      );
 
-      const isMessageSendable =
-        channel.type === ChannelType.Voice ||
-        channel.type === ChannelType.Text ||
-        channel.type === ChannelType.DM ||
-        channel.type === ChannelType.GroupDM;
-
-      if (!isMessageSendable)
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Message cannot be sent in this channel",
-        );
-
-      const {
-        content,
-        nonce,
-        repliedToId,
-        mentionReply = true,
-        expressionIds = [],
-        sharedPostId,
-        codedLinks = [],
-        attachmentSpoilers: validatedAttachmentSpoilers = [],
-      } = validateMessageBodyPut.parse(req.body);
-
-      const rawSpoilers =
-        validatedAttachmentSpoilers.length > 0
-          ? validatedAttachmentSpoilers
-          : (() => {
-              const body = req.body as Record<string, unknown>;
-              const raw =
-                body["attachmentSpoilers[]"] ?? body.attachmentSpoilers;
-              if (raw == null) return [];
-              const arr = Array.isArray(raw) ? raw : [raw];
-              return arr.map((v) => v === true || v === "true");
-            })();
-
-      const uploadedFiles: Express.Multer.File[] = Array.isArray(req.files)
+      const files: Express.Multer.File[] = Array.isArray(req.files)
         ? req.files
         : [];
 
-      if (
-        !content &&
-        expressionIds.length === 0 &&
-        uploadedFiles.length === 0 &&
-        !sharedPostId &&
-        codedLinks.length === 0 &&
-        !contentHasInviteLinks(content)
-      )
-        throw new HttpException(
-          HttpStatusCode.BadRequest,
-          "Message must have content, stickers, or attachments",
-        );
-
-      switch (channel.type) {
-        case ChannelType.DM:
-        case ChannelType.GroupDM:
-          if (!(await isChannelRecipient(channel.id, user.id))) {
-            throw new HttpException(
-              HttpStatusCode.Forbidden,
-              "You are not part of this DM Channel",
-            );
-          }
-          break;
-        default:
-          if (
-            channel.spaceId &&
-            !(await getMember(channel.spaceId, user.id, true))
-          )
-            throw new HttpException(
-              HttpStatusCode.Forbidden,
-              "You are not a member of this space",
-            );
-      }
-
-      if (channel.spaceId)
-        await requireChannelPermissions({
-          channelId: channel.id,
-          userId: user.id,
-          needed: ["ViewChannel", "SendMessages"],
-        });
-
-      if (channel.spaceId && uploadedFiles.length > 0)
-        await requireChannelPermissions({
-          channelId: channel.id,
-          userId: user.id,
-          needed: ["AttachFiles"],
-        });
-
-      if (nonce) {
-        let existingMessage = await getCache("message", nonce);
-        if (existingMessage)
-          return res.status(HttpStatusCode.Success).json(existingMessage);
-
-        existingMessage = await execNormalized<APIMessage>(
-          db.query.messagesTable.findFirst({
-            with: {
-              channel: true,
-              repliedTo: true,
-            },
-            where: and(
-              eq(messagesTable.nonce, BigInt(nonce)),
-              eq(messagesTable.channelId, BigInt(channel.id)),
-              eq(messagesTable.authorId, BigInt(user.id)),
-            ),
-          }),
-        );
-
-        if (existingMessage) {
-          const [hydrated] = await hydrateMessagesForResponse(
-            [
-              {
-                ...existingMessage,
-                expressions: await resolveExpressions(
-                  existingMessage.content ?? "",
-                  existingMessage.expressionIds,
-                ),
-                expressionIds: (existingMessage.expressionIds ?? []).map((id) =>
-                  id.toString(),
-                ),
-              },
-            ],
-            user.id,
-            false,
-          );
-          await setCache("message", nonce, hydrated);
-          return res.status(HttpStatusCode.Success).json(hydrated);
-        }
-      }
-
-      let canUseExternalEmojis = false;
-      let canEmbed = false;
-      let canUseExternalStickers = false;
-      let canMentionEveryone = false;
-
-      if (channel.spaceId) {
-        try {
-          const { permissions } = await requireChannelPermissions({
-            channelId: channel.id,
-            userId: user.id,
-            needed: ["UseExternalStickers"],
-            mode: "Any",
-          });
-          canUseExternalStickers = permissions.has("UseExternalStickers");
-        } catch {
-          canUseExternalStickers = false;
-        }
-      } else canUseExternalStickers = true;
-
-      const validatedStickerIds = await validateMessageStickers({
-        expressionIds,
-        channel,
-        userId: user.id,
-        canUseExternalStickers,
+      const { message, created } = await createMessage({
+        ...body,
+        author: req.user,
+        channelId,
+        files,
+        spoilers,
       });
 
-      if (channel.spaceId) {
-        try {
-          const { permissions } = await requireChannelPermissions({
-            channelId: channel.id,
-            userId: user.id,
-            needed: ["UseExternalEmojis", "EmbedLinks", "MentionEveryone"],
-            mode: "Any",
-          });
-
-          canUseExternalEmojis = permissions.has("UseExternalEmojis");
-          canEmbed = permissions.has("EmbedLinks");
-          canMentionEveryone = permissions.has("MentionEveryone");
-        } catch {
-          canUseExternalEmojis = false;
-          canEmbed = false;
-          canMentionEveryone = false;
-        }
-      }
-
-      const effectiveCanEmbed = !channel.spaceId || canEmbed;
-
-      const sanitizedContent = content
-        ? await sanitizeContent(content, channel, user.id, canUseExternalEmojis)
-        : null;
-
-      if (
-        channel.type === ChannelType.DM ||
-        channel.type === ChannelType.GroupDM
-      ) {
-        const recipientRows = await execNormalizedMany(
-          db.query.channelRecipientsTable.findMany({
-            where: eq(channelRecipientsTable.channelId, BigInt(channel.id)),
-          }),
-        );
-
-        const otherRecipients = recipientRows
-          .map((r) => r.userId)
-          .filter((id: string) => id !== user.id);
-
-        for (const otherId of otherRecipients) {
-          if (await isBlockedBetween(user.id, otherId)) {
-            const sysMsg = await createSystemMessage(
-              channelId,
-              "You cannot message this person",
-              messageFlags.Ephemeral,
-            );
-
-            fireAndForgetAll([
-              {
-                label: `event:MessageCreate:ephemeral:${user.id}`,
-                run: () =>
-                  emitEvent({
-                    event: "MessageCreate",
-                    user_id: user.id,
-                    data: sysMsg,
-                  }),
-              },
-            ]);
-
-            throw new HttpException(
-              HttpStatusCode.Forbidden,
-              "You cannot message this person",
-            );
-          }
-
-          if (channel.type === ChannelType.DM && otherRecipients.length === 1) {
-            await assertCanDm(otherId, user.id);
-          }
-        }
-      }
-
-      const messageId = BigInt(Snowflake.generate());
-
-      const allUploaded: APIAttachment[] = await Promise.all(
-        uploadedFiles.map(async (file, index) => {
-          const spoiler = rawSpoilers[index] ?? false;
-          const attachmentId = Snowflake.generate();
-          const originalName =
-            typeof file.originalname === "string"
-              ? file.originalname.trim()
-              : "";
-          const fallbackExt =
-            file.mimetype
-              .split("/")[1]
-              ?.split(";")[0]
-              ?.replace("jpeg", "jpg") || "bin";
-          const safeName = (
-            originalName || `attachment.${fallbackExt}`
-          ).replace(/[^a-zA-Z0-9._-]/g, "_");
-          const key = `attachments/${messageId}/${attachmentId}_${safeName}`;
-
-          await s3Client.send(
-            new PutObjectCommand({
-              Bucket: bucketName,
-              Body: file.buffer,
-              Key: key,
-              ContentType: file.mimetype,
-            }),
-          );
-
-          let width: number | undefined;
-          let height: number | undefined;
-          if (file.mimetype.startsWith("image/")) {
-            try {
-              const meta = await sharp(file.buffer).metadata();
-              width = meta.width;
-              height = meta.height;
-            } catch {
-              // ignore dimension errors
-            }
-          }
-
-          const cdnBase = process.env.CDN_URL ?? "";
-          return {
-            id: attachmentId,
-            filename: originalName || `attachment.${fallbackExt}`,
-            size: file.size,
-            contentType: file.mimetype,
-            url: `${cdnBase}/attachments/${messageId}/${attachmentId}_${safeName}`,
-            width,
-            height,
-            spoiler,
-          } satisfies APIAttachment;
-        }),
-      );
-
-      // GIF uploads become gifv embeds so they work with the gif picker
-      const attachments = allUploaded.filter(
-        (a) => a.contentType !== "image/gif",
-      );
-      const gifEmbeds: APIMessageEmbed[] = allUploaded
-        .filter((a) => a.contentType === "image/gif")
-        .map((gif) => ({
-          type: "gifv",
-          url: gif.url,
-          media: gif.url,
-          image: gif.url,
-          title: gif.filename,
-          spoiler: gif.spoiler,
-        }));
-
-      const { codedLinks: hydratedCodedLinks, content: messageContent } =
-        await resolveMessageCodedLinks(sanitizedContent, codedLinks);
-
-      const contentEmbeds = effectiveCanEmbed
-        ? await buildEmbeds(messageContent || "")
-        : [];
-
-      const postEmbeds: APIMessageEmbed[] = [];
-      if (sharedPostId) {
-        const sharedPost = await execNormalized<APIPost>(
-          db.query.postsTable.findFirst({
-            with: { author: { columns: publicUserColumns } },
-            where: eq(postsTable.id, BigInt(sharedPostId)),
-          }),
-        );
-
-        if (sharedPost) {
-          const [hydratedSharedPost] = await attachHashtagsToPosts([
-            sharedPost,
-          ]);
-
-          postEmbeds.push({
-            type: "post",
-            post: {
-              id: hydratedSharedPost.id,
-              authorId: hydratedSharedPost.authorId,
-              author: hydratedSharedPost.author,
-              content: hydratedSharedPost.content,
-              attachments: hydratedSharedPost.attachments,
-              hashtags: hydratedSharedPost.hashtags,
-              createdAt: hydratedSharedPost.createdAt,
-            },
-          });
-        }
-      }
-
-      const embeds = [...contentEmbeds, ...gifEmbeds, ...postEmbeds];
-
-      const newMessage = await execNormalized<APIMessage>(
-        db
-          .insert(messagesTable)
-          .values({
-            id: messageId,
-            authorId: BigInt(user.id),
-            nonce: nonce ? BigInt(nonce) : undefined,
-            channelId: BigInt(channel.id),
-            spaceId: channel.spaceId ? BigInt(channel.spaceId) : undefined,
-            content: messageContent,
-            embeds,
-            codedLinks: hydratedCodedLinks,
-            attachments,
-            repliedToId: repliedToId ? BigInt(repliedToId) : undefined,
-            expressionIds: validatedStickerIds,
-            type: repliedToId ? MessageType.Reply : MessageType.Default,
-          })
-          .returning()
-          .then((r) => r[0]),
-      );
-
-      if (!newMessage)
-        throw new HttpException(
-          HttpStatusCode.InternalServerError,
-          "Failed to create message",
-        );
-
-      const userMentionMatches: { type: MentionType; id: string }[] = (
-        sanitizedContent?.match(/<@(\d+)>/g) ?? []
-      )
-        .map((m) => m.replace(/<@|>/g, ""))
-        .filter((id) => id !== user.id)
-        .map((id) => ({
-          type: "user",
-          id: id,
-        }));
-
-      const roleMentionMatches: { type: MentionType; id: string }[] = (
-        sanitizedContent?.match(/<@&(\d+)>/g) ?? []
-      )
-        .map((m) => m.replace(/<@&|>/g, ""))
-        .filter((id) => id !== user.id)
-        .map((id) => ({
-          type: "role",
-          id: id,
-        }));
-
-      const everyoneMentions: { type: MentionType; id: string }[] =
-        canMentionEveryone && sanitizedContent?.includes("@everyone")
-          ? [{ type: "everyone", id: "0" }]
-          : [];
-      const hereMentions: { type: MentionType; id: string }[] =
-        canMentionEveryone && sanitizedContent?.includes("@here")
-          ? [{ type: "here", id: "0" }]
-          : [];
-
-      const uniqueMentions = [
-        ...new Map(
-          [
-            ...userMentionMatches,
-            ...roleMentionMatches,
-            ...everyoneMentions,
-            ...hereMentions,
-          ].map((m) => [`${m.type}:${m.id.toString()}`, m]),
-        ).values(),
-      ];
-
-      let repliedTo: APIMessage | null = null;
-      if (repliedToId)
-        repliedTo = await execNormalized<APIMessage>(
-          db.query.messagesTable.findFirst({
-            where: and(
-              eq(messagesTable.id, BigInt(repliedToId)),
-              eq(messagesTable.channelId, BigInt(channelId)),
-            ),
-          }),
-        );
-
-      if (mentionReply && repliedTo && repliedTo.authorId !== user.id) {
-        const replyAuthorMention = {
-          type: "user" as MentionType,
-          id: repliedTo.authorId.toString(),
-        };
-        if (
-          !uniqueMentions.some(
-            (m) => m.type === "user" && m.id === replyAuthorMention.id,
-          )
-        ) {
-          uniqueMentions.push(replyAuthorMention);
-        }
-      }
-
-      const message = {
-        ...newMessage,
-        mentions: uniqueMentions,
-        channel: channel,
-        author: user,
-        space: channel.spaceId ? await getSpace(channel.spaceId) : null,
-        expressions: await resolveExpressions(
-          newMessage.content ?? "",
-          newMessage.expressionIds,
-        ),
-        expressionIds: (newMessage.expressionIds ?? []).map((id) =>
-          id.toString(),
-        ),
-        attachments,
-        reactions: [],
-        repliedTo,
-      };
-
-      res.status(HttpStatusCode.Created).json(message);
-
-      fireAndForgetAll([
-        {
-          label: "event:MessageCreate",
-          run: () =>
-            emitEvent({
-              event: "MessageCreate",
-              channel_id: channel.id,
-              data: message,
-            }),
-        },
-        {
-          label: "channel:lastMessageId",
-          run: () => setChannelLastMessageId(channel.id, message.id),
-        },
-        {
-          label: "readState:mentions",
-          run: async () => {
-            if (uniqueMentions.length > 0) {
-              await db
-                .update(messagesTable)
-                .set({ mentions: uniqueMentions })
-                .where(eq(messagesTable.id, BigInt(newMessage.id)));
-
-              const userMentionIds = userMentionMatches.map((m) =>
-                m.id.toString(),
-              );
-              const roleMentionIds = roleMentionMatches.map((m) =>
-                m.id.toString(),
-              );
-
-              const membersToNotify = [...userMentionIds];
-
-              if (everyoneMentions.length > 0 && channel.spaceId) {
-                const allMembers = await db
-                  .select({
-                    userId: spaceMembersTable.userId,
-                  })
-                  .from(spaceMembersTable)
-                  .where(
-                    eq(spaceMembersTable.spaceId, BigInt(channel.spaceId)),
-                  );
-
-                const viewableMemberIds = (
-                  await Promise.all(
-                    allMembers.map(async (m) => {
-                      const id = m.userId.toString();
-                      if (id === user.id) return null;
-                      try {
-                        await requireChannelPermissions({
-                          channelId: channel.id,
-                          userId: id,
-                          needed: ["ViewChannel"],
-                        });
-                        return id;
-                      } catch {
-                        return null;
-                      }
-                    }),
-                  )
-                ).filter((id): id is string => id != null);
-
-                membersToNotify.push(...viewableMemberIds);
-              }
-
-              if (hereMentions.length > 0 && channel.spaceId) {
-                const allMembers = await db
-                  .select({
-                    userId: spaceMembersTable.userId,
-                  })
-                  .from(spaceMembersTable)
-                  .where(
-                    eq(spaceMembersTable.spaceId, BigInt(channel.spaceId)),
-                  );
-
-                const memberIds = allMembers
-                  .map((m) => m.userId.toString())
-                  .filter((id) => id !== user.id);
-
-                const presences = await Promise.all(
-                  memberIds.map((id) => PresenceService.get(id)),
-                );
-
-                const onlineMemberIds = memberIds.filter((_, idx) => {
-                  const p = presences[idx];
-                  return !unavailableLike(p ?? null);
-                });
-
-                membersToNotify.push(...onlineMemberIds);
-              }
-
-              const uniqueMembers = Array.from(new Set(membersToNotify));
-              const directMentionIds = new Set(userMentionIds);
-              let roleMemberIds: string[] = [];
-              if (roleMentionIds.length > 0) {
-                const roleMembers = await db
-                  .select({ userId: spaceMemberRolesTable.userId })
-                  .from(spaceMemberRolesTable)
-                  .where(
-                    sql`${spaceMemberRolesTable.roleId} = ANY(ARRAY[${sql.raw(roleMentionIds.map((id) => `'${BigInt(id)}'`).join(","))}]::bigint[])`,
-                  );
-                roleMemberIds = roleMembers
-                  .map((row) => row.userId.toString())
-                  .filter((id) => id !== user.id);
-              }
-              const allCandidates = Array.from(
-                new Set([...uniqueMembers, ...roleMemberIds]),
-              );
-              const filteredMembers: string[] = [];
-
-              for (const memberId of allCandidates) {
-                const ctx = {
-                  isDirectMention: directMentionIds.has(memberId),
-                  isRoleMention:
-                    roleMemberIds.includes(memberId) &&
-                    !directMentionIds.has(memberId),
-                  isEveryoneMention: everyoneMentions.length > 0,
-                  isHereMention: hereMentions.length > 0,
-                  isRegularMessage: false,
-                };
-                const resolved = await resolveChannelNotificationForUser(
-                  memberId,
-                  channel.id,
-                  channel.spaceId,
-                );
-                if (
-                  shouldIncrementMentionCount(
-                    resolved.level,
-                    ctx,
-                    resolved.suppress,
-                  )
-                ) {
-                  filteredMembers.push(memberId);
-                }
-              }
-
-              if (filteredMembers.length > 0) {
-                await incrementMentionCounts(
-                  channel.id,
-                  filteredMembers,
-                  undefined,
-                  newMessage.id,
-                );
-              }
-            }
-          },
-        },
-        {
-          label: "event:ChannelUpdate",
-          run: () => {
-            const updatedChannel = {
-              ...channel,
-              lastMessageId: message.id,
-              lastMessage: message,
-            };
-
-            emitEvent({
-              event: "ChannelUpdate",
-              channel_id: channel.id,
-              data: updatedChannel,
-            });
-          },
-        },
-        {
-          label: "cache:set:message",
-          run: () => setCache("message", message.id, message),
-        },
-        {
-          label: "cache:invalidate:messages",
-          run: () => invalidateCache("messages", channel.id),
-        },
-        {
-          label: "push:message",
-          run: () =>
-            sendMessagePushNotifications({
-              message,
-              channel: {
-                id: channel.id,
-                type: channel.type,
-                spaceId: channel.spaceId,
-              },
-              authorId: user.id,
-              authorName: user.globalName ?? user.username,
-              authorAvatar: {
-                id: user.id,
-                avatar: user.avatar,
-                defaultAvatar: user.defaultAvatar,
-              },
-              userMentionIds: userMentionMatches.map((mention) =>
-                mention.id.toString(),
-              ),
-              roleMentionIds: roleMentionMatches.map((mention) =>
-                mention.id.toString(),
-              ),
-              everyoneMentioned: everyoneMentions.length > 0,
-              hereMentioned: hereMentions.length > 0,
-            }),
-        },
-      ]);
-
-      if (
-        channel.type === ChannelType.DM ||
-        channel.type === ChannelType.GroupDM
-      ) {
-        const closedRecipients = await db
-          .select()
-          .from(channelRecipientsTable)
-          .where(
-            and(
-              eq(channelRecipientsTable.channelId, BigInt(channel.id)),
-              eq(channelRecipientsTable.closed, true),
-              ne(channelRecipientsTable.userId, BigInt(user.id)),
-            ),
-          );
-
-        if (closedRecipients.length > 0) {
-          await db
-            .update(channelRecipientsTable)
-            .set({ closed: false })
-            .where(
-              and(
-                eq(channelRecipientsTable.channelId, BigInt(channel.id)),
-                eq(channelRecipientsTable.closed, true),
-                ne(channelRecipientsTable.userId, BigInt(user.id)),
-              ),
-            );
-
-          fireAndForgetAll(
-            closedRecipients.map((r) => ({
-              label: `event:ChannelCreate:${r.userId}`,
-              run: () => {
-                emitEvent({
-                  event: "ChannelCreate",
-                  user_id: r.userId.toString(),
-                  data: channel,
-                });
-              },
-            })),
-          );
-        }
-      }
+      res
+        .status(created ? HttpStatusCode.Created : HttpStatusCode.Success)
+        .json(message);
     } catch (err) {
       next(err);
     }
@@ -1605,11 +900,11 @@ export default class MessagesController {
         throw new HttpException(HttpStatusCode.NotFound, "Message not found");
       }
 
-      if (
-        !channel.spaceId &&
-        message.authorId?.toString() !== user.id
-      ) {
-        throw new HttpException(HttpStatusCode.Forbidden, "Missing permissions");
+      if (!channel.spaceId && message.authorId?.toString() !== user.id) {
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "Missing permissions",
+        );
       }
 
       if (message.pinned) {
@@ -1670,7 +965,9 @@ export default class MessagesController {
                   type: MessageType.ChannelPinned,
                   authorId: BigInt(user.id),
                   channelId: BigInt(channelId),
-                  spaceId: channel.spaceId ? BigInt(channel.spaceId) : undefined,
+                  spaceId: channel.spaceId
+                    ? BigInt(channel.spaceId)
+                    : undefined,
                   content: messageId,
                 })
                 .returning()

@@ -9,6 +9,7 @@ import type { WebSocket } from "./util/WebSocket";
 import { initVoiceState } from "@mutualzz/gateway/voice/init.ts";
 import { initCallState } from "@mutualzz/gateway/call/init.ts";
 import { PresenceService } from "./presence/Presence.service.ts";
+import { startScheduleSweepers } from "./reminders/ScheduleSweepers.ts";
 import { redis } from "../util/Redis";
 
 const PING_INTERVAL_MS = 30_000;
@@ -90,6 +91,7 @@ export class Server {
   async start() {
     if (!this.server.listening) {
       PresenceService.startBackgroundWorkers();
+      startScheduleSweepers();
       this.server.listen(this.port, () => {
         initVoiceState();
         initCallState();

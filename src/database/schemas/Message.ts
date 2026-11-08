@@ -1,5 +1,10 @@
 import { usersTable } from "./users/User";
-import type { APIAttachment, APICodedLink, APIMessageEmbed, APIMessageMention } from "@mutualzz/types";
+import type {
+  APIAttachment,
+  APICodedLink,
+  APIMessageEmbed,
+  APIMessageMention,
+} from "@mutualzz/types";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
@@ -84,6 +89,7 @@ export const messagesTable = pgTable(
     index("message_channel_pinned_idx")
       .on(table.channelId, table.pinnedAt)
       .where(sql`${table.pinned} = true`),
+    index("message_mentions_gin_idx").using("gin", table.mentions),
   ],
 );
 

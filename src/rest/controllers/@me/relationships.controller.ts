@@ -1,3 +1,4 @@
+import { createNotification } from "@mutualzz/util/notifications";
 import {
   type APIRelationship,
   HttpException,
@@ -198,6 +199,17 @@ export default class RelationshipsController {
                 }),
             });
 
+          if (updatedTheirs)
+            events.push({
+              label: "notification:friendAccepted",
+              run: () =>
+                createNotification({
+                  userId: targetUser.id,
+                  type: "friend_accepted",
+                  actorId: user.id,
+                }).then(() => undefined),
+            });
+
           fireAndForgetAll(events);
           return;
         }
@@ -266,7 +278,8 @@ export default class RelationshipsController {
     try {
       const { user } = req;
 
-      const { identifier: targetIdentifier } = validateRelationshipRequest.parse(req.params);
+      const { identifier: targetIdentifier } =
+        validateRelationshipRequest.parse(req.params);
       const targetUser = await resolveUserIdentifier(targetIdentifier);
       if (!targetUser)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
@@ -342,6 +355,17 @@ export default class RelationshipsController {
             }),
         });
 
+      if (updatedTheirs)
+        events.push({
+          label: "notification:friendAccepted",
+          run: () =>
+            createNotification({
+              userId: targetUser.id,
+              type: "friend_accepted",
+              actorId: user.id,
+            }).then(() => undefined),
+        });
+
       fireAndForgetAll(events);
     } catch (err) {
       next(err);
@@ -352,7 +376,8 @@ export default class RelationshipsController {
     try {
       const { user } = req;
 
-      const { identifier: targetIdentifier } = validateRelationshipRequest.parse(req.params);
+      const { identifier: targetIdentifier } =
+        validateRelationshipRequest.parse(req.params);
       const targetUser = await resolveUserIdentifier(targetIdentifier);
       if (!targetUser)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
@@ -418,7 +443,8 @@ export default class RelationshipsController {
     try {
       const { user } = req;
 
-      const { identifier: targetIdentifier } = validateRelationshipRequest.parse(req.params);
+      const { identifier: targetIdentifier } =
+        validateRelationshipRequest.parse(req.params);
       const targetUser = await resolveUserIdentifier(targetIdentifier);
       if (!targetUser)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
@@ -488,7 +514,8 @@ export default class RelationshipsController {
     try {
       const { user } = req;
 
-      const { identifier: targetIdentifier } = validateRelationshipRequest.parse(req.params);
+      const { identifier: targetIdentifier } =
+        validateRelationshipRequest.parse(req.params);
       const targetUser = await resolveUserIdentifier(targetIdentifier);
       if (!targetUser)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");

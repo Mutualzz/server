@@ -1,3 +1,4 @@
+import { createNotification } from "@mutualzz/util/notifications";
 import {
   deleteCache,
   getCache,
@@ -921,6 +922,15 @@ export default class InvitesController {
                       user_id: targetUser.id,
                       data: updatedTheirs,
                     }),
+                },
+                {
+                  label: "notification:friendAccepted",
+                  run: () =>
+                    createNotification({
+                      userId: targetUser.id,
+                      type: "friend_accepted",
+                      actorId: user.id,
+                    }).then(() => undefined),
                 },
               ]);
             }

@@ -23,6 +23,26 @@ import {
 import { onInventoryEdit, onInventoryEditCancel } from "./InventoryEdit.ts";
 import { onLyricsRequest } from "./LyricsRequest.ts";
 import { onActivityArtUpload } from "./ActivityArtUpload.ts";
+import {
+  onBookmarkAdd,
+  onBookmarkList,
+  onBookmarkRemove,
+} from "./Bookmarks.ts";
+import {
+  onReminderDelete,
+  onReminderList,
+  onReminderSet,
+} from "./Reminders.ts";
+import {
+  onScheduledMessageDelete,
+  onScheduledMessageEdit,
+} from "./ScheduledMessages.ts";
+import {
+  onNotificationDelete,
+  onNotificationList,
+  onNotificationMarkRead,
+} from "./Notifications.ts";
+import { onMentionDismiss, onMentionList } from "./Mentions.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -47,4 +67,17 @@ export default {
   [GatewayOpcodes.InventoryEditCancel]: onInventoryEditCancel,
   [GatewayOpcodes.LyricsRequest]: onLyricsRequest,
   [GatewayOpcodes.ActivityArtUpload]: onActivityArtUpload,
+  [GatewayOpcodes.BookmarkAdd]: onBookmarkAdd,
+  [GatewayOpcodes.BookmarkRemove]: onBookmarkRemove,
+  [GatewayOpcodes.BookmarkList]: onBookmarkList,
+  [GatewayOpcodes.ReminderSet]: onReminderSet,
+  [GatewayOpcodes.ReminderDelete]: onReminderDelete,
+  [GatewayOpcodes.ReminderList]: onReminderList,
+  [GatewayOpcodes.ScheduledMessageEdit]: onScheduledMessageEdit,
+  [GatewayOpcodes.ScheduledMessageDelete]: onScheduledMessageDelete,
+  [GatewayOpcodes.NotificationList]: onNotificationList,
+  [GatewayOpcodes.NotificationMarkRead]: onNotificationMarkRead,
+  [GatewayOpcodes.NotificationDelete]: onNotificationDelete,
+  [GatewayOpcodes.MentionList]: onMentionList,
+  [GatewayOpcodes.MentionDismiss]: onMentionDismiss,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

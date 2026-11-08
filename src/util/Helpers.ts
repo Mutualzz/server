@@ -6,6 +6,9 @@ import {
   channelsTable,
   db,
   expressionsTable,
+  messageBookmarksTable,
+  messageRemindersTable,
+  scheduledMessagesTable,
   minecraftLinksTable,
   relationshipsTable,
   rolesTable,
@@ -43,7 +46,7 @@ import {
   type VoiceState,
 } from "@mutualzz/types";
 import { execNormalized, execNormalizedMany } from "@mutualzz/util";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { roleFlags } from "@mutualzz/bitfield";
 import { attachPresenceUser } from "@mutualzz/gateway/util/Calculations.ts";
 import { readStatesTable } from "@mutualzz/database/schemas/ReadState.ts";
@@ -54,6 +57,9 @@ import {
 import { PresenceService } from "@mutualzz/gateway/presence/Presence.service.ts";
 import { VoiceStateRedis } from "@mutualzz/gateway/voice/VoiceState.redis.ts";
 import { mapUserProfileRow } from "./profileAssets.ts";
+import { serializeReminder } from "./Reminders.ts";
+import { countUnreadNotifications } from "./notifications.ts";
+import { serializeScheduledMessage } from "./messages/scheduledMessages.ts";
 
 export async function collectVisibleVoiceStates(
   userId: string,
@@ -281,6 +287,10 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     customStatusSchedule,
     minecraftLinkRow,
     spaceNotificationSettings,
+    bookmarkRows,
+    reminderRows,
+    scheduledMessageRows,
+    unreadNotificationCount,
   ] = await Promise.all([
     // Get all personal themes owned by the user (exclude space-owned)
     execNormalizedMany<APITheme>(
@@ -416,6 +426,25 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     }),
 
     getSpaceNotificationSettingsForUser(user.id),
+
+    db.query.messageBookmarksTable.findMany({
+      columns: {
+        messageId: true,
+      },
+      where: eq(messageBookmarksTable.userId, BigInt(user.id)),
+    }),
+
+    db.query.messageRemindersTable.findMany({
+      where: eq(messageRemindersTable.userId, BigInt(user.id)),
+      orderBy: asc(messageRemindersTable.remindAt),
+    }),
+
+    db.query.scheduledMessagesTable.findMany({
+      where: eq(scheduledMessagesTable.authorId, BigInt(user.id)),
+      orderBy: asc(scheduledMessagesTable.scheduledFor),
+    }),
+
+    countUnreadNotifications(user.id),
   ]);
 
   const presenceUserIds = new Set<string>();
@@ -523,6 +552,10 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
     users,
     minecraftLink,
     voiceStates,
+    bookmarkedMessageIds: bookmarkRows.map((row) => row.messageId.toString()),
+    reminders: reminderRows.map(serializeReminder),
+    scheduledMessages: scheduledMessageRows.map(serializeScheduledMessage),
+    unreadNotificationCount,
   };
 };
 

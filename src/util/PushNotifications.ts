@@ -1,5 +1,6 @@
 import {
   channelRecipientsTable,
+  channelsTable,
   db,
   pushTokensTable,
   spaceMemberRolesTable,
@@ -360,10 +361,7 @@ export async function sendMessagePushNotifications(
   const directMentionIds = new Set(ctx.userMentionIds);
 
   const title = ctx.authorName;
-  const body = formatPushNotificationBody(
-    ctx.message.content,
-    ctx.authorName,
-  );
+  const body = formatPushNotificationBody(ctx.message.content, ctx.authorName);
   const authorAvatarUrl = buildAuthorAvatarUrl(ctx.authorAvatar);
   const url = buildNotificationUrl(ctx.channel);
   const messages: ExpoPushMessage[] = [];
@@ -376,7 +374,8 @@ export async function sendMessagePushNotifications(
           ctx.roleMentionIds.length > 0 &&
           mentionRecipients.has(userId) &&
           !directMentionIds.has(userId),
-        isEveryoneMention: ctx.everyoneMentioned && mentionRecipients.has(userId),
+        isEveryoneMention:
+          ctx.everyoneMentioned && mentionRecipients.has(userId),
         isHereMention: ctx.hereMentioned && mentionRecipients.has(userId),
         isRegularMessage: !mentionRecipients.has(userId),
       };
@@ -663,4 +662,48 @@ export async function cancelCallPushNotifications(ctx: {
   }
 
   await deliverPushMessages(messages);
+}
+
+export interface InboxPushInput {
+  userId: string;
+  title: string;
+  body: string;
+  channelId?: string | null;
+}
+
+export async function sendInboxPush(input: InboxPushInput): Promise<void> {
+  const settings =
+    (await getPushSettingsForUsers([input.userId])).get(input.userId) ??
+    DEFAULT_PUSH_SETTINGS;
+  if (!settings.pushEnabled) return;
+
+  const presence = await PresenceService.get(input.userId);
+  if (!shouldPushForPresence(presence?.status ?? "offline")) return;
+
+  const tokens = (await getTokensForUsers([input.userId])).get(input.userId);
+  if (!tokens?.length) return;
+
+  let url = `${APP_SCHEME}:///`;
+  if (input.channelId) {
+    const channel = await db.query.channelsTable.findFirst({
+      columns: { id: true, type: true, spaceId: true },
+      where: eq(channelsTable.id, BigInt(input.channelId)),
+    });
+    if (channel)
+      url = buildNotificationUrl({
+        id: channel.id.toString(),
+        type: channel.type,
+        spaceId: channel.spaceId?.toString() ?? null,
+      });
+  }
+
+  await deliverPushMessages(
+    tokens.map(({ token }) => ({
+      to: token,
+      sound: "default",
+      title: input.title,
+      body: input.body,
+      data: { url, pushType: "inbox" },
+    })),
+  );
 }

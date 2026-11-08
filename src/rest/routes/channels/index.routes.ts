@@ -2,6 +2,7 @@ import ChannelsController from "@mutualzz/rest/controllers/channels/channels.con
 import ChannelPermissionOverwritesController from "@mutualzz/rest/controllers/channels/channelPermissionOverwrites.controller.ts";
 import MessagesController from "@mutualzz/rest/controllers/messages.controller.ts";
 import ReactionsController from "@mutualzz/rest/controllers/reactions.controller.ts";
+import ScheduledMessagesController from "@mutualzz/rest/controllers/scheduledMessages.controller.ts";
 import { createLimiter, createRouter } from "@mutualzz/util";
 import { upload, scanUploads } from "@mutualzz/rest";
 import DMsController from "@mutualzz/rest/controllers/channels/dms.controller.ts";
@@ -83,6 +84,13 @@ router.post(
   upload.array("attachments", 10),
   scanUploads,
   MessagesController.create,
+);
+router.post(
+  "/:channelId/scheduled-messages",
+  createLimiter(10_000, 10),
+  upload.array("attachments", 10),
+  scanUploads,
+  ScheduledMessagesController.create,
 );
 router.patch(
   "/:channelId/messages/:messageId",

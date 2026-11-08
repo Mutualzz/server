@@ -616,6 +616,41 @@
       "when": 1794019508869,
       "tag": "0087_woozy_vance_astro",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794039450541,
+      "tag": "0088_lowly_echo",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794046462730,
+      "tag": "0089_flat_omega_flight",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794100663125,
+      "tag": "0090_amusing_mad_thinker",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1794111272705,
+      "tag": "0091_smart_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1794111825653,
+      "tag": "0092_young_patriot",
+      "breakpoints": true
     }
   ],
   "version": "7"
