@@ -51,6 +51,7 @@ export const userSettingsTable = pgTable("user_settings", {
   shareRecentActivity: boolean().notNull().default(true),
 
   lastSeenChangelogId: bigint({ mode: "bigint" }),
+  mentionsClearedBefore: bigint({ mode: "bigint" }),
 
   whoCanDm: dmPrivacyEnum().notNull().default("everyone"),
   profileVisibility: profileVisibilityEnum().notNull().default("everyone"),

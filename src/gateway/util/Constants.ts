@@ -28,4 +28,6 @@ export const OPCODE_LIMITS: Record<number, { limit: number; window: number }> =
     [GatewayOpcodes.NotificationDelete]: { limit: 120, window: 60_000 }, // NotificationDelete
     [GatewayOpcodes.MentionList]: { limit: 60, window: 60_000 }, // MentionList
     [GatewayOpcodes.MentionDismiss]: { limit: 120, window: 60_000 }, // MentionDismiss
+    [GatewayOpcodes.MentionClearAll]: { limit: 10, window: 60_000 }, // MentionClearAll
+    [GatewayOpcodes.DiscordImportExecute]: { limit: 10, window: 60_000 }, // DiscordImportExecute
   };

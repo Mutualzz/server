@@ -4,7 +4,12 @@ import {
   type GatewayPayload,
   type RESTSession,
 } from "@mutualzz/types";
-import { getUser, prepareReadyData, redis } from "@mutualzz/util";
+import {
+  base64UrlDecode,
+  getUser,
+  prepareReadyData,
+  redis,
+} from "@mutualzz/util";
 import { gatewayIdentifyPayload } from "@mutualzz/validators";
 import { randomUUID } from "crypto";
 import { setupListener } from "../Listener";
@@ -30,7 +35,13 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
     ? await redis.get(`rest:sessions:${identify.data.token}`)
     : null;
   if (!rawSession) {
-    logger.warn(`Identify failed: invalid token (ip: ${this.ipAddress})`);
+    const tokenUserId = identify.success
+      ? base64UrlDecode(identify.data.token.split(".")[0] ?? "")
+      : "unparseable";
+
+    logger.warn(
+      `Identify failed: invalid token (user: ${tokenUserId}, token: …${identify.success ? identify.data.token.slice(-8) : "-"}, ip: ${this.ipAddress}, ua: ${this.userAgent})`,
+    );
     await Send(this, {
       op: "InvalidSession",
       d: false,

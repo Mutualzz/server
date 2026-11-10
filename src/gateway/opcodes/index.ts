@@ -42,7 +42,12 @@ import {
   onNotificationList,
   onNotificationMarkRead,
 } from "./Notifications.ts";
-import { onMentionDismiss, onMentionList } from "./Mentions.ts";
+import {
+  onMentionClearAll,
+  onMentionDismiss,
+  onMentionList,
+} from "./Mentions.ts";
+import { onDiscordImportExecute } from "./DiscordImport.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -80,4 +85,6 @@ export default {
   [GatewayOpcodes.NotificationDelete]: onNotificationDelete,
   [GatewayOpcodes.MentionList]: onMentionList,
   [GatewayOpcodes.MentionDismiss]: onMentionDismiss,
+  [GatewayOpcodes.MentionClearAll]: onMentionClearAll,
+  [GatewayOpcodes.DiscordImportExecute]: onDiscordImportExecute,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

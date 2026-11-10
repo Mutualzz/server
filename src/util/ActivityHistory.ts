@@ -10,11 +10,15 @@ import type {
 } from "@mutualzz/types";
 import { and, desc, eq, gt, lt, notInArray } from "drizzle-orm";
 import { proxyActivityAssets } from "./activityImageProxy";
+import { redis } from "./Redis";
 
 export const ACTIVITY_HISTORY_MAX = 5;
 export const ACTIVITY_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const ACTIVITY_HISTORY_MIN_DURATION_MS = 60_000;
-export const ACTIVITY_HISTORY_DEDUPE_MS = ACTIVITY_HISTORY_RETENTION_MS;
+export const ACTIVITY_HISTORY_MERGE_GAP_MS = 3 * 60_000;
+
+const activeActivitiesKey = (userId: string) =>
+  `activity-history:active:${userId}`;
 
 export interface RecentActivityView {
   type: Exclude<PresenceActivityType, "custom">;
@@ -40,36 +44,77 @@ function isTrackable(activity: PresenceActivity): boolean {
   return activity.type === "playing" || activity.type === "listening";
 }
 
+function resolveStartedAt(
+  activity: PresenceActivity,
+  observedStart: string | null,
+  now: number,
+): number | null {
+  const observed = observedStart ? Number(observedStart) : Number.NaN;
+  if (Number.isFinite(observed) && observed <= now) return observed;
+
+  const reported = activity.timestamps?.start;
+  if (
+    typeof reported === "number" &&
+    Number.isFinite(reported) &&
+    reported <= now
+  ) {
+    return reported;
+  }
+  return null;
+}
+
 export async function recordEndedActivities(
   userId: string,
   previousActivities: PresenceActivity[],
   nextActivities: PresenceActivity[],
 ) {
-  const prev = previousActivities.filter(isTrackable);
-  if (prev.length === 0) return;
+  const previousTrackable = previousActivities.filter(isTrackable);
+  const nextTrackable = nextActivities.filter(isTrackable);
+  const previousIdentities = new Set(previousTrackable.map(activityIdentity));
+  const nextIdentities = new Set(nextTrackable.map(activityIdentity));
 
-  const nextKeys = new Set(
-    nextActivities.filter(isTrackable).map(activityIdentity),
+  const started = nextTrackable.filter(
+    (activity) => !previousIdentities.has(activityIdentity(activity)),
   );
-  const ended = prev.filter(
-    (activity) => !nextKeys.has(activityIdentity(activity)),
+  const ended = previousTrackable.filter(
+    (activity) => !nextIdentities.has(activityIdentity(activity)),
   );
-  if (ended.length === 0) return;
+  if (started.length === 0 && ended.length === 0) return;
 
   const now = Date.now();
+  const activeKey = activeActivitiesKey(userId);
+
+  if (started.length > 0) {
+    await redis
+      .pipeline()
+      .hset(
+        activeKey,
+        Object.fromEntries(
+          started.map((activity) => [activityIdentity(activity), String(now)]),
+        ),
+      )
+      .pexpire(activeKey, ACTIVITY_HISTORY_RETENTION_MS)
+      .exec()
+      .catch(() => null);
+  }
+  if (ended.length === 0) return;
+
+  const endedIdentities = ended.map(activityIdentity);
+  const observedStarts = await redis
+    .hmget(activeKey, ...endedIdentities)
+    .catch(() => endedIdentities.map(() => null));
+  await redis.hdel(activeKey, ...endedIdentities).catch(() => null);
+
   const userIdBig = BigInt(userId);
 
-  for (const activity of ended) {
-    const startedAt = activity.timestamps?.start;
-    if (
-      typeof startedAt === "number" &&
-      Number.isFinite(startedAt) &&
-      now - startedAt < ACTIVITY_HISTORY_MIN_DURATION_MS
-    ) {
-      continue;
-    }
+  for (const [index, activity] of ended.entries()) {
+    const identity = endedIdentities[index];
+    const startedAt = resolveStartedAt(
+      activity,
+      observedStarts[index] ?? null,
+      now,
+    );
 
-    const identity = activityIdentity(activity);
     const recentRows = await db.query.userActivityHistoryTable.findMany({
       where: and(
         eq(userActivityHistoryTable.userId, userIdBig),
@@ -77,14 +122,14 @@ export async function recordEndedActivities(
         eq(userActivityHistoryTable.name, activity.name),
         gt(
           userActivityHistoryTable.endedAt,
-          new Date(now - ACTIVITY_HISTORY_DEDUPE_MS),
+          new Date(now - ACTIVITY_HISTORY_MERGE_GAP_MS),
         ),
       ),
       orderBy: [desc(userActivityHistoryTable.endedAt)],
       limit: 5,
     });
 
-    const match = recentRows.find(
+    const continuedRow = recentRows.find(
       (row) =>
         activityIdentity({
           type: row.type,
@@ -93,29 +138,24 @@ export async function recordEndedActivities(
         }) === identity,
     );
 
-    if (match) {
-      const nextStartedAt =
-        typeof startedAt === "number" && Number.isFinite(startedAt)
-          ? startedAt
-          : null;
-      const existingStartedAt = match.startedAt?.getTime() ?? null;
-      const mergedStartedAt =
-        existingStartedAt != null && nextStartedAt != null
-          ? Math.min(existingStartedAt, nextStartedAt)
-          : (existingStartedAt ?? nextStartedAt);
-
+    if (continuedRow) {
       await db
         .update(userActivityHistoryTable)
         .set({
           endedAt: new Date(now),
-          details: activity.details ?? match.details,
-          state: activity.state ?? match.state,
-          url: activity.url ?? match.url,
-          assets: activity.assets ?? match.assets,
-          startedAt:
-            mergedStartedAt != null ? new Date(mergedStartedAt) : null,
+          details: activity.details ?? continuedRow.details,
+          state: activity.state ?? continuedRow.state,
+          url: activity.url ?? continuedRow.url,
+          assets: activity.assets ?? continuedRow.assets,
         })
-        .where(eq(userActivityHistoryTable.id, match.id));
+        .where(eq(userActivityHistoryTable.id, continuedRow.id));
+      continue;
+    }
+
+    if (
+      startedAt != null &&
+      now - startedAt < ACTIVITY_HISTORY_MIN_DURATION_MS
+    ) {
       continue;
     }
 
@@ -128,10 +168,7 @@ export async function recordEndedActivities(
       state: activity.state ?? null,
       url: activity.url ?? null,
       assets: activity.assets ?? null,
-      startedAt:
-        typeof startedAt === "number" && Number.isFinite(startedAt)
-          ? new Date(startedAt)
-          : null,
+      startedAt: startedAt != null ? new Date(startedAt) : null,
       endedAt: new Date(now),
     });
   }

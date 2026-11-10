@@ -1,0 +1,2 @@
+ALTER TABLE "user_settings" ADD COLUMN "mentionsClearedBefore" bigint;--> statement-breakpoint
+UPDATE "user_settings" SET "mentionsClearedBefore" = ((floor(extract(epoch FROM now() - interval '30 days') * 1000)::bigint - 1735737360000) << 22) WHERE "mentionsClearedBefore" IS NULL;

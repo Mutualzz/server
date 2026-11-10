@@ -651,6 +651,13 @@
       "when": 1794111825653,
       "tag": "0092_young_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1794269608075,
+      "tag": "0093_misty_namor",
+      "breakpoints": true
     }
   ],
   "version": "7"

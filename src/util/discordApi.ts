@@ -40,6 +40,13 @@ export interface DiscordGuildRole {
   hoist: boolean;
   position: number;
   permissions: string;
+  managed: boolean;
+}
+
+export interface DiscordGuild {
+  id: string;
+  name: string;
+  icon?: string | null;
 }
 
 export interface DiscordGuildEmoji {
@@ -178,11 +185,45 @@ export async function fetchDiscordGuildEmojis(guildId: string) {
   return res.json() as Promise<DiscordGuildEmoji[]>;
 }
 
+export async function fetchDiscordGuild(guildId: string) {
+  const token = process.env.BOT_TOKEN;
+  if (!token) throw new Error("BOT_TOKEN is not defined");
+
+  const res = await fetch(`${DISCORD_API}/guilds/${guildId}`, {
+    headers: { Authorization: `Bot ${token}` },
+  });
+
+  if (!res.ok) throw new Error(`Discord guild fetch failed (${res.status})`);
+  return res.json() as Promise<DiscordGuild>;
+}
+
+export function discordGuildIconUrl(guild: DiscordGuild, size = 128) {
+  if (!guild.icon) return null;
+  const extension = guild.icon.startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.${extension}?size=${size}`;
+}
+
 export function mapDiscordChannelType(type: number): ChannelType | null {
   if (type === 0) return ChannelType.Text;
   if (type === 2) return ChannelType.Voice;
   if (type === 4) return ChannelType.Category;
   return null;
+}
+
+function discordChannelSortGroup(type: number) {
+  if (type === 4) return 2;
+  if (type === 2 || type === 13) return 1;
+  return 0;
+}
+
+export function sortDiscordChannelsForDisplay(channels: DiscordGuildChannel[]) {
+  return [...channels].sort(
+    (first, second) =>
+      discordChannelSortGroup(first.type) -
+        discordChannelSortGroup(second.type) ||
+      first.position - second.position ||
+      Number(BigInt(first.id) - BigInt(second.id)),
+  );
 }
 
 const DISCORD_TO_MUTUALZZ: Record<string, bigint> = {

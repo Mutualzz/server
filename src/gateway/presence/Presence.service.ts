@@ -44,7 +44,7 @@ const CUSTOM_STATUS_SCHEDULE_ZSET = `presence:custom-status-schedules`;
 
 const PRESENCE_BROADCAST_CHANNEL = "presence:broadcast";
 const INSTANCE_ID = randomUUID();
-const DISCONNECT_GRACE_MS = 1_500;
+const DISCONNECT_GRACE_MS = 20_000;
 
 function buildCustomActivity(
   text: string,
@@ -217,10 +217,18 @@ export class PresenceService {
       await this.expireCustomStatusSchedule(ws.userId, customScheduled);
     }
 
+    const resumedSession = await this.store
+      .getSession(ws.userId, ws.sessionId)
+      .catch(() => null);
+
+    const resumedActivities = (resumedSession?.activities ?? []).filter(
+      (activity) => activity.type !== "custom",
+    );
+
     let presence = await this.store.upsertSession(ws.userId, ws.sessionId, {
       status: sessionStatus,
-      activities: sessionActivities,
-      device: "web",
+      activities: [...sessionActivities, ...resumedActivities],
+      device: resumedSession?.device ?? "web",
     });
 
     presence = await this.applyOverlaysAndWrite(ws.userId, presence);
@@ -475,6 +483,7 @@ export class PresenceService {
     this.ensureGcLoop();
     this.ensureScheduleLoop();
     this.ensurePubSub();
+    const disconnectedAt = Date.now();
 
     setTimeout(async () => {
       if (sessionId) {
@@ -482,6 +491,11 @@ export class PresenceService {
           userId,
         ).some((ws) => ws.sessionId === sessionId);
         if (sessionStillConnected) return;
+
+        const session = await this.store
+          .getSession(userId, sessionId)
+          .catch(() => null);
+        if (session && session.updatedAt > disconnectedAt) return;
       }
 
       if (PresenceBucket.hasAnyAuthenticatedSocket(userId)) {

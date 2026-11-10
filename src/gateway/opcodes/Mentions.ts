@@ -4,9 +4,10 @@ import {
   messagesTable,
   spaceMemberRolesTable,
   spaceMembersTable,
+  userSettingsTable,
 } from "@mutualzz/database";
 import type { GatewayPayload } from "@mutualzz/types";
-import { emitEvent } from "@mutualzz/util";
+import { emitEvent, Snowflake } from "@mutualzz/util";
 import {
   gatewayMentionDismissPayload,
   gatewayMentionListPayload,
@@ -17,6 +18,8 @@ import {
   and,
   desc,
   eq,
+  gt,
+  lte,
   inArray,
   lt,
   ne,
@@ -62,6 +65,12 @@ export async function onMentionList(this: WebSocket, { d }: GatewayPayload) {
   if (!parsed.success) return ackInvalid(this, d);
   const { nonce, before, includeEveryone, includeRoles, spaceId } = parsed.data;
 
+  const settings = await db.query.userSettingsTable.findFirst({
+    columns: { mentionsClearedBefore: true },
+    where: eq(userSettingsTable.userId, BigInt(userId)),
+  });
+  const clearedBefore = settings?.mentionsClearedBefore ?? null;
+
   const memberships = await db
     .select({ spaceId: spaceMembersTable.spaceId })
     .from(spaceMembersTable)
@@ -99,6 +108,7 @@ export async function onMentionList(this: WebSocket, { d }: GatewayPayload) {
         ne(messagesTable.authorId, BigInt(userId)),
         spaceId ? eq(messagesTable.spaceId, BigInt(spaceId)) : undefined,
         before ? lt(messagesTable.id, BigInt(before)) : undefined,
+        clearedBefore ? gt(messagesTable.id, clearedBefore) : undefined,
         notExists(
           db
             .select({ messageId: mentionDismissalsTable.messageId })
@@ -157,6 +167,44 @@ export async function onMentionDismiss(this: WebSocket, { d }: GatewayPayload) {
     event: "MentionDismiss",
     user_id: userId,
     data: { messageId },
+  });
+  await ack(this, nonce, { ok: true });
+}
+
+export async function onMentionClearAll(
+  this: WebSocket,
+  { d }: GatewayPayload,
+) {
+  const { userId } = this;
+  if (!userId) return;
+
+  const parsed = gatewayNoncePayload.safeParse(d);
+  if (!parsed.success) return;
+  const { nonce } = parsed.data;
+
+  const clearedBefore = BigInt(Snowflake.generate());
+
+  await db
+    .insert(userSettingsTable)
+    .values({ userId: BigInt(userId), mentionsClearedBefore: clearedBefore })
+    .onConflictDoUpdate({
+      target: userSettingsTable.userId,
+      set: { mentionsClearedBefore: clearedBefore },
+    });
+
+  await db
+    .delete(mentionDismissalsTable)
+    .where(
+      and(
+        eq(mentionDismissalsTable.userId, BigInt(userId)),
+        lte(mentionDismissalsTable.messageId, clearedBefore),
+      ),
+    );
+
+  await emitEvent({
+    event: "MentionsCleared",
+    user_id: userId,
+    data: { before: clearedBefore.toString() },
   });
   await ack(this, nonce, { ok: true });
 }
