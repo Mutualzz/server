@@ -1,41 +1,46 @@
-import { HttpStatusCode } from "@mutualzz/types";
-import { runDiscordImport } from "@mutualzz/util/DiscordImport";
+import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
-  validateDiscordImportExecute,
-  validateDiscordImportPreview,
-} from "@mutualzz/validators";
+  hasDiscordImportGrant,
+  MAX_IMPORTED_EXPRESSIONS,
+} from "@mutualzz/util/DiscordImport";
+import { validateDiscordImportPreview } from "@mutualzz/validators";
 import type { NextFunction, Request, Response } from "express";
 import {
-  discordBotInviteUrl,
   discordEmojiUrl,
   discordGuildIconUrl,
+  discordStickerUrl,
   fetchDiscordGuild,
   fetchDiscordGuildChannels,
   fetchDiscordGuildEmojis,
   fetchDiscordGuildRoles,
+  fetchDiscordGuildStickers,
+  isDiscordChannelPrivate,
+  isImportableDiscordSticker,
   mapDiscordChannelType,
   sortDiscordChannelsForDisplay,
 } from "../../util/discordApi.ts";
 
 export default class DiscordImportController {
-  static async botInvite(_req: Request, res: Response, next: NextFunction) {
-    try {
-      res.json({ url: discordBotInviteUrl() });
-    } catch (error) {
-      next(error);
-    }
-  }
-
   static async preview(req: Request, res: Response, next: NextFunction) {
     try {
+      const { user } = req;
       const { guildId } = validateDiscordImportPreview.parse(req.body);
 
-      const [guild, channels, roles, emojis] = await Promise.all([
+      if (!(await hasDiscordImportGrant(user.id, guildId))) {
+        throw new HttpException(
+          HttpStatusCode.Forbidden,
+          "Authorize the Mutualzz bot for this server before previewing it",
+        );
+      }
+
+      const [guild, channels, roles, emojis, stickers] = await Promise.all([
         fetchDiscordGuild(guildId),
         fetchDiscordGuildChannels(guildId),
         fetchDiscordGuildRoles(guildId),
         fetchDiscordGuildEmojis(guildId),
+        fetchDiscordGuildStickers(guildId),
       ]);
+      const importableStickers = stickers.filter(isImportableDiscordSticker);
 
       const importableChannels = channels.filter(
         (channel) => mapDiscordChannelType(channel.type) !== null,
@@ -67,11 +72,15 @@ export default class DiscordImportController {
         guild: {
           name: guild.name,
           iconUrl: discordGuildIconUrl(guild),
+          description: guild.description ?? null,
         },
         channels: orderedChannels.map((channel) => ({
           id: channel.id,
           name: channel.name,
           type: mapDiscordChannelType(channel.type),
+          topic: channel.topic ?? null,
+          nsfw: channel.nsfw ?? false,
+          isPrivate: isDiscordChannelPrivate(channel, guildId),
           parentId:
             channel.parent_id && categoryIds.has(channel.parent_id)
               ? channel.parent_id
@@ -89,33 +98,20 @@ export default class DiscordImportController {
               : null,
             hoist: role.hoist,
           })),
-        emojis: emojis.slice(0, 100).map((emoji) => ({
+        emojis: emojis.map((emoji) => ({
           id: emoji.id,
           name: emoji.name,
           url: discordEmojiUrl(emoji),
         })),
+        stickers: importableStickers.map((sticker) => ({
+          id: sticker.id,
+          name: sticker.name,
+          url: discordStickerUrl(sticker),
+        })),
+        maxExpressions: MAX_IMPORTED_EXPRESSIONS,
         skippedChannelCount: channels.length - importableChannels.length,
-        skippedEmojiCount: Math.max(0, emojis.length - 100),
+        skippedStickerCount: stickers.length - importableStickers.length,
       });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async execute(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { user } = req;
-      const { guildId, spaceName } = validateDiscordImportExecute.parse(
-        req.body,
-      );
-
-      const result = await runDiscordImport({
-        userId: user.id,
-        guildId,
-        spaceName,
-      });
-
-      res.status(HttpStatusCode.Created).json(result);
     } catch (error) {
       next(error);
     }

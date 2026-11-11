@@ -8,10 +8,11 @@ router.get(
   createLimiter(60_000, 10),
   DiscordAuthController.createLinkUrl,
 );
-router.delete(
-  "/",
+router.get(
+  "/import",
   createLimiter(60_000, 10),
-  DiscordAuthController.unlink,
+  DiscordAuthController.createImportUrl,
 );
+router.delete("/", createLimiter(60_000, 10), DiscordAuthController.unlink);
 
 export default router;

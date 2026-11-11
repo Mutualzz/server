@@ -59,7 +59,7 @@ export async function onDiscordImportExecute(
     return;
   }
 
-  const { nonce, guildId, spaceName } = parsed.data;
+  const { nonce, guildId, spaceName, ...selection } = parsed.data;
   let lastStage: DiscordImportStage | null = null;
   let lastSentAt = 0;
 
@@ -68,6 +68,7 @@ export async function onDiscordImportExecute(
       userId: this.userId,
       guildId,
       spaceName,
+      selection,
       onProgress: (stage, completed, total) => {
         const now = Date.now();
         const isStageChange = stage !== lastStage;
@@ -81,7 +82,9 @@ export async function onDiscordImportExecute(
 
         lastStage = stage;
         lastSentAt = now;
-        void sendProgress(this, nonce, stage, completed, total).catch(() => undefined);
+        void sendProgress(this, nonce, stage, completed, total).catch(
+          () => undefined,
+        );
       },
     });
 

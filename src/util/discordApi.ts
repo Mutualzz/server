@@ -1,7 +1,25 @@
 import { permissionFlags } from "@mutualzz/bitfield";
 import { ChannelType } from "@mutualzz/types";
+import {
+  ChannelType as DiscordChannelType,
+  DiscordAPIError,
+  OverwriteType,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+} from "discord.js";
 
 const DISCORD_API = "https://discord.com/api/v10";
+
+let discordBotRest: REST | null = null;
+
+function botRest() {
+  if (discordBotRest) return discordBotRest;
+  const token = process.env.BOT_TOKEN;
+  if (!token) throw new Error("BOT_TOKEN is not defined");
+  discordBotRest = new REST({ version: "10" }).setToken(token);
+  return discordBotRest;
+}
 
 export interface DiscordOAuthTokens {
   access_token: string;
@@ -9,6 +27,7 @@ export interface DiscordOAuthTokens {
   expires_in: number;
   refresh_token: string;
   scope: string;
+  guild?: DiscordGuild;
 }
 
 export interface DiscordUser {
@@ -31,6 +50,16 @@ export interface DiscordGuildChannel {
   type: number;
   position: number;
   parent_id?: string | null;
+  topic?: string | null;
+  nsfw?: boolean;
+  permission_overwrites?: DiscordPermissionOverwrite[];
+}
+
+export interface DiscordPermissionOverwrite {
+  id: string;
+  type: OverwriteType;
+  allow: string;
+  deny: string;
 }
 
 export interface DiscordGuildRole {
@@ -41,12 +70,14 @@ export interface DiscordGuildRole {
   position: number;
   permissions: string;
   managed: boolean;
+  mentionable: boolean;
 }
 
 export interface DiscordGuild {
   id: string;
   name: string;
   icon?: string | null;
+  description?: string | null;
 }
 
 export interface DiscordGuildEmoji {
@@ -55,20 +86,29 @@ export interface DiscordGuildEmoji {
   animated?: boolean;
 }
 
-export function discordBotInviteUrl() {
-  const clientId = process.env.DISCORD_CLIENT_ID;
-  if (!clientId) throw new Error("DISCORD_CLIENT_ID is not defined");
+export const DiscordStickerFormat = {
+  Png: 1,
+  Apng: 2,
+  Lottie: 3,
+  Gif: 4,
+} as const;
 
-  const params = new URLSearchParams({
-    client_id: clientId,
-    scope: "bot",
-    permissions: "1342178304",
-  });
-
-  return `https://discord.com/api/oauth2/authorize?${params}`;
+export interface DiscordGuildSticker {
+  id: string;
+  name: string;
+  format_type: number;
+  available?: boolean;
 }
 
-export function discordAuthorizeUrl(state: string, redirectUri: string) {
+export type DiscordAuthPurpose = "auth" | "import";
+
+const DISCORD_ADMINISTRATOR_PERMISSION = PermissionFlagsBits.Administrator;
+
+export function discordAuthorizeUrl(
+  state: string,
+  redirectUri: string,
+  purpose: DiscordAuthPurpose = "auth",
+) {
   const clientId = process.env.DISCORD_CLIENT_ID;
   if (!clientId) throw new Error("DISCORD_CLIENT_ID is not defined");
 
@@ -76,10 +116,16 @@ export function discordAuthorizeUrl(state: string, redirectUri: string) {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: "identify email guilds",
     state,
-    prompt: "consent",
   });
+
+  if (purpose === "import") {
+    params.set("scope", "bot identify");
+    params.set("permissions", DISCORD_ADMINISTRATOR_PERMISSION.toString());
+  } else {
+    params.set("scope", "identify email guilds");
+    params.set("prompt", "consent");
+  }
 
   return `https://discord.com/api/oauth2/authorize?${params}`;
 }
@@ -109,7 +155,10 @@ export async function exchangeDiscordCode(
   });
 
   if (!res.ok) {
-    throw new Error(`Discord token exchange failed (${res.status})`);
+    const failureDetails = await res.text().catch(() => "");
+    throw new Error(
+      `Discord token exchange failed (${res.status}): ${failureDetails}`,
+    );
   }
 
   return res.json() as Promise<DiscordOAuthTokens>;
@@ -149,52 +198,80 @@ export function discordBannerUrl(user: DiscordUser) {
   return `https://cdn.discordapp.com/banners/${user.id}/${user.banner}.${ext}?size=512`;
 }
 
-export async function fetchDiscordGuildChannels(guildId: string) {
-  const token = process.env.BOT_TOKEN;
-  if (!token) throw new Error("BOT_TOKEN is not defined");
-
-  const res = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
-    headers: { Authorization: `Bot ${token}` },
-  });
-
-  if (!res.ok) throw new Error(`Discord guild channels failed (${res.status})`);
-  return res.json() as Promise<DiscordGuildChannel[]>;
+export function fetchDiscordGuild(guildId: string) {
+  return botRest().get(Routes.guild(guildId)) as Promise<DiscordGuild>;
 }
 
-export async function fetchDiscordGuildRoles(guildId: string) {
-  const token = process.env.BOT_TOKEN;
-  if (!token) throw new Error("BOT_TOKEN is not defined");
-
-  const res = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
-    headers: { Authorization: `Bot ${token}` },
-  });
-
-  if (!res.ok) throw new Error(`Discord guild roles failed (${res.status})`);
-  return res.json() as Promise<DiscordGuildRole[]>;
+export function fetchDiscordGuildChannels(guildId: string) {
+  return botRest().get(Routes.guildChannels(guildId)) as Promise<
+    DiscordGuildChannel[]
+  >;
 }
 
-export async function fetchDiscordGuildEmojis(guildId: string) {
-  const token = process.env.BOT_TOKEN;
-  if (!token) throw new Error("BOT_TOKEN is not defined");
-
-  const res = await fetch(`${DISCORD_API}/guilds/${guildId}/emojis`, {
-    headers: { Authorization: `Bot ${token}` },
-  });
-
-  if (!res.ok) throw new Error(`Discord guild emojis failed (${res.status})`);
-  return res.json() as Promise<DiscordGuildEmoji[]>;
+export function fetchDiscordGuildRoles(guildId: string) {
+  return botRest().get(Routes.guildRoles(guildId)) as Promise<
+    DiscordGuildRole[]
+  >;
 }
 
-export async function fetchDiscordGuild(guildId: string) {
-  const token = process.env.BOT_TOKEN;
-  if (!token) throw new Error("BOT_TOKEN is not defined");
+export function fetchDiscordGuildEmojis(guildId: string) {
+  return botRest().get(Routes.guildEmojis(guildId)) as Promise<
+    DiscordGuildEmoji[]
+  >;
+}
 
-  const res = await fetch(`${DISCORD_API}/guilds/${guildId}`, {
-    headers: { Authorization: `Bot ${token}` },
-  });
+export function fetchDiscordGuildStickers(guildId: string) {
+  return botRest().get(Routes.guildStickers(guildId)) as Promise<
+    DiscordGuildSticker[]
+  >;
+}
 
-  if (!res.ok) throw new Error(`Discord guild fetch failed (${res.status})`);
-  return res.json() as Promise<DiscordGuild>;
+export async function fetchDiscordBotJoinedAt(guildId: string) {
+  const botUser = (await botRest().get(Routes.user())) as { id: string };
+
+  try {
+    const botMember = (await botRest().get(
+      Routes.guildMember(guildId, botUser.id),
+    )) as { joined_at: string };
+    return new Date(botMember.joined_at).getTime();
+  } catch (error) {
+    if (error instanceof DiscordAPIError) return null;
+    throw error;
+  }
+}
+
+export async function leaveDiscordGuild(guildId: string) {
+  try {
+    await botRest().delete(Routes.userGuild(guildId));
+  } catch (error) {
+    if (error instanceof DiscordAPIError && error.status === 404) return;
+    throw error;
+  }
+}
+
+export function isImportableDiscordSticker(sticker: DiscordGuildSticker) {
+  return sticker.format_type !== DiscordStickerFormat.Lottie;
+}
+
+export function discordStickerUrl(sticker: DiscordGuildSticker) {
+  if (sticker.format_type === DiscordStickerFormat.Gif)
+    return `https://media.discordapp.net/stickers/${sticker.id}.gif`;
+  return `https://cdn.discordapp.com/stickers/${sticker.id}.png`;
+}
+
+export function isDiscordChannelPrivate(
+  channel: DiscordGuildChannel,
+  guildId: string,
+) {
+  const everyoneOverwrite = channel.permission_overwrites?.find(
+    (overwrite) =>
+      overwrite.type === OverwriteType.Role && overwrite.id === guildId,
+  );
+  if (!everyoneOverwrite) return false;
+  return (
+    (BigInt(everyoneOverwrite.deny) & PermissionFlagsBits.ViewChannel) ===
+    PermissionFlagsBits.ViewChannel
+  );
 }
 
 export function discordGuildIconUrl(guild: DiscordGuild, size = 128) {
@@ -204,15 +281,19 @@ export function discordGuildIconUrl(guild: DiscordGuild, size = 128) {
 }
 
 export function mapDiscordChannelType(type: number): ChannelType | null {
-  if (type === 0) return ChannelType.Text;
-  if (type === 2) return ChannelType.Voice;
-  if (type === 4) return ChannelType.Category;
+  if (type === DiscordChannelType.GuildText) return ChannelType.Text;
+  if (type === DiscordChannelType.GuildVoice) return ChannelType.Voice;
+  if (type === DiscordChannelType.GuildCategory) return ChannelType.Category;
   return null;
 }
 
 function discordChannelSortGroup(type: number) {
-  if (type === 4) return 2;
-  if (type === 2 || type === 13) return 1;
+  if (type === DiscordChannelType.GuildCategory) return 2;
+  if (
+    type === DiscordChannelType.GuildVoice ||
+    type === DiscordChannelType.GuildStageVoice
+  )
+    return 1;
   return 0;
 }
 
@@ -226,70 +307,40 @@ export function sortDiscordChannelsForDisplay(channels: DiscordGuildChannel[]) {
   );
 }
 
-const DISCORD_TO_MUTUALZZ: Record<string, bigint> = {
-  VIEW_CHANNEL: permissionFlags.ViewChannel,
-  SEND_MESSAGES: permissionFlags.SendMessages,
-  MANAGE_MESSAGES: permissionFlags.ManageMessages,
-  EMBED_LINKS: permissionFlags.EmbedLinks,
-  ATTACH_FILES: permissionFlags.AttachFiles,
-  READ_MESSAGE_HISTORY: permissionFlags.ReadMessageHistory,
-  MENTION_EVERYONE: permissionFlags.MentionEveryone,
-  USE_EXTERNAL_EMOJIS: permissionFlags.UseExternalEmojis,
-  ADD_REACTIONS: permissionFlags.AddReactions,
-  CONNECT: permissionFlags.Connect,
-  SPEAK: permissionFlags.Speak,
-  MUTE_MEMBERS: permissionFlags.MuteMembers,
-  DEAFEN_MEMBERS: permissionFlags.DeafenMembers,
-  MOVE_MEMBERS: permissionFlags.MoveMembers,
-  MANAGE_CHANNELS: permissionFlags.ManageChannels,
-  MANAGE_ROLES: permissionFlags.ManageRoles,
-  MANAGE_GUILD: permissionFlags.ManageSpace,
-  KICK_MEMBERS: permissionFlags.KickMembers,
-  BAN_MEMBERS: permissionFlags.BanMembers,
-  CREATE_INVITE: permissionFlags.CreateInvites,
-  PIN_MESSAGES: permissionFlags.PinMessages,
-};
+const DISCORD_TO_MUTUALZZ_PERMISSIONS: [bigint, bigint][] = [
+  [PermissionFlagsBits.ViewChannel, permissionFlags.ViewChannel],
+  [PermissionFlagsBits.SendMessages, permissionFlags.SendMessages],
+  [PermissionFlagsBits.ManageMessages, permissionFlags.ManageMessages],
+  [PermissionFlagsBits.EmbedLinks, permissionFlags.EmbedLinks],
+  [PermissionFlagsBits.AttachFiles, permissionFlags.AttachFiles],
+  [PermissionFlagsBits.ReadMessageHistory, permissionFlags.ReadMessageHistory],
+  [PermissionFlagsBits.MentionEveryone, permissionFlags.MentionEveryone],
+  [PermissionFlagsBits.UseExternalEmojis, permissionFlags.UseExternalEmojis],
+  [PermissionFlagsBits.AddReactions, permissionFlags.AddReactions],
+  [PermissionFlagsBits.Connect, permissionFlags.Connect],
+  [PermissionFlagsBits.Speak, permissionFlags.Speak],
+  [PermissionFlagsBits.MuteMembers, permissionFlags.MuteMembers],
+  [PermissionFlagsBits.DeafenMembers, permissionFlags.DeafenMembers],
+  [PermissionFlagsBits.MoveMembers, permissionFlags.MoveMembers],
+  [PermissionFlagsBits.ManageChannels, permissionFlags.ManageChannels],
+  [PermissionFlagsBits.ManageRoles, permissionFlags.ManageRoles],
+  [PermissionFlagsBits.ManageGuild, permissionFlags.ManageSpace],
+  [PermissionFlagsBits.KickMembers, permissionFlags.KickMembers],
+  [PermissionFlagsBits.BanMembers, permissionFlags.BanMembers],
+  [PermissionFlagsBits.CreateInstantInvite, permissionFlags.CreateInvites],
+  [PermissionFlagsBits.PinMessages, permissionFlags.PinMessages],
+];
 
 export function mapDiscordPermissions(raw: string) {
-  const value = BigInt(raw);
-  let allow = 0n;
+  const discordPermissions = BigInt(raw);
+  let mutualzzPermissions = 0n;
 
-  for (const [name, bit] of Object.entries(DISCORD_TO_MUTUALZZ)) {
-    const discordBit = discordPermissionBit(name);
-    if (discordBit !== null && (value & discordBit) === discordBit) {
-      allow |= bit;
-    }
+  for (const [discordBit, mutualzzBit] of DISCORD_TO_MUTUALZZ_PERMISSIONS) {
+    if ((discordPermissions & discordBit) === discordBit)
+      mutualzzPermissions |= mutualzzBit;
   }
 
-  return allow;
-}
-
-function discordPermissionBit(name: string) {
-  const bits: Record<string, bigint> = {
-    VIEW_CHANNEL: 1n << 10n,
-    SEND_MESSAGES: 1n << 11n,
-    MANAGE_MESSAGES: 1n << 13n,
-    EMBED_LINKS: 1n << 14n,
-    ATTACH_FILES: 1n << 15n,
-    READ_MESSAGE_HISTORY: 1n << 16n,
-    MENTION_EVERYONE: 1n << 17n,
-    USE_EXTERNAL_EMOJIS: 1n << 18n,
-    ADD_REACTIONS: 1n << 6n,
-    CONNECT: 1n << 20n,
-    SPEAK: 1n << 21n,
-    MUTE_MEMBERS: 1n << 22n,
-    DEAFEN_MEMBERS: 1n << 23n,
-    MOVE_MEMBERS: 1n << 24n,
-    MANAGE_CHANNELS: 1n << 4n,
-    MANAGE_ROLES: 1n << 28n,
-    MANAGE_GUILD: 1n << 5n,
-    KICK_MEMBERS: 1n << 1n,
-    BAN_MEMBERS: 1n << 2n,
-    CREATE_INVITE: 1n << 0n,
-    PIN_MESSAGES: 1n << 50n,
-  };
-
-  return bits[name] ?? null;
+  return mutualzzPermissions;
 }
 
 export function discordEmojiUrl(emoji: DiscordGuildEmoji) {

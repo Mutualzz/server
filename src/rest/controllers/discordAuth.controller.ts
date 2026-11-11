@@ -40,36 +40,50 @@ import {
   discordAvatarUrl,
   discordBannerUrl,
   exchangeDiscordCode,
+  fetchDiscordBotJoinedAt,
   fetchDiscordUser,
   fetchDiscordUserProfile,
+  type DiscordAuthPurpose,
   type DiscordUser,
 } from "../../util/discordApi.ts";
 import { isProfileConfigured } from "../../util/profileAssets.ts";
 import { frontendOrigin } from "../../util/connections/shared.ts";
+import { createDiscordImportGrant } from "@mutualzz/util/DiscordImport.ts";
 
 const OAUTH_STATE_TTL = 600;
 const PENDING_SIGNUP_TTL = 900;
-
-function discordRedirectUri() {
-  return `${frontendOrigin()}/auth/discord/callback`;
-}
-
-async function storeOAuthState(client: string, linkUserId: string | null) {
-  const state = crypto.randomBytes(24).toString("hex");
-  await redis.set(
-    `discord:oauth:${state}`,
-    JSON.stringify({ link: linkUserId, client }),
-    "EX",
-    OAUTH_STATE_TTL,
-  );
-  return state;
-}
+const CLOCK_SKEW_TOLERANCE_MS = 60_000;
 
 type DiscordOAuthResult =
   | { result: "token"; token: string; client: string }
   | { result: "pending"; pendingId: string; client: string }
   | { result: "linked"; client: string }
+  | { result: "import"; guildId: string; client: string }
   | { result: "error"; error: string; client: string; email?: string };
+
+function discordRedirectUri() {
+  return `${frontendOrigin()}/auth/discord/callback`;
+}
+
+async function storeOAuthState(
+  client: string,
+  linkUserId: string | null,
+  purpose: DiscordAuthPurpose = "auth",
+) {
+  const state = crypto.randomBytes(24).toString("hex");
+  await redis.set(
+    `discord:oauth:${state}`,
+    JSON.stringify({
+      link: linkUserId,
+      client,
+      purpose,
+      createdAt: Date.now(),
+    }),
+    "EX",
+    OAUTH_STATE_TTL,
+  );
+  return state;
+}
 
 async function processOAuthCallback(
   code: string,
@@ -84,9 +98,45 @@ async function processOAuthCallback(
   const parsed = JSON.parse(rawState) as {
     link: string | null;
     client: string;
+    purpose?: DiscordAuthPurpose;
+    createdAt?: number;
   };
 
   const tokens = await exchangeDiscordCode(code, discordRedirectUri());
+
+  if (parsed.purpose === "import") {
+    if (!parsed.link) {
+      throw new HttpException(
+        HttpStatusCode.BadRequest,
+        "Invalid import state",
+      );
+    }
+
+    if (!tokens.guild) {
+      return {
+        result: "error",
+        error: "import_no_guild",
+        client: parsed.client,
+      };
+    }
+
+    const botJoinedAt = await fetchDiscordBotJoinedAt(tokens.guild.id);
+    const leaveAfterImport =
+      botJoinedAt !== null &&
+      parsed.createdAt !== undefined &&
+      botJoinedAt >= parsed.createdAt - CLOCK_SKEW_TOLERANCE_MS;
+
+    await createDiscordImportGrant(parsed.link, tokens.guild.id, {
+      leaveAfterImport,
+    });
+
+    return {
+      result: "import",
+      guildId: tokens.guild.id,
+      client: parsed.client,
+    };
+  }
+
   const discordUser = await fetchDiscordUser(tokens.access_token);
   const profile = await fetchDiscordUserProfile(tokens.access_token);
   const discordId = BigInt(discordUser.id);
@@ -427,6 +477,28 @@ export default class DiscordAuthController {
       const state = await storeOAuthState(client, user.id);
 
       res.json({ url: discordAuthorizeUrl(state, discordRedirectUri()) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async createImportUrl(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const { user } = req;
+      if (!user) {
+        throw new HttpException(HttpStatusCode.Unauthorized, "Unauthorized");
+      }
+
+      const client = String(req.query.client ?? "web");
+      const state = await storeOAuthState(client, user.id, "import");
+
+      res.json({
+        url: discordAuthorizeUrl(state, discordRedirectUri(), "import"),
+      });
     } catch (error) {
       next(error);
     }
