@@ -58,10 +58,8 @@ export default async function Connection(
     socket.on("error", logger.error);
 
     socket.events = {};
-    socket.memberEvents = {};
     socket.sequence = 0;
     socket.isAlive = true;
-    socket.memberListSubs = socket.memberListSubs ?? new Map();
     socket.presences = socket.presences ?? new Map();
 
     socket.on("pong", () => {

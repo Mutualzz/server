@@ -9,7 +9,7 @@ export const OPCODE_LIMITS: Record<number, { limit: number; window: number }> =
     [GatewayOpcodes.Heartbeat]: { limit: 30, window: 60_000 }, // Heartbeat
     [GatewayOpcodes.Identify]: { limit: 1, window: 60_000 }, // Identify
     [GatewayOpcodes.Resume]: { limit: 5, window: 60_000 }, // Resume
-    [GatewayOpcodes.LazyRequest]: { limit: 20, window: 60_000 }, // LazyRequest
+    [GatewayOpcodes.LazyRequest]: { limit: 300, window: 60_000 }, // LazyRequest
     [GatewayOpcodes.PresenceUpdate]: { limit: 6, window: 10_000 }, // Presence
     [GatewayOpcodes.InventoryEdit]: { limit: 120, window: 60_000 }, // InventoryEdit
     [GatewayOpcodes.InventoryEditCancel]: { limit: 30, window: 60_000 }, // InventoryEditCancel
@@ -30,4 +30,5 @@ export const OPCODE_LIMITS: Record<number, { limit: number; window: number }> =
     [GatewayOpcodes.MentionDismiss]: { limit: 120, window: 60_000 }, // MentionDismiss
     [GatewayOpcodes.MentionClearAll]: { limit: 10, window: 60_000 }, // MentionClearAll
     [GatewayOpcodes.DiscordImportExecute]: { limit: 10, window: 60_000 }, // DiscordImportExecute
+    [GatewayOpcodes.RequestSpaceMembers]: { limit: 240, window: 60_000 }, // RequestSpaceMembers
   };

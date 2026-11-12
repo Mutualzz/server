@@ -29,3 +29,4 @@ export * from "./themeBackground";
 export * from "./applicationIcon";
 export * from "./activityImageProxy";
 export * from "./semver";
+export * from "./UserEvents";

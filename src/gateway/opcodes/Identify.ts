@@ -65,8 +65,6 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
 
   this.userId = user.id.toString();
   this.sequence = 0;
-
-  this.memberListSubs = this.memberListSubs ?? new Map();
   this.presences = this.presences ?? new Map();
   this.presenceSubs = new Set();
 

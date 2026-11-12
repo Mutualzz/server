@@ -21,6 +21,7 @@ import {
   lookupDeezerTrack,
   lookupItunesTrack,
   emitEvent,
+  emitUserUpdate,
   execNormalized,
   fireAndForget,
   fireAndForgetAll,
@@ -37,7 +38,10 @@ import {
   toMusicSearchTrack,
   assertUserVisible,
 } from "@mutualzz/util";
-import { isProfileConfigured, mapUserProfileRow } from "../../../util/profileAssets.ts";
+import {
+  isProfileConfigured,
+  mapUserProfileRow,
+} from "../../../util/profileAssets.ts";
 import {
   fontExtFromFile,
   fontFileValidator,
@@ -337,12 +341,7 @@ export default class ProfileController {
         },
         {
           label: "event:UserUpdate",
-          run: () =>
-            emitEvent({
-              event: "UserUpdate",
-              user_id: user.id,
-              data: publicUser,
-            }),
+          run: () => emitUserUpdate(updatedUser),
           meta: { userId: user.id },
         },
         {

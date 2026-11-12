@@ -32,7 +32,6 @@ import {
   type APISpaceMember,
   type APITheme,
   type APIUser,
-  type APIUserProfile,
   type APIUserSettings,
   ChannelType,
   ExpressionType,
@@ -311,6 +310,7 @@ export const prepareReadyData = async (user: APIPrivateUser) => {
       .findMany({
         with: {
           members: {
+            where: eq(spaceMembersTable.userId, BigInt(user.id)),
             with: {
               user: { columns: publicUserColumns },
               roles: true,
@@ -847,18 +847,6 @@ export const getSpaceHydrated = async (id: string) => {
   const raw = await db.query.spacesTable.findFirst({
     with: {
       roles: true,
-      members: {
-        with: {
-          user: {
-            columns: publicUserColumns,
-          },
-          roles: {
-            with: {
-              role: true,
-            },
-          },
-        },
-      },
       channels: {
         with: {
           parent: true,

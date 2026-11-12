@@ -5,13 +5,12 @@ import type { Compressor } from "./Compressor";
 import type { Compression, Encoding } from "./Negotation";
 import type { RateLimitBucket } from "./RateLimit";
 
-export type MemberListRange = [number, number]; // [start, end] inclusive
-
-export interface MemberListSubscription {
-  spaceId: string;
-  listId: string;
+export interface MemberListWindow {
+  key: string;
   channelId: string;
-  ranges: MemberListRange[];
+  parentId: string | null;
+  channelSignature: string;
+  parentSignature: string | null;
 }
 
 export interface WebSocket extends WS {
@@ -30,7 +29,6 @@ export interface WebSocket extends WS {
   isAlive?: boolean;
   sequence: number;
   events: Record<string, undefined | (() => unknown)>;
-  memberEvents: Record<string, () => unknown>;
 
   encoding?: Encoding;
   compress?: Compression;
@@ -39,7 +37,7 @@ export interface WebSocket extends WS {
   compressor?: Compressor;
 
   rateLimits: Map<string, RateLimitBucket>;
-  memberListSubs?: Map<string, MemberListSubscription>;
+  memberListWindows?: Map<string, MemberListWindow>;
   presences?: Map<string, Set<string>>;
   presenceSubs?: Set<string>;
   userSubscriptions?: Record<string, () => unknown>;

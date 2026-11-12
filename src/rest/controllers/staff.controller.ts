@@ -21,6 +21,7 @@ import type {
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
+  BCRYPT_SALT_ROUNDS,
   listSessions,
   revokeAllSessions,
   revokeSession,
@@ -29,6 +30,7 @@ import {
   bucketName,
   buildAppealUrl,
   emitEvent,
+  emitUserUpdate,
   execNormalizedMany,
   fireAndForget,
   generateAppealToken,
@@ -56,12 +58,14 @@ import {
   validateStaffSessionParams,
   validateStaffSetFlagBody,
   validateStaffSetFlagParams,
+  validateStaffSetPasswordBody,
   validateStaffUserParams,
   validateStaffWarnUserBody,
 } from "@mutualzz/validators";
 import { and, asc, desc, eq, gt, ilike, lt, or, sql } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+import bcrypt from "bcrypt";
 
 const UNVERIFIED_FILTER = "Unverified";
 const VERIFY_REMINDER_COOLDOWN_SECONDS = 60 * 60;
@@ -223,15 +227,9 @@ export default class StaffController {
           "Failed to update user",
         );
 
-      fireAndForget(
-        () =>
-          emitEvent({
-            event: "UserUpdate",
-            user_id: updated.id,
-            data: updated,
-          }),
-        { label: "event:UserUpdate (staff.updateProfile)" },
-      );
+      fireAndForget(() => emitUserUpdate(updated), {
+        label: "event:UserUpdate (staff.updateProfile)",
+      });
 
       res.status(HttpStatusCode.Success).json(updated);
     } catch (err) {
@@ -440,15 +438,9 @@ export default class StaffController {
           "Failed to update user",
         );
 
-      fireAndForget(
-        () =>
-          emitEvent({
-            event: "UserUpdate",
-            user_id: updated.id,
-            data: updated,
-          }),
-        { label: "event:UserUpdate (staff.setDisabled)" },
-      );
+      fireAndForget(() => emitUserUpdate(updated), {
+        label: "event:UserUpdate (staff.setDisabled)",
+      });
 
       res.status(HttpStatusCode.Success).json(updated);
     } catch (err) {
@@ -461,9 +453,7 @@ export default class StaffController {
       const actor = requireStaff(req.user);
 
       const { userId } = validateStaffUserParams.parse(req.params);
-      const { hours, reason } = validateStaffRestrictUserBody.parse(
-        req.body,
-      );
+      const { hours, reason } = validateStaffRestrictUserBody.parse(req.body);
 
       const target = (await resolveUserIdentifier(
         userId,
@@ -533,15 +523,9 @@ export default class StaffController {
           "Failed to update user",
         );
 
-      fireAndForget(
-        () =>
-          emitEvent({
-            event: "UserUpdate",
-            user_id: updated.id,
-            data: updated,
-          }),
-        { label: "event:UserUpdate (staff.restrictUser)" },
-      );
+      fireAndForget(() => emitUserUpdate(updated), {
+        label: "event:UserUpdate (staff.restrictUser)",
+      });
 
       res.status(HttpStatusCode.Success).json(updated);
     } catch (err) {
@@ -591,15 +575,9 @@ export default class StaffController {
           "Failed to update user",
         );
 
-      fireAndForget(
-        () =>
-          emitEvent({
-            event: "UserUpdate",
-            user_id: updated.id,
-            data: updated,
-          }),
-        { label: "event:UserUpdate (staff.liftRestriction)" },
-      );
+      fireAndForget(() => emitUserUpdate(updated), {
+        label: "event:UserUpdate (staff.liftRestriction)",
+      });
 
       res.status(HttpStatusCode.Success).json(updated);
     } catch (err) {
@@ -657,15 +635,9 @@ export default class StaffController {
           "Failed to update user",
         );
 
-      fireAndForget(
-        () =>
-          emitEvent({
-            event: "UserUpdate",
-            user_id: updated.id,
-            data: updated,
-          }),
-        { label: "event:UserUpdate (staff.setFlag)" },
-      );
+      fireAndForget(() => emitUserUpdate(updated), {
+        label: "event:UserUpdate (staff.setFlag)",
+      });
 
       res.status(HttpStatusCode.Success).json(updated);
     } catch (err) {
@@ -678,9 +650,8 @@ export default class StaffController {
       const actor = requireStaff(req.user);
 
       const { userId } = validateStaffUserParams.parse(req.params);
-      const { mode, reason, confirmUsername } = validateStaffDeleteUserBody.parse(
-        req.body,
-      );
+      const { mode, reason, confirmUsername } =
+        validateStaffDeleteUserBody.parse(req.body);
 
       const target = (await resolveUserIdentifier(
         userId,
@@ -842,15 +813,9 @@ export default class StaffController {
           "Failed to delete user",
         );
 
-      fireAndForget(
-        () =>
-          emitEvent({
-            event: "UserUpdate",
-            user_id: updated.id,
-            data: updated,
-          }),
-        { label: "event:UserUpdate (staff.deleteUser)" },
-      );
+      fireAndForget(() => emitUserUpdate(updated), {
+        label: "event:UserUpdate (staff.deleteUser)",
+      });
 
       res.status(HttpStatusCode.Success).json(updated);
     } catch (err) {
@@ -895,6 +860,65 @@ export default class StaffController {
             data: {},
           }),
         { label: "event:UserForceLogout (staff.forceLogout)" },
+      );
+
+      res.status(HttpStatusCode.Success).json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async setPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const actor = requireFounder(req.user);
+
+      const { userId } = validateStaffUserParams.parse(req.params);
+      const { password, reason } = validateStaffSetPasswordBody.parse(req.body);
+
+      const target = await resolveUserIdentifier(userId, true);
+      if (!target)
+        throw new HttpException(HttpStatusCode.NotFound, "User not found");
+
+      if (BigInt(target.id) === BigInt(actor.id))
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Change your own password from account settings",
+        );
+
+      const newHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+
+      const updatedRows = await db
+        .update(usersTable)
+        .set({ hash: newHash })
+        .where(eq(usersTable.id, BigInt(target.id)))
+        .returning({ id: usersTable.id });
+
+      if (!updatedRows.length)
+        throw new HttpException(
+          HttpStatusCode.InternalServerError,
+          "Failed to update user password",
+        );
+
+      await revokeAllSessions(target.id);
+
+      await db.insert(staffActionsTable).values({
+        id: BigInt(Snowflake.generate()),
+        actorId: BigInt(actor.id),
+        targetId: BigInt(target.id),
+        action: "user.password_set" satisfies StaffActionType,
+        reason: reason ?? null,
+      });
+
+      await deleteCache("authUser", target.id);
+
+      fireAndForget(
+        () =>
+          emitEvent({
+            event: "UserForceLogout",
+            user_id: target.id,
+            data: {},
+          }),
+        { label: "event:UserForceLogout (staff.setPassword)" },
       );
 
       res.status(HttpStatusCode.Success).json({ success: true });

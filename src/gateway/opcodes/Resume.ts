@@ -91,7 +91,6 @@ export async function onResume(this: WebSocket, data: GatewayPayload) {
         return failResume(this, "Invalid session");
     }
 
-    this.memberListSubs = this.memberListSubs ?? new Map();
     this.presences = this.presences ?? new Map();
     this.presenceSubs = this.presenceSubs ?? new Set();
 

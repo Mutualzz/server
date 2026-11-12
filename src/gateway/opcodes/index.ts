@@ -48,6 +48,7 @@ import {
   onMentionList,
 } from "./Mentions.ts";
 import { onDiscordImportExecute } from "./DiscordImport.ts";
+import { onRequestSpaceMembers } from "./RequestSpaceMembers.ts";
 
 export type OPCodeHandler = (this: WebSocket, data: GatewayPayload) => unknown;
 
@@ -87,4 +88,5 @@ export default {
   [GatewayOpcodes.MentionDismiss]: onMentionDismiss,
   [GatewayOpcodes.MentionClearAll]: onMentionClearAll,
   [GatewayOpcodes.DiscordImportExecute]: onDiscordImportExecute,
+  [GatewayOpcodes.RequestSpaceMembers]: onRequestSpaceMembers,
 } as unknown as Record<keyof typeof GatewayOpcodes, OPCodeHandler>;

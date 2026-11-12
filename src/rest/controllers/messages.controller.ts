@@ -26,6 +26,7 @@ import {
   getChannel,
   getChannels,
   getMember,
+  getMemberRoles,
   getSpaceHydrated,
   getUser,
   isChannelRecipient,
@@ -1220,6 +1221,9 @@ export default class MessagesController {
       const visibleChannels = filterVisibleChannelsForUser(
         space,
         BigInt(user.id),
+        (await getMemberRoles(space.id, user.id)).map((role) =>
+          String(role.id),
+        ),
       );
       const textChannels = visibleChannels.filter(
         (channel) => channel.type === ChannelType.Text,

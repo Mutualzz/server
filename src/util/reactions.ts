@@ -14,6 +14,7 @@ import {
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import emojiRegex from "emojibase-regex";
 import { getExpression, publicUserColumns, resolveExpressions } from "./Helpers";
+import { attachAuthorMembers } from "./messages/authorMembers";
 import type { z } from "zod";
 import type { validateReactionEmojiBody } from "@mutualzz/validators";
 
@@ -252,7 +253,8 @@ export async function hydrateMessagesForResponse<T extends APIMessage>(
       )
     : messages;
 
-  return attachReactionsToMessages(withExpressions, viewerUserId);
+  const withMembers = await attachAuthorMembers(withExpressions);
+  return attachReactionsToMessages(withMembers, viewerUserId);
 }
 
 export const buildReactionEmojiPayload = async (

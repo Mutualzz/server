@@ -19,16 +19,15 @@ import {
 } from "./Presence.validator.ts";
 import { logger } from "../Logger";
 import { PresenceBucket } from "./Presence.bucket.ts";
-import { offlineLike, resyncMemberListWindows } from "../util/Calculations";
-import { emitEvent, redis } from "@mutualzz/util";
+import { offlineLike } from "../util/Calculations";
+import { redis } from "@mutualzz/util";
 import { db, userSettingsTable } from "@mutualzz/database";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { findGameByName } from "../../util/GameCatalog.ts";
 import { recordEndedActivities } from "../../util/ActivityHistory.ts";
 import type Redis from "ioredis";
-
-type ResyncKey = string;
+import { MemberListRegistry } from "../memberList/MemberListRegistry.ts";
 
 const SCHEDULE_KEY = (userId: string) => `presence:schedule:${userId}`;
 const MANUAL_KEY = (userId: string) => `presence:manual:${userId}`;
@@ -147,8 +146,6 @@ export class PresenceService {
   private static store = new PresenceStore();
   private static started = false;
 
-  private static resyncTimers = new Map<ResyncKey, NodeJS.Timeout>();
-
   private static scheduleLoopStarted = false;
   private static pubsubStarted = false;
   private static subscriber: Redis | null = null;
@@ -169,8 +166,6 @@ export class PresenceService {
     this.startBackgroundWorkers();
 
     PresenceBucket.add(ws);
-
-    ws.memberListSubs = ws.memberListSubs ?? new Map();
     ws.presences = ws.presences ?? new Map();
 
     if (!ws.userId || !ws.sessionId) return;
@@ -257,13 +252,6 @@ export class PresenceService {
 
   static onSocketClose(ws: WebSocket) {
     PresenceBucket.remove(ws);
-
-    for (const [key, timer] of this.resyncTimers) {
-      if (key.startsWith(`${ws.sessionId}:`)) {
-        clearTimeout(timer);
-        this.resyncTimers.delete(key);
-      }
-    }
   }
 
   static async get(userId: string) {
@@ -272,6 +260,16 @@ export class PresenceService {
 
   static async getPublic(userId: string) {
     return toPublicPresence(await this.store.get(userId));
+  }
+
+  static async getManyPublic(userIds: string[]) {
+    const presences = await this.store.getMany(userIds);
+    return new Map(
+      [...presences].map(([userId, presence]) => [
+        userId,
+        toPublicPresence(presence),
+      ]),
+    );
   }
 
   static async getScheduleForUser(
@@ -830,6 +828,7 @@ export class PresenceService {
           const parsed = JSON.parse(message) as {
             userId: string;
             presence: PresencePayload;
+            wasOffline?: boolean;
             origin?: string;
           };
           if (!parsed?.userId || !parsed?.presence) return;
@@ -837,6 +836,7 @@ export class PresenceService {
 
           void this.fanoutLocal(parsed.userId, parsed.presence, {
             publish: false,
+            wasOffline: parsed.wasOffline,
           });
         } catch (error) {
           logger.debug("[Presence] pubsub message error:", error);
@@ -847,59 +847,21 @@ export class PresenceService {
     }
   }
 
-  private static scheduleResyncForTargets(
-    userId: string,
-    targets: WebSocket[],
-    opts?: { forceAllSubs?: boolean },
-  ) {
-    for (const socket of targets) {
-      const presencesBySubKey = socket.presences;
-      const subKeys = new Set<string>();
-
-      if (presencesBySubKey) {
-        for (const [subKey, visibleUserIds] of presencesBySubKey) {
-          if (!opts?.forceAllSubs && !visibleUserIds?.has(userId)) continue;
-          subKeys.add(subKey);
-        }
-      }
-
-      if (opts?.forceAllSubs && socket.memberListSubs?.size) {
-        for (const sub of socket.memberListSubs.values()) {
-          subKeys.add(`${sub.spaceId}:${sub.channelId}:${sub.listId}`);
-        }
-      }
-
-      for (const subKey of subKeys) {
-        const resyncKey: ResyncKey = `${socket.sessionId}:${subKey}`;
-
-        const existingTimer = this.resyncTimers.get(resyncKey);
-        if (existingTimer) clearTimeout(existingTimer);
-
-        const timer = setTimeout(async () => {
-          this.resyncTimers.delete(resyncKey);
-          try {
-            await resyncMemberListWindows.call(socket, subKey);
-          } catch (error) {
-            logger.debug("[Presence] resync failed:", error);
-          }
-        }, 250);
-
-        this.resyncTimers.set(resyncKey, timer);
-      }
-    }
-  }
-
   private static async fanoutLocal(
     userId: string,
     presence: PresencePayload,
-    opts?: { publish?: boolean; previous?: PresencePayload | null },
+    opts?: {
+      publish?: boolean;
+      previous?: PresencePayload | null;
+      wasOffline?: boolean;
+    },
   ) {
     const seenBy = PresenceBucket.socketsSeeingUser(userId);
     const own = PresenceBucket.socketsByUserId(userId);
     const targets = new Set([...seenBy, ...own]);
     const publicPresence = toPublicPresence(presence) ?? presence;
-    const offlineFlipped =
-      offlineLike(opts?.previous ?? null) !== offlineLike(presence);
+    const wasOffline = opts?.wasOffline ?? offlineLike(opts?.previous ?? null);
+    const offlineFlipped = wasOffline !== offlineLike(presence);
 
     await Promise.allSettled(
       [...targets].map((socket) => {
@@ -919,40 +881,24 @@ export class PresenceService {
     );
 
     if (opts?.publish !== false) {
-      await Promise.allSettled([
-        emitEvent({
-          event: "PresenceUpdate",
-          user_id: userId,
-          data: { userId, presence: publicPresence },
-        }).catch((error) => {
-          logger.debug("[Presence] emit fail:", error);
-        }),
-        redis
-          .publish(
-            PRESENCE_BROADCAST_CHANNEL,
-            JSON.stringify({
-              userId,
-              presence,
-              origin: INSTANCE_ID,
-            }),
-          )
-          .catch((error) => {
-            logger.debug("[Presence] publish fail:", error);
+      await redis
+        .publish(
+          PRESENCE_BROADCAST_CHANNEL,
+          JSON.stringify({
+            userId,
+            presence,
+            wasOffline,
+            origin: INSTANCE_ID,
           }),
-      ]);
+        )
+        .catch((error) => {
+          logger.debug("[Presence] publish fail:", error);
+        });
     }
 
-    let resyncTargets = seenBy;
-    if (offlineFlipped) {
-      const memberListWatchers = PresenceBucket.authenticatedSockets().filter(
-        (ws) => (ws.memberListSubs?.size ?? 0) > 0,
-      );
-      resyncTargets = [...new Set([...seenBy, ...memberListWatchers])];
-    }
+    if (!offlineFlipped) return;
 
-    this.scheduleResyncForTargets(userId, resyncTargets, {
-      forceAllSubs: offlineFlipped,
-    });
+    MemberListRegistry.applyPresence(userId, !offlineLike(presence));
   }
 
   private static async broadcast(

@@ -5,84 +5,89 @@ const router = createRouter();
 
 router.get("/users", createLimiter(60_000, 30), StaffController.search);
 router.get(
-    "/actions",
-    createLimiter(60_000, 30),
-    StaffController.getAllActions,
+  "/actions",
+  createLimiter(60_000, 30),
+  StaffController.getAllActions,
 );
 router.get(
-    "/users/:userId",
-    createLimiter(60_000, 60),
-    StaffController.getUser,
+  "/users/:userId",
+  createLimiter(60_000, 60),
+  StaffController.getUser,
 );
 router.patch(
-    "/users/:userId/profile",
-    createLimiter(60_000, 20),
-    StaffController.updateProfile,
+  "/users/:userId/profile",
+  createLimiter(60_000, 20),
+  StaffController.updateProfile,
 );
 router.post(
-    "/users/:userId/verify-reminder",
-    createLimiter(60_000, 10),
-    StaffController.sendVerifyReminder,
+  "/users/:userId/verify-reminder",
+  createLimiter(60_000, 10),
+  StaffController.sendVerifyReminder,
 );
 router.post(
-    "/users/:userId/warn",
-    createLimiter(60_000, 10),
-    StaffController.warnUser,
+  "/users/:userId/warn",
+  createLimiter(60_000, 10),
+  StaffController.warnUser,
 );
 router.get(
-    "/users/:userId/notes",
-    createLimiter(60_000, 30),
-    StaffController.getNotes,
+  "/users/:userId/notes",
+  createLimiter(60_000, 30),
+  StaffController.getNotes,
 );
 router.post(
-    "/users/:userId/notes",
-    createLimiter(60_000, 20),
-    StaffController.createNote,
+  "/users/:userId/notes",
+  createLimiter(60_000, 20),
+  StaffController.createNote,
 );
 router.patch(
-    "/users/:userId/disabled",
-    createLimiter(60_000, 20),
-    StaffController.setDisabled,
+  "/users/:userId/disabled",
+  createLimiter(60_000, 20),
+  StaffController.setDisabled,
 );
 router.patch(
-    "/users/:userId/restrict",
-    createLimiter(60_000, 10),
-    StaffController.restrictUser,
+  "/users/:userId/restrict",
+  createLimiter(60_000, 10),
+  StaffController.restrictUser,
 );
 router.delete(
-    "/users/:userId/restrict",
-    createLimiter(60_000, 10),
-    StaffController.liftRestriction,
+  "/users/:userId/restrict",
+  createLimiter(60_000, 10),
+  StaffController.liftRestriction,
 );
 router.patch(
-    "/users/:userId/flags/:flag",
-    createLimiter(60_000, 30),
-    StaffController.setFlag,
+  "/users/:userId/flags/:flag",
+  createLimiter(60_000, 30),
+  StaffController.setFlag,
 );
 router.get(
-    "/users/:userId/actions",
-    createLimiter(60_000, 60),
-    StaffController.getActions,
+  "/users/:userId/actions",
+  createLimiter(60_000, 60),
+  StaffController.getActions,
 );
 router.post(
-    "/users/:userId/delete",
-    createLimiter(60_000, 5),
-    StaffController.deleteUser,
+  "/users/:userId/delete",
+  createLimiter(60_000, 5),
+  StaffController.deleteUser,
 );
 router.post(
-    "/users/:userId/force-logout",
-    createLimiter(60_000, 10),
-    StaffController.forceLogout,
+  "/users/:userId/force-logout",
+  createLimiter(60_000, 10),
+  StaffController.forceLogout,
+);
+router.post(
+  "/users/:userId/password",
+  createLimiter(60_000, 5),
+  StaffController.setPassword,
 );
 router.get(
-    "/users/:userId/sessions",
-    createLimiter(60_000, 30),
-    StaffController.getSessions,
+  "/users/:userId/sessions",
+  createLimiter(60_000, 30),
+  StaffController.getSessions,
 );
 router.delete(
-    "/users/:userId/sessions/:sessionId",
-    createLimiter(60_000, 20),
-    StaffController.revokeSession,
+  "/users/:userId/sessions/:sessionId",
+  createLimiter(60_000, 20),
+  StaffController.revokeSession,
 );
 
 export default router;

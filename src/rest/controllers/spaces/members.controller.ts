@@ -93,6 +93,9 @@ export default class MembersController {
       const visibleChannels = filterVisibleChannelsForUser(
         space,
         BigInt(user.id),
+        (await getMemberRoles(space.id, user.id)).map((role) =>
+          String(role.id),
+        ),
       );
 
       if (visibleChannels.length === 0)
@@ -101,13 +104,14 @@ export default class MembersController {
           "You do not have access to any channels in this space",
         );
 
-      let members = await getCache("spaceMembers", space.id);
+      const cacheKey = `${space.id}:${limit ?? "all"}`;
+      let members = await getCache("spaceMembers", cacheKey);
       if (!members)
         members = await execNormalizedMany<APISpaceMember>(
           db.query.spaceMembersTable.findMany({
             with: {
               user: {
-                with: publicUserColumns,
+                columns: publicUserColumns,
               },
             },
             where: eq(spaceMembersTable.spaceId, BigInt(space.id)),
@@ -117,7 +121,7 @@ export default class MembersController {
 
       res.status(HttpStatusCode.Success).json(members);
 
-      fireAndForget(() => setCache("spaceMembers", space.id, members), {
+      fireAndForget(() => setCache("spaceMembers", cacheKey, members), {
         label: "cache:set:spaceMembers",
         meta: {
           spaceId: space.id,
@@ -149,6 +153,9 @@ export default class MembersController {
       const visibleChannels = filterVisibleChannelsForUser(
         space,
         BigInt(user.id),
+        (await getMemberRoles(space.id, user.id)).map((role) =>
+          String(role.id),
+        ),
       );
 
       if (visibleChannels.length === 0)
@@ -335,7 +342,6 @@ export default class MembersController {
         return createdMember;
       });
 
-      let members = await getCache("spaceMembers", space.id);
       let channels = await getCache("channels", space.id);
 
       if (!channels)
@@ -348,18 +354,20 @@ export default class MembersController {
           }),
         );
 
-      if (!members)
-        members = await execNormalizedMany<APISpaceMember>(
-          db.query.spaceMembersTable.findMany({
-            with: {
-              user: {
-                columns: publicUserColumns,
-              },
-              roles: true,
+      const members = await execNormalizedMany<APISpaceMember>(
+        db.query.spaceMembersTable.findMany({
+          with: {
+            user: {
+              columns: publicUserColumns,
             },
-            where: eq(spaceMembersTable.spaceId, BigInt(space.id)),
-          }),
-        );
+            roles: true,
+          },
+          where: and(
+            eq(spaceMembersTable.spaceId, BigInt(space.id)),
+            eq(spaceMembersTable.userId, BigInt(user.id)),
+          ),
+        }),
+      );
 
       res.status(HttpStatusCode.Created).json(newMember);
 
@@ -397,8 +405,8 @@ export default class MembersController {
           run: () => setCache("channels", space.id, channels),
         },
         {
-          label: "cache:set:spaceMembers",
-          run: () => setCache("spaceMembers", space.id, members),
+          label: "cache:invalidate:spaceMembers",
+          run: () => invalidateCache("spaceMembers", space.id),
         },
         {
           label: "cache:invalidate:spaceHydrated",

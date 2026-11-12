@@ -28,6 +28,7 @@ import {
   deletePushTokensForUser,
   upsertPushToken,
   Snowflake,
+  emitUserUpdate,
 } from "@mutualzz/util";
 import { revokeAllSessions } from "@mutualzz/rest/util";
 import type {
@@ -323,12 +324,7 @@ export default class MeController {
       fireAndForgetAll([
         {
           label: "event:UserUpdate",
-          run: () =>
-            emitEvent({
-              event: "UserUpdate",
-              user_id: newUser.id,
-              data: toPublicUser(newUser),
-            }),
+          run: () => emitUserUpdate(newUser),
           meta: { userId: user.id },
         },
         {
@@ -492,12 +488,8 @@ export default class MeController {
       fireAndForgetAll([
         {
           label: "event:UserUpdate",
-          run: () =>
-            emitEvent({
-              event: "UserUpdate",
-              user_id: updatedUser.id,
-              data: updatedUser,
-            }),
+          run: () => emitUserUpdate(updatedUser),
+          meta: { userId: user.id },
         },
         {
           label: "cache:update:user",
@@ -618,12 +610,8 @@ export default class MeController {
       fireAndForgetAll([
         {
           label: "event:UserUpdate",
-          run: () =>
-            emitEvent({
-              event: "UserUpdate",
-              user_id: updatedUser.id,
-              data: updatedUser,
-            }),
+          run: () => emitUserUpdate(updatedUser),
+          meta: { userId: user.id },
         },
         {
           label: "cache:update:user",
@@ -725,12 +713,8 @@ export default class MeController {
       fireAndForgetAll([
         {
           label: "event:UserUpdate",
-          run: () =>
-            emitEvent({
-              event: "UserUpdate",
-              user_id: updatedUser.id,
-              data: updatedUser,
-            }),
+          run: () => emitUserUpdate(updatedUser),
+          meta: { userId: user.id },
         },
         {
           label: "cache:update:user",
@@ -815,12 +799,8 @@ export default class MeController {
       fireAndForgetAll([
         {
           label: "event:UserUpdate",
-          run: () =>
-            emitEvent({
-              event: "UserUpdate",
-              user_id: updatedUser.id,
-              data: updatedUser,
-            }),
+          run: () => emitUserUpdate(updatedUser),
+          meta: { userId: user.id },
         },
         {
           label: "cache:update:user",

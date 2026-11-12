@@ -6,6 +6,7 @@ import { clearSessionBuffer, touchSessionBuffer } from "./SessionEventBuffer";
 import { revokeSession, saveSession, flushSessionSeq } from "./Session";
 import type { WebSocket } from "./WebSocket";
 import { removeSessionInventoryViewers } from "../../minecraft/InventoryViewers.ts";
+import { MemberListRegistry } from "../memberList/MemberListRegistry.ts";
 
 interface SessionEntry {
   sessionId: string;
@@ -27,13 +28,11 @@ function teardownListeners(ws: WebSocket) {
       channel.close().catch?.(() => null);
     } else {
       Object.values(ws.events ?? {}).forEach((x) => x?.());
-      Object.values(ws.memberEvents ?? {}).forEach((x) => x?.());
       Object.values(ws.userSubscriptions ?? {}).forEach((x) => x?.());
     }
 
-    ws.memberListSubs?.clear();
+    MemberListRegistry.unsubscribeSocket(ws);
     ws.events = {};
-    ws.memberEvents = {};
     ws.userSubscriptions = {};
   } catch (err) {
     logger.error("[SessionRuntime] teardownListeners failed:", err);
@@ -48,13 +47,12 @@ function syncSocketSequences(entry: SessionEntry) {
 }
 
 function copyAppState(from: WebSocket, to: WebSocket) {
-  to.memberListSubs = from.memberListSubs ?? new Map();
   to.presences = from.presences ?? new Map();
   to.presenceSubs = from.presenceSubs ?? new Set();
   to.userSubscriptions = from.userSubscriptions ?? {};
   to.events = from.events ?? {};
-  to.memberEvents = from.memberEvents ?? {};
   to.listenOptions = from.listenOptions;
+  to.memberListWindows = from.memberListWindows ?? new Map();
   to.sequence = from.sequence;
 }
 

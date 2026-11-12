@@ -16,7 +16,11 @@ import type { Channel } from "amqplib";
 import { and, eq } from "drizzle-orm";
 import { logger } from "./Logger";
 import { Send, SessionRuntime, type WebSocket } from "./util";
-import { resyncMemberListWindows } from "@mutualzz/gateway/util/Calculations.ts";
+import {
+  recheckMemberList,
+  refreshMemberListWindows,
+  unsubscribeMemberListsFor,
+} from "./opcodes/LazyRequest";
 
 export async function setupListener(this: WebSocket) {
   if (!this.userId) {
@@ -29,10 +33,7 @@ export async function setupListener(this: WebSocket) {
   try {
     // ensure containers exist
     this.events = this.events ?? {};
-    this.memberEvents = this.memberEvents ?? {};
     this.listenOptions = this.listenOptions ?? {};
-
-    this.memberListSubs = this.memberListSubs ?? new Map();
 
     const userId = BigInt(this.userId);
 
@@ -141,7 +142,6 @@ export async function setupListener(this: WebSocket) {
         );
       }
     }
-
   } catch (err) {
     logger.error(`[RabbitMQ] setupListener: `, err);
   }
@@ -156,8 +156,7 @@ export async function consume(this: WebSocket, opts: EventOpts) {
 
   switch (event) {
     case "UserForceLogout": {
-      const target =
-        SessionRuntime.getLiveSocket(this.sessionId) ?? this;
+      const target = SessionRuntime.getLiveSocket(this.sessionId) ?? this;
       if (
         target.readyState === target.OPEN ||
         target.readyState === target.CONNECTING
@@ -168,53 +167,9 @@ export async function consume(this: WebSocket, opts: EventOpts) {
       return;
     }
     case "SpaceMemberRemove": {
-      const mid = String(data?.user?.id);
-      this.memberEvents?.[mid]?.();
-      delete this.memberEvents?.[mid];
-
       const spaceId = String(data?.spaceId ?? data?.space_id);
-      if (spaceId) {
-        try {
-          await resyncMemberListWindows.call(this, spaceId);
-        } catch (err) {
-          logger.error("[MemberList] resync failed (SpaceMemberRemove):", err);
-        }
-      }
-      break;
-    }
-    case "SpaceMemberAdd": {
-      const mid = String(data?.user?.id);
-      if (this.memberEvents?.[mid]) break;
-      this.memberEvents = this.memberEvents ?? {};
-      this.memberEvents[mid] = await listenEvent(
-        mid,
-        consumer,
-        this.listenOptions,
-      );
-
-      const spaceId = String(data?.spaceId ?? data?.space_id);
-      if (spaceId) {
-        try {
-          await resyncMemberListWindows.call(this, spaceId);
-        } catch (err) {
-          logger.error("[MemberList] resync failed (SpaceMemberAdd):", err);
-        }
-      }
-      break;
-    }
-    case "SpaceMemberUpdate": {
-      const mid = String(data?.user?.id);
-      if (!this.memberEvents?.[mid]) break;
-      this.memberEvents[mid]();
-
-      const spaceId = String(data?.spaceId ?? data?.space_id);
-      if (spaceId) {
-        try {
-          await resyncMemberListWindows.call(this, spaceId);
-        } catch (err) {
-          logger.error("[MemberList] resync failed (SpaceMemberUpdate):", err);
-        }
-      }
+      if (String(data?.userId) === this.userId)
+        unsubscribeMemberListsFor(this, spaceId);
       break;
     }
     case "ChannelDelete":
@@ -232,15 +187,7 @@ export async function consume(this: WebSocket, opts: EventOpts) {
 
       this.events[id]?.();
       delete this.events[id];
-
-      if (event === "SpaceDelete") {
-        const spaceId = String(data?.id);
-        if (spaceId && this.memberListSubs) {
-          for (const key of this.memberListSubs.keys()) {
-            if (key.startsWith(`${spaceId}:`)) this.memberListSubs.delete(key);
-          }
-        }
-      }
+      unsubscribeMemberListsFor(this, id);
       break;
     }
     case "ChannelCreate":
@@ -280,6 +227,7 @@ export async function consume(this: WebSocket, opts: EventOpts) {
       break;
     }
     case "ChannelUpdate": {
+      refreshMemberListWindows(this, data);
       const cancelListener = this.events[id];
       if (cancelListener) {
         await cancelListener();
@@ -287,20 +235,12 @@ export async function consume(this: WebSocket, opts: EventOpts) {
       }
 
       this.events[id] = await listenEvent(id, consumer, listenOpts);
-
-      const channelSpaceId = String(data?.spaceId ?? data?.space_id);
-      if (channelSpaceId) {
-        try {
-          await resyncMemberListWindows.call(this, channelSpaceId);
-        } catch (err) {
-          logger.error("[MemberList] resync failed (ChannelUpdate):", err);
-        }
-      }
       break;
     }
     case "ChannelDeleteBulk": {
       for (const channel of data) {
         const cid = String(channel.id);
+        unsubscribeMemberListsFor(this, cid);
         this.events[cid]?.();
         delete this.events[cid];
       }
@@ -309,6 +249,7 @@ export async function consume(this: WebSocket, opts: EventOpts) {
     }
     case "ChannelUpdateBulk": {
       for (const channel of data) {
+        refreshMemberListWindows(this, channel);
         const cid = String(channel.id);
         const cancelListener = this.events[cid];
         if (!cancelListener) continue;
@@ -321,29 +262,22 @@ export async function consume(this: WebSocket, opts: EventOpts) {
 
       break;
     }
-    case "RoleCreate":
     case "RoleUpdate":
     case "RoleDelete": {
       const spaceId = String(data?.spaceId ?? data?.space_id);
-      if (spaceId) {
-        try {
-          await resyncMemberListWindows.call(this, spaceId);
-        } catch (err) {
-          logger.error(`[MemberList] resync failed (${event}):`, err);
-        }
-      }
+      recheckMemberList(this, spaceId);
       break;
     }
     case "SpaceMemberRoleAdd":
     case "SpaceMemberRoleRemove": {
-      const spaceId = String(data?.spaceId ?? data?.space_id);
-      if (spaceId) {
-        try {
-          await resyncMemberListWindows.call(this, spaceId);
-        } catch (err) {
-          logger.error(`[MemberList] resync failed (${event}):`, err);
-        }
-      }
+      if (String(data?.userId) === this.userId)
+        recheckMemberList(this, String(data?.spaceId ?? data?.space_id));
+      break;
+    }
+    case "SpaceMemberRoleAddBulk": {
+      const userIds = ((data?.userIds ?? []) as unknown[]).map(String);
+      if (this.userId && userIds.includes(this.userId))
+        recheckMemberList(this, String(data?.spaceId ?? data?.space_id));
       break;
     }
     default:

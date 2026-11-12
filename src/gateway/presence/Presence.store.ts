@@ -16,6 +16,8 @@ export type SessionPresence = Omit<PresencePayload, "updatedAt"> & {
   updatedAt: number;
 };
 
+const PRESENCE_MGET_BATCH = 500;
+
 const presenceKey = (userId: Snowflake) => `presence:${userId}`;
 const sessionsKey = (userId: Snowflake) => `presence:sessions:${userId}`;
 
@@ -37,6 +39,15 @@ const ACTIVITY_TYPE_ORDER: Record<string, number> = {
 
 const isGatewaySession = (sessionId: string) =>
   !sessionId.startsWith("minecraft:");
+
+function parsePresence(raw: string | null | undefined): PresencePayload | null {
+  if (!raw) return null;
+  try {
+    return (JSON.parse(raw) as PresencePayload) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const compareActivities = (first: PresenceActivity, second: PresenceActivity) =>
   (ACTIVITY_TYPE_ORDER[first.type] ?? 99) -
@@ -363,6 +374,32 @@ export class PresenceStore {
     } catch {
       // ignore invalid JSON
     }
+  }
+
+  async getMany(
+    userIds: Snowflake[],
+  ): Promise<Map<Snowflake, PresencePayload | null>> {
+    const now = Date.now();
+    const presences = new Map<Snowflake, PresencePayload | null>();
+    const missingUserIds: Snowflake[] = [];
+
+    for (const userId of userIds) {
+      const local = this.entries.get(userId);
+      if (local && local.expiresAt > now) presences.set(userId, local.presence);
+      else missingUserIds.push(userId);
+    }
+
+    for (let i = 0; i < missingUserIds.length; i += PRESENCE_MGET_BATCH) {
+      const batch = missingUserIds.slice(i, i + PRESENCE_MGET_BATCH);
+      const rawValues = await redis
+        .mget(batch.map(presenceKey))
+        .catch(() => [] as (string | null)[]);
+      batch.forEach((userId, index) => {
+        presences.set(userId, parsePresence(rawValues[index]));
+      });
+    }
+
+    return presences;
   }
 
   async get(userId: Snowflake): Promise<PresencePayload | null> {

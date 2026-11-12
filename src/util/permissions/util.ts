@@ -23,8 +23,16 @@ export function computeBaseBitsFromSpace(
   baseBits: bigint;
   memberRoleIds: string[];
 } {
-  const memberRoleIds = getMemberRoleIdsIdsOnly(member);
+  return computeBaseBitsFromRoleIds(space, getMemberRoleIdsIdsOnly(member));
+}
 
+export function computeBaseBitsFromRoleIds(
+  space: APISpace,
+  memberRoleIds: string[],
+): {
+  baseBits: bigint;
+  memberRoleIds: string[];
+} {
   const roles = (space.roles ?? []).map((r) => ({
     id: r.id.toString(),
     allow: r.allow,
@@ -40,10 +48,8 @@ export function computeBaseBitsFromSpace(
 export function filterVisibleChannelsForUser(
   space: APISpace,
   userId: bigint,
+  userRoleIds: string[],
 ): APIChannel[] {
-  const member = (space.members ?? []).find((m) => BigInt(m.userId) === userId);
-  if (!member) return [];
-
   if (BigInt(space.ownerId) === userId) return space.channels ?? [];
 
   const channels = space.channels ?? [];
@@ -52,7 +58,10 @@ export function filterVisibleChannelsForUser(
   const byId = new Map<string, APIChannel>();
   for (const channel of channels) byId.set(channel.id.toString(), channel);
 
-  const { baseBits, memberRoleIds } = computeBaseBitsFromSpace(space, member);
+  const { baseBits, memberRoleIds } = computeBaseBitsFromRoleIds(
+    space,
+    userRoleIds,
+  );
 
   if (
     (baseBits & permissionFlags.Administrator) ===
