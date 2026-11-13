@@ -46,3 +46,25 @@ export function isActivityArtUrl(url: unknown): url is string {
   if (!url.startsWith(base + PATH_PREFIX)) return false;
   return FILE_PATTERN.test(url.slice(base.length + PATH_PREFIX.length));
 }
+
+function artHashOf(url: string) {
+  return url.slice(url.lastIndexOf("/") + 1).slice(0, 32);
+}
+
+export async function findLiveActivityArtUrls(
+  urls: (string | undefined)[],
+): Promise<Set<string>> {
+  const artUrls = [...new Set(urls.filter(isActivityArtUrl))];
+  if (artUrls.length === 0) return new Set();
+
+  const pipeline = redis.pipeline();
+  for (const artUrl of artUrls) pipeline.exists(artKey(artHashOf(artUrl)));
+  const results = await pipeline.exec().catch(() => null);
+  if (!results) return new Set(artUrls);
+
+  const liveArtUrls = new Set<string>();
+  artUrls.forEach((artUrl, index) => {
+    if (results[index]?.[1] === 1) liveArtUrls.add(artUrl);
+  });
+  return liveArtUrls;
+}

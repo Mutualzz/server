@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import type { PresenceActivityAssets } from "@mutualzz/types";
 
 // Activity images (RPC large/small image URLs, Spotify art) are served through
 // the CDN so viewers never load third-party URLs directly (which would leak
@@ -63,18 +62,4 @@ export function proxyActivityImageUrl(url: string | undefined) {
 
 export function isProxiedActivityImageUrl(url: unknown): url is string {
   return typeof url === "string" && parseProxiedUrl(url) !== null;
-}
-
-export function proxyActivityAssets(
-  assets: PresenceActivityAssets,
-): PresenceActivityAssets {
-  const largeImageUrl = proxyActivityImageUrl(assets.largeImageUrl);
-  const smallImageUrl = proxyActivityImageUrl(assets.smallImageUrl);
-
-  const { largeImageUrl: _l, smallImageUrl: _s, ...rest } = assets;
-  return {
-    ...rest,
-    ...(largeImageUrl ? { largeImageUrl } : {}),
-    ...(smallImageUrl ? { smallImageUrl } : {}),
-  };
 }

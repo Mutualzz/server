@@ -9,7 +9,8 @@ import type {
   PresenceActivityType,
 } from "@mutualzz/types";
 import { and, desc, eq, gt, lt, notInArray } from "drizzle-orm";
-import { proxyActivityAssets } from "./activityImageProxy";
+import { findLiveActivityArtUrls, isActivityArtUrl } from "./ActivityArt";
+import { proxyActivityImageUrl } from "./activityImageProxy";
 import { redis } from "./Redis";
 
 export const ACTIVITY_HISTORY_MAX = 5;
@@ -38,6 +39,31 @@ function activityIdentity(activity: {
   applicationId?: string | null;
 }): string {
   return `${activity.type}|${activity.applicationId ?? ""}|${activity.name}`;
+}
+
+function historyImageUrl(
+  url: string | undefined,
+  liveArtUrls: Set<string>,
+): string | undefined {
+  if (!url) return undefined;
+  if (isActivityArtUrl(url)) return liveArtUrls.has(url) ? url : undefined;
+  return proxyActivityImageUrl(url);
+}
+
+function historyAssets(
+  assets: PresenceActivityAssets,
+  liveArtUrls: Set<string>,
+): PresenceActivityAssets | null {
+  const { largeImageUrl, smallImageUrl, ...textAssets } = assets;
+  const largeImage = historyImageUrl(largeImageUrl, liveArtUrls);
+  const smallImage = historyImageUrl(smallImageUrl, liveArtUrls);
+
+  const result: PresenceActivityAssets = {
+    ...textAssets,
+    ...(largeImage ? { largeImageUrl: largeImage } : {}),
+    ...(smallImage ? { smallImageUrl: smallImage } : {}),
+  };
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 function isTrackable(activity: PresenceActivity): boolean {
@@ -248,6 +274,13 @@ export async function listRecentActivities(
     limit: ACTIVITY_HISTORY_MAX * 4,
   });
 
+  const liveArtUrls = await findLiveActivityArtUrls(
+    rows.flatMap((row) => [
+      row.assets?.largeImageUrl,
+      row.assets?.smallImageUrl,
+    ]),
+  );
+
   const seen = new Set<string>();
   const activities: RecentActivityView[] = [];
 
@@ -260,6 +293,7 @@ export async function listRecentActivities(
     });
     if (seen.has(key)) continue;
     seen.add(key);
+    const assets = row.assets ? historyAssets(row.assets, liveArtUrls) : null;
     activities.push({
       type: row.type,
       name: row.name,
@@ -267,7 +301,7 @@ export async function listRecentActivities(
       ...(row.details ? { details: row.details } : {}),
       ...(row.state ? { state: row.state } : {}),
       ...(row.url ? { url: row.url } : {}),
-      ...(row.assets ? { assets: proxyActivityAssets(row.assets) } : {}),
+      ...(assets ? { assets } : {}),
       startedAt: row.startedAt ? row.startedAt.getTime() : null,
       endedAt: row.endedAt.getTime(),
     });
