@@ -33,6 +33,7 @@ import {
   onReminderList,
   onReminderSet,
 } from "./Reminders.ts";
+import { onSpaceMemberProfileUpdate } from "./SpaceMemberProfile.ts";
 import {
   onScheduledMessageDelete,
   onScheduledMessageEdit,
@@ -77,6 +78,7 @@ export default {
   [GatewayOpcodes.BookmarkRemove]: onBookmarkRemove,
   [GatewayOpcodes.BookmarkList]: onBookmarkList,
   [GatewayOpcodes.ReminderSet]: onReminderSet,
+  [GatewayOpcodes.SpaceMemberProfileUpdate]: onSpaceMemberProfileUpdate,
   [GatewayOpcodes.ReminderDelete]: onReminderDelete,
   [GatewayOpcodes.ReminderList]: onReminderList,
   [GatewayOpcodes.ScheduledMessageEdit]: onScheduledMessageEdit,

@@ -31,4 +31,5 @@ export const OPCODE_LIMITS: Record<number, { limit: number; window: number }> =
     [GatewayOpcodes.MentionClearAll]: { limit: 10, window: 60_000 }, // MentionClearAll
     [GatewayOpcodes.DiscordImportExecute]: { limit: 10, window: 60_000 }, // DiscordImportExecute
     [GatewayOpcodes.RequestSpaceMembers]: { limit: 240, window: 60_000 }, // RequestSpaceMembers
+    [GatewayOpcodes.SpaceMemberProfileUpdate]: { limit: 30, window: 60_000 }, // SpaceMemberProfileUpdate
   };

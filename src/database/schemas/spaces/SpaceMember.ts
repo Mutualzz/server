@@ -28,6 +28,8 @@ export const spaceMembersTable = pgTable(
         nickname: text(),
         avatar: text(),
         banner: text(),
+        bio: text(),
+        pronouns: text(),
 
         flags: bigint("flags", { mode: "bigint" })
             .notNull()

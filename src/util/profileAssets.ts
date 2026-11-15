@@ -7,7 +7,10 @@ import type {
   APIMobileProfileBlock,
   APIProfileBlock,
   APIProfileMusic,
+  APIProfileTheme,
+  APIDisplayNameStyle,
   APIUserProfile,
+  ProfileBackgroundImageFit,
 } from "@mutualzz/types";
 import { generateHash } from "./Common";
 import { bucketName, s3Client } from "./S3";
@@ -20,11 +23,7 @@ export type ProfileFontExt = (typeof PROFILE_FONT_EXTENSIONS)[number];
 
 const PROFILE_FONT_REF_RE = /^([a-f0-9]{64})(?:\.(woff2|woff|ttf|otf))?$/i;
 
-export const PROFILE_IMAGE_KINDS = [
-  "banner",
-  "background",
-  "image",
-] as const;
+export const PROFILE_IMAGE_KINDS = ["banner", "background", "image"] as const;
 
 export type ProfileImageKind = (typeof PROFILE_IMAGE_KINDS)[number];
 
@@ -50,9 +49,12 @@ export interface UserProfileRow {
   configured: boolean;
   backgroundColor: string | null;
   backgroundImage: string | null;
+  backgroundImageFit: ProfileBackgroundImageFit | null;
   banner: string | null;
   bio: string | null;
   pageFontFamily: string | null;
+  theme: APIProfileTheme | null;
+  displayNameStyle: APIDisplayNameStyle | null;
   profileMusic: APIProfileMusic | null;
   blocks: APIProfileBlock[];
   mobileBlocks: APIMobileProfileBlock[];
@@ -77,10 +79,13 @@ export function mapUserProfileRow(
     }),
     backgroundColor: row.backgroundColor,
     backgroundImage: row.backgroundImage,
+    backgroundImageFit: row.backgroundImageFit ?? null,
     banner: row.banner,
     bio: row.bio,
     pronouns: pronouns ?? null,
     pageFontFamily: row.pageFontFamily,
+    theme: row.theme,
+    displayNameStyle: row.displayNameStyle,
     profileMusic: row.profileMusic,
     blocks,
     mobileBlocks: row.mobileBlocks ?? [],
@@ -94,10 +99,12 @@ export interface ProfileAssetRefs {
   fonts: Set<string>;
 }
 
-interface ProfileAssetSource {
+export interface ProfileAssetSource {
+  images?: string[];
   banner?: string | null;
   backgroundImage?: string | null;
   pageFontFamily?: string | null;
+  displayNameStyle?: APIDisplayNameStyle | null;
   profileMusic?: APIProfileMusic | null;
   blocks?: APIProfileBlock[] | unknown[];
   mobileBlocks?: APIMobileProfileBlock[] | unknown[];
@@ -170,6 +177,10 @@ export const collectProfileAssetRefs = (
   const music = new Set<string>();
   const fonts = new Set<string>();
 
+  for (const imageHash of profile.images ?? []) {
+    if (isProfileAssetHash(imageHash)) images.add(imageHash);
+  }
+
   if (isProfileAssetHash(profile.banner)) images.add(profile.banner);
   if (isProfileAssetHash(profile.backgroundImage)) {
     images.add(profile.backgroundImage);
@@ -178,14 +189,31 @@ export const collectProfileAssetRefs = (
   const fontRef = parseFontRef(profile.pageFontFamily);
   if (fontRef) fonts.add(`${fontRef.hash}.${fontRef.ext}`);
 
+  const nameFontRef = parseFontRef(profile.displayNameStyle?.font);
+  if (nameFontRef) fonts.add(`${nameFontRef.hash}.${nameFontRef.ext}`);
+
   const audioHash = profile.profileMusic?.audioHash;
   if (isProfileAssetHash(audioHash)) music.add(audioHash);
 
   for (const block of profile.blocks ?? []) {
-    const candidate = block as { type?: string; src?: string };
+    const candidate = block as {
+      type?: string;
+      src?: string;
+      images?: { src?: string }[];
+      appearance?: { font?: string | null } | null;
+    };
     if (candidate.type === "image" && isProfileAssetHash(candidate.src)) {
       images.add(candidate.src);
     }
+
+    if (candidate.type === "gallery") {
+      for (const galleryImage of candidate.images ?? []) {
+        if (isProfileAssetHash(galleryImage.src)) images.add(galleryImage.src);
+      }
+    }
+
+    const blockFontRef = parseFontRef(candidate.appearance?.font);
+    if (blockFontRef) fonts.add(`${blockFontRef.hash}.${blockFontRef.ext}`);
   }
 
   for (const block of profile.mobileBlocks ?? []) {
@@ -272,13 +300,33 @@ const deleteS3Object = async (key: string): Promise<void> => {
   }
 };
 
+const mergeProfileAssetRefs = (
+  sources: (ProfileAssetSource | null | undefined)[],
+): ProfileAssetRefs => {
+  const merged: ProfileAssetRefs = {
+    images: new Set(),
+    music: new Set(),
+    fonts: new Set(),
+  };
+
+  for (const source of sources) {
+    if (!source) continue;
+    const refs = collectProfileAssetRefs(source);
+    for (const hash of refs.images) merged.images.add(hash);
+    for (const hash of refs.music) merged.music.add(hash);
+    for (const token of refs.fonts) merged.fonts.add(token);
+  }
+
+  return merged;
+};
+
 export const cleanupOrphanedProfileAssets = async (
   userId: string,
-  previous: ProfileAssetSource | null | undefined,
-  next: ProfileAssetSource,
+  previousSources: (ProfileAssetSource | null | undefined)[],
+  nextSources: (ProfileAssetSource | null | undefined)[],
 ): Promise<void> => {
-  const previousRefs = collectProfileAssetRefs(previous ?? {});
-  const nextRefs = collectProfileAssetRefs(next);
+  const previousRefs = mergeProfileAssetRefs(previousSources);
+  const nextRefs = mergeProfileAssetRefs(nextSources);
 
   const keysToDelete: string[] = [];
 

@@ -17,6 +17,8 @@ export * from "./reactions";
 export * from "./Voice";
 export * from "./Postmark";
 export * from "./profileAssets";
+export * from "./profileAssetKeep";
+export * from "./profileAssetPending";
 export * from "./hashtags";
 export * from "./postEngagement";
 export * from "./blocks";

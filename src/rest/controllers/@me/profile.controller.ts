@@ -4,18 +4,26 @@ import {
   db,
   toPublicUser,
   userProfilesTable,
+  userProfileVersionsTable,
   usersTable,
 } from "@mutualzz/database";
 import type {
   APIPrivateUser,
+  APIProfileBlock,
   APIProfileMusic,
+  APIProfileTheme,
+  APIDisplayNameStyle,
   APIUserProfile,
+  APIUserProfileSnapshot,
+  APIUserProfileVersion,
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
   buildEmbed,
   bucketName,
   cleanupOrphanedProfileAssets,
+  loadUserAssetKeepSources,
+  markProfileAssetPending,
   ensureProfileImage,
   profileFontKey,
   lookupDeezerTrack,
@@ -41,6 +49,7 @@ import {
 import {
   isProfileConfigured,
   mapUserProfileRow,
+  type UserProfileRow,
 } from "../../../util/profileAssets.ts";
 import {
   fontExtFromFile,
@@ -52,11 +61,16 @@ import {
   validateProfileMusicPreview,
   validateProfileMusicSearch,
   validateProfileUpdate,
+  validateProfileVersionDelete,
 } from "@mutualzz/validators";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { isDeepStrictEqual } from "node:util";
 import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
-import { assertCanViewUserProfile } from "@mutualzz/util/privacy.ts";
+import {
+  areFriends,
+  assertCanViewUserProfile,
+} from "@mutualzz/util/privacy.ts";
 
 const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
   woff2: "font/woff2",
@@ -67,6 +81,95 @@ const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
 
 const toAPIUserProfile = mapUserProfileRow;
 
+const PROFILE_VERSION_LIMIT = 10;
+
+const isBlockOnlyMe = (block: APIProfileBlock) =>
+  !!block.hidden || block.visibility === "nobody";
+
+const filterBlocksForViewer = async (
+  blocks: APIProfileBlock[],
+  ownerId: string,
+  viewerId: string | undefined,
+) => {
+  const publicBlocks = blocks.filter((block) => !isBlockOnlyMe(block));
+  if (!publicBlocks.some((block) => block.visibility === "friends")) {
+    return publicBlocks;
+  }
+
+  const viewerIsFriend = viewerId ? await areFriends(ownerId, viewerId) : false;
+  return viewerIsFriend
+    ? publicBlocks
+    : publicBlocks.filter((block) => block.visibility !== "friends");
+};
+
+const toProfileSnapshot = (
+  row: UserProfileRow,
+  pronouns: string | null,
+): APIUserProfileSnapshot => {
+  const profile = mapUserProfileRow(row, pronouns);
+  return {
+    backgroundColor: profile.backgroundColor,
+    backgroundImage: profile.backgroundImage,
+    backgroundImageFit: profile.backgroundImageFit,
+    banner: profile.banner,
+    bio: profile.bio,
+    pronouns: profile.pronouns,
+    pageFontFamily: profile.pageFontFamily,
+    theme: profile.theme,
+    displayNameStyle: profile.displayNameStyle,
+    profileMusic: profile.profileMusic,
+    blocks: profile.blocks,
+    mobileBlocks: profile.mobileBlocks,
+  };
+};
+
+const recordProfileVersion = async (
+  userId: string,
+  snapshot: APIUserProfileSnapshot,
+  savedAt: Date,
+): Promise<APIUserProfileSnapshot[]> => {
+  await db.insert(userProfileVersionsTable).values({
+    userId: BigInt(userId),
+    snapshot,
+    savedAt,
+  });
+
+  const staleVersions = await db
+    .select({ id: userProfileVersionsTable.id })
+    .from(userProfileVersionsTable)
+    .where(eq(userProfileVersionsTable.userId, BigInt(userId)))
+    .orderBy(
+      desc(userProfileVersionsTable.savedAt),
+      desc(userProfileVersionsTable.id),
+    )
+    .offset(PROFILE_VERSION_LIMIT);
+
+  if (staleVersions.length === 0) return [];
+
+  const removedVersions = await db
+    .delete(userProfileVersionsTable)
+    .where(
+      inArray(
+        userProfileVersionsTable.id,
+        staleVersions.map((version) => version.id),
+      ),
+    )
+    .returning({ snapshot: userProfileVersionsTable.snapshot });
+
+  return removedVersions.map((version) => version.snapshot);
+};
+
+const loadProfileVersions = (userId: string) =>
+  db
+    .select()
+    .from(userProfileVersionsTable)
+    .where(eq(userProfileVersionsTable.userId, BigInt(userId)))
+    .orderBy(
+      desc(userProfileVersionsTable.savedAt),
+      desc(userProfileVersionsTable.id),
+    )
+    .limit(PROFILE_VERSION_LIMIT);
+
 const emptyProfile = (
   userId: string,
   pronouns?: string | null,
@@ -75,10 +178,13 @@ const emptyProfile = (
   configured: false,
   backgroundColor: null,
   backgroundImage: null,
+  backgroundImageFit: null,
   banner: null,
   bio: null,
   pronouns: pronouns ?? null,
   pageFontFamily: null,
+  theme: null,
+  displayNameStyle: null,
   profileMusic: null,
   blocks: [],
   mobileBlocks: [],
@@ -151,6 +257,8 @@ export default class ProfileController {
     res: Response,
     userId: string,
     pronouns?: string | null,
+    includeHiddenBlocks?: boolean,
+    viewerId?: string,
   ) {
     const profile = await execNormalized<
       typeof userProfilesTable.$inferSelect | null
@@ -169,7 +277,18 @@ export default class ProfileController {
     const apiProfile = await hydrateUserProfileMusicPreviews(
       toAPIUserProfile(profile, pronouns ?? null),
     );
-    return res.status(HttpStatusCode.Success).json(apiProfile);
+    const visibleProfile = includeHiddenBlocks
+      ? apiProfile
+      : {
+          ...apiProfile,
+          blocks: await filterBlocksForViewer(
+            apiProfile.blocks,
+            userId,
+            viewerId,
+          ),
+        };
+
+    return res.status(HttpStatusCode.Success).json(visibleProfile);
   }
 
   static async get(req: Request, res: Response, next: NextFunction) {
@@ -188,7 +307,15 @@ export default class ProfileController {
 
       await assertCanViewUserProfile(viewerId, user.id);
 
-      return ProfileController.sendProfile(res, user.id, user.pronouns ?? null);
+      const isOwner = !!viewerId && String(viewerId) === String(user.id);
+
+      return ProfileController.sendProfile(
+        res,
+        user.id,
+        user.pronouns ?? null,
+        isOwner,
+        viewerId ? String(viewerId) : undefined,
+      );
     } catch (err) {
       next(err);
     }
@@ -204,6 +331,7 @@ export default class ProfileController {
         res,
         String(req.user.id),
         req.user.pronouns ?? null,
+        true,
       );
     } catch (err) {
       next(err);
@@ -262,9 +390,15 @@ export default class ProfileController {
       const payload = {
         backgroundColor: body.backgroundColor ?? null,
         backgroundImage: body.backgroundImage ?? null,
+        backgroundImageFit: body.backgroundImage
+          ? (body.backgroundImageFit ?? null)
+          : null,
         banner: body.banner ?? null,
         bio: body.bio ?? null,
         pageFontFamily: body.pageFontFamily ?? null,
+        theme: (body.theme ?? null) as APIProfileTheme | null,
+        displayNameStyle: (body.displayNameStyle ??
+          null) as APIDisplayNameStyle | null,
         profileMusic,
         blocks: normalizedBlocks,
         mobileBlocks: normalizedMobileBlocks,
@@ -304,10 +438,30 @@ export default class ProfileController {
         );
       }
 
+      const previousSnapshot = existing
+        ? toProfileSnapshot(existing, user.pronouns ?? null)
+        : null;
+      const prunedSnapshots =
+        existing &&
+        previousSnapshot &&
+        !isDeepStrictEqual(
+          previousSnapshot,
+          toProfileSnapshot(updated, pronouns),
+        )
+          ? await recordProfileVersion(
+              user.id,
+              previousSnapshot,
+              new Date(existing.updatedAt),
+            )
+          : [];
+
       const updatedUser = await execNormalized<APIPrivateUser | null>(
         db
           .update(usersTable)
-          .set({ pronouns })
+          .set({
+            pronouns,
+            displayNameStyle: payload.displayNameStyle,
+          })
           .where(eq(usersTable.id, BigInt(user.id)))
           .returning()
           .then((rows) => rows[0] ?? null),
@@ -357,9 +511,71 @@ export default class ProfileController {
       ]);
 
       fireAndForget(
-        () => cleanupOrphanedProfileAssets(user.id, existing, payload),
+        async () => {
+          await cleanupOrphanedProfileAssets(
+            user.id,
+            [existing, ...prunedSnapshots],
+            [payload, ...(await loadUserAssetKeepSources(user.id))],
+          );
+        },
         {
           label: "profile:cleanupOrphanedAssets",
+          meta: { userId: user.id },
+        },
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getVersions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const rows = await loadProfileVersions(user.id);
+
+      const versions: APIUserProfileVersion[] = rows.map((row) => ({
+        id: String(row.id),
+        savedAt: row.savedAt,
+        profile: row.snapshot,
+      }));
+
+      return res.status(HttpStatusCode.Success).json(versions);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteVersion(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user } = req;
+      const { versionId } = validateProfileVersionDelete.parse(req.params);
+
+      const removedVersions = await db
+        .delete(userProfileVersionsTable)
+        .where(
+          and(
+            eq(userProfileVersionsTable.id, Number(versionId)),
+            eq(userProfileVersionsTable.userId, BigInt(user.id)),
+          ),
+        )
+        .returning({ snapshot: userProfileVersionsTable.snapshot });
+
+      if (removedVersions.length === 0) {
+        throw new HttpException(HttpStatusCode.NotFound, "Version not found");
+      }
+
+      res.status(HttpStatusCode.NoContent).send();
+
+      fireAndForget(
+        async () => {
+          await cleanupOrphanedProfileAssets(
+            user.id,
+            removedVersions.map((version) => version.snapshot),
+            await loadUserAssetKeepSources(user.id),
+          );
+        },
+        {
+          label: "profile:cleanupDeletedVersionAssets",
           meta: { userId: user.id },
         },
       );
@@ -444,6 +660,7 @@ export default class ProfileController {
             );
           }
 
+          await markProfileAssetPending(user.id, "music", hash);
           return res.status(HttpStatusCode.Success).json({ hash });
         }
 
@@ -470,6 +687,8 @@ export default class ProfileController {
               }),
             );
           }
+
+          await markProfileAssetPending(user.id, "font", `${hash}.${ext}`);
 
           const displayName = file.originalname
             .replace(/\.(woff2|woff|ttf|otf)$/i, "")
@@ -501,6 +720,7 @@ export default class ProfileController {
           }
 
           const hash = await ensureProfileImage(user.id, buffer, isGif);
+          await markProfileAssetPending(user.id, "image", hash);
 
           return res.status(HttpStatusCode.Success).json({ hash });
         }

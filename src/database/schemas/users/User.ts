@@ -1,4 +1,4 @@
-import type { APIPrivateUser } from "@mutualzz/types";
+import type { APIDisplayNameStyle, APIPrivateUser } from "@mutualzz/types";
 import { sql } from "drizzle-orm";
 import {
     bigint,
@@ -25,6 +25,7 @@ export const usersTable = pgTable(
         accentColor: text().notNull(),
         globalName: text(),
         pronouns: text(),
+        displayNameStyle: jsonb().$type<APIDisplayNameStyle | null>(),
 
         defaultAvatar: jsonb().$type<DefaultAvatar>().notNull(),
         avatar: text(),

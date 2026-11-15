@@ -6,6 +6,16 @@ const router = createRouter();
 
 router.get("/", createLimiter(60_000, 60), ProfileController.getMe);
 router.put("/", createLimiter(60_000, 20), ProfileController.update);
+router.get(
+  "/versions",
+  createLimiter(60_000, 30),
+  ProfileController.getVersions,
+);
+router.delete(
+  "/versions/:versionId",
+  createLimiter(60_000, 30),
+  ProfileController.deleteVersion,
+);
 router.post(
   "/assets",
   createLimiter(60_000, 20),
