@@ -1,0 +1,1 @@
+ALTER TABLE "user_profiles" ALTER COLUMN "displayNameStyle" SET DATA TYPE jsonb USING CASE WHEN "displayNameStyle" IS NULL THEN NULL WHEN left(trim("displayNameStyle"), 1) = '{' THEN "displayNameStyle"::jsonb ELSE jsonb_build_object('color', "displayNameStyle") END;

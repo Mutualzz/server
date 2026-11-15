@@ -700,6 +700,13 @@
       "when": 1794660313936,
       "tag": "0099_quick_mac_gargan",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1794707177492,
+      "tag": "0100_display_name_style_jsonb",
+      "breakpoints": true
     }
   ],
   "version": "7"
