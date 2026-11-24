@@ -25,6 +25,35 @@ export default class ThemesController {
       const urlExt = path.extname(asset).replace(".", "").toLowerCase();
       const isAnimatedHash = baseName.startsWith("a_");
 
+      if (urlExt === "mp4") {
+        if (!isAnimatedHash)
+          throw new HttpException(
+            HttpStatusCode.NotFound,
+            "Background video not found",
+          );
+        let videoBody: Uint8Array;
+        try {
+          const { Body } = await s3Client.send(
+            new GetObjectCommand({
+              Bucket: bucketName,
+              Key: `themes/${themeId}/background/${baseName}.mp4`,
+            }),
+          );
+          if (!Body) throw new Error("Empty body");
+          videoBody = await Body.transformToByteArray();
+        } catch {
+          throw new HttpException(
+            HttpStatusCode.NotFound,
+            "Background video not found",
+          );
+        }
+        res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+        res.setHeader("ETag", contentEtag(videoBody));
+        res.setHeader("Content-Type", "video/mp4");
+        res.status(HttpStatusCode.Success).end(Buffer.from(videoBody));
+        return;
+      }
+
       let targetFormat = normalizeFormat(format) ?? normalizeFormat(urlExt);
 
       const explicitAnimated = ["true", "1", "on", "yes"].includes(

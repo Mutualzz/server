@@ -3,6 +3,7 @@ import { db, themesTable } from "@mutualzz/database";
 import type { APITheme } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
+  convertGifToMp4,
   deleteThemeBackgroundImage,
   execNormalized,
   fireAndForget,
@@ -125,6 +126,40 @@ export default class MeThemesController {
         label: "cache:set:theme",
         meta: { themeId },
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async previewBackground(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      if (!req.file)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Background image is required",
+        );
+
+      const imageFile = imageFileValidator.parse(req.file);
+      if (imageFile.mimetype !== "image/gif")
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Only animated GIFs have a video preview",
+        );
+
+      const video = await convertGifToMp4(imageFile.buffer);
+      if (!video)
+        throw new HttpException(
+          HttpStatusCode.BadRequest,
+          "Could not convert the GIF",
+        );
+
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Cache-Control", "no-store");
+      res.status(HttpStatusCode.Success).end(video);
     } catch (error) {
       next(error);
     }

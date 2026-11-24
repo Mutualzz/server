@@ -5,6 +5,13 @@ import { createLimiter, createRouter } from "@mutualzz/util";
 const router = createRouter();
 
 router.post("/", createLimiter(60_000, 30), MeThemesController.create);
+router.post(
+  "/background-preview",
+  createLimiter(60_000, 10),
+  upload.single("backgroundImage"),
+  scanUploads,
+  MeThemesController.previewBackground,
+);
 router.patch("/:themeId", createLimiter(60_000, 30), MeThemesController.update);
 router.put(
   "/:themeId/background",
