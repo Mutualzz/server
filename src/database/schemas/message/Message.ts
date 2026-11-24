@@ -1,4 +1,4 @@
-import { usersTable } from "./users/User";
+import { usersTable } from "../users/User";
 import type {
   APIAttachment,
   APICodedLink,
@@ -17,8 +17,8 @@ import {
   timestamp,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { channelsTable } from "./channel/Channel.ts";
-import { spacesTable } from "./spaces";
+import { channelsTable } from "../channel/Channel";
+import { spacesTable } from "../spaces/Space";
 import { messageReactionsTable } from "./MessageReaction";
 
 export const messagesTable = pgTable(
@@ -80,16 +80,23 @@ export const messagesTable = pgTable(
     mentions: jsonb().$type<APIMessageMention[]>().notNull().default([]),
   },
   (table) => [
-    index("message_channel_id_idx").on(table.channelId),
-    index("message_created_at_idx").on(table.createdAt),
-    index("message_channel_created_at_idx").on(
-      table.channelId,
+    index("message_channel_id_id_idx").on(table.channelId, table.id),
+    index("message_space_author_created_at_idx").on(
+      table.spaceId,
+      table.authorId,
       table.createdAt,
     ),
+    index("message_channel_nonce_idx")
+      .on(table.channelId, table.nonce)
+      .where(sql`${table.nonce} is not null`),
+    index("message_created_at_idx").on(table.createdAt),
     index("message_channel_pinned_idx")
       .on(table.channelId, table.pinnedAt)
       .where(sql`${table.pinned} = true`),
-    index("message_mentions_gin_idx").using("gin", table.mentions),
+    index("message_content_trgm_idx").using(
+      "gin",
+      table.content.op("gin_trgm_ops"),
+    ),
   ],
 );
 

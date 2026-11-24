@@ -1,6 +1,6 @@
-import { expressionsTable } from "./Expression";
+import { expressionsTable } from "../Expression";
 import { messagesTable } from "./Message";
-import { usersTable } from "./users/User";
+import { usersTable } from "../users/User";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,

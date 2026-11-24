@@ -4,6 +4,7 @@ import type { WebSocket } from "../util/WebSocket";
 import { SessionRuntime } from "../util/SessionRuntime";
 import { PresenceService } from "../presence/Presence.service.ts";
 import { VoiceStateService } from "../voice/VoiceState.service.ts";
+import { touchLastSeen } from "../util/LastSeen.ts";
 
 export async function Close(this: WebSocket, code: number, reason: Buffer) {
   logger.info(
@@ -16,6 +17,7 @@ export async function Close(this: WebSocket, code: number, reason: Buffer) {
   PresenceService.onSocketClose(this);
 
   await PresenceService.onDisconnect(this.userId, this.sessionId);
+  void touchLastSeen(this.userId);
 
   if (
     !this.sessionId ||

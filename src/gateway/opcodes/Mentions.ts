@@ -1,6 +1,7 @@
 import {
   db,
   mentionDismissalsTable,
+  messageMentionsTable,
   messagesTable,
   spaceMemberRolesTable,
   spaceMembersTable,
@@ -24,9 +25,6 @@ import {
   lt,
   ne,
   notExists,
-  or,
-  sql,
-  type SQL,
 } from "drizzle-orm";
 import { filterReadable, loadHydratedMessages } from "../util/MessageAccess";
 import { Send } from "../util/Send";
@@ -53,9 +51,6 @@ const ackInvalid = async (socket: WebSocket, data: unknown) => {
       message: "Invalid request",
     });
 };
-
-const mentionsContain = (mention: { type: string; id?: string }) =>
-  sql`${messagesTable.mentions} @> ${JSON.stringify([mention])}::jsonb`;
 
 export async function onMentionList(this: WebSocket, { d }: GatewayPayload) {
   const { userId } = this;
@@ -84,31 +79,27 @@ export async function onMentionList(this: WebSocket, { d }: GatewayPayload) {
         .where(eq(spaceMemberRolesTable.userId, BigInt(userId)))
     : [];
 
-  const mentionConditions: SQL[] = [
-    mentionsContain({ type: "user", id: userId }),
-    ...roleRows.map((row) =>
-      mentionsContain({ type: "role", id: row.roleId.toString() }),
-    ),
+  const targetIds = [
+    BigInt(userId),
+    ...roleRows.map((row) => row.roleId),
+    ...(includeEveryone ? spaceIds : []),
   ];
 
-  if (includeEveryone && spaceIds.length > 0)
-    mentionConditions.push(
-      and(
-        mentionsContain({ type: "everyone" }),
-        inArray(messagesTable.spaceId, spaceIds),
-      )!,
-    );
-
   const candidates = await db
-    .select({ id: messagesTable.id, channelId: messagesTable.channelId })
-    .from(messagesTable)
+    .selectDistinct({
+      id: messageMentionsTable.messageId,
+      channelId: messageMentionsTable.channelId,
+    })
+    .from(messageMentionsTable)
     .where(
       and(
-        or(...mentionConditions),
-        ne(messagesTable.authorId, BigInt(userId)),
-        spaceId ? eq(messagesTable.spaceId, BigInt(spaceId)) : undefined,
-        before ? lt(messagesTable.id, BigInt(before)) : undefined,
-        clearedBefore ? gt(messagesTable.id, clearedBefore) : undefined,
+        inArray(messageMentionsTable.targetId, targetIds),
+        ne(messageMentionsTable.authorId, BigInt(userId)),
+        spaceId ? eq(messageMentionsTable.spaceId, BigInt(spaceId)) : undefined,
+        before ? lt(messageMentionsTable.messageId, BigInt(before)) : undefined,
+        clearedBefore
+          ? gt(messageMentionsTable.messageId, clearedBefore)
+          : undefined,
         notExists(
           db
             .select({ messageId: mentionDismissalsTable.messageId })
@@ -116,13 +107,16 @@ export async function onMentionList(this: WebSocket, { d }: GatewayPayload) {
             .where(
               and(
                 eq(mentionDismissalsTable.userId, BigInt(userId)),
-                eq(mentionDismissalsTable.messageId, messagesTable.id),
+                eq(
+                  mentionDismissalsTable.messageId,
+                  messageMentionsTable.messageId,
+                ),
               ),
             ),
         ),
       ),
     )
-    .orderBy(desc(messagesTable.id))
+    .orderBy(desc(messageMentionsTable.messageId))
     .limit(MENTIONS_PAGE_SIZE + 1);
 
   const page = candidates.slice(0, MENTIONS_PAGE_SIZE);

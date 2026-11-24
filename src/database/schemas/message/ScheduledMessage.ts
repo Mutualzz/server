@@ -13,8 +13,8 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { channelsTable } from "./channel";
-import { usersTable } from "./users/User";
+import { channelsTable } from "../channel/Channel";
+import { usersTable } from "../users/User";
 
 export const scheduledMessagesTable = pgTable(
   "scheduled_messages",

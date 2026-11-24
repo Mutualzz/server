@@ -1,5 +1,4 @@
 export * from "./itunesMusic";
-export * from "./deezerMusic";
 export * from "./hydrateProfileMusicPreviews";
 export * from "./Common";
 export * from "./Constants";

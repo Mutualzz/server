@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   index,
@@ -6,12 +6,12 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { channelsTable } from "./channel";
+import { channelsTable } from "../channel/Channel";
 import { messagesTable } from "./Message";
-import { usersTable } from "./users/User";
+import { usersTable } from "../users/User";
 
-export const messageBookmarksTable = pgTable(
-  "message_bookmarks",
+export const messageRemindersTable = pgTable(
+  "message_reminders",
   {
     userId: bigint({ mode: "bigint" })
       .notNull()
@@ -23,33 +23,38 @@ export const messageBookmarksTable = pgTable(
       .notNull()
       .references(() => channelsTable.id, { onDelete: "cascade" }),
 
+    remindAt: timestamp({ withTimezone: true, mode: "date" }).notNull(),
+    firedAt: timestamp({ withTimezone: true, mode: "date" }),
+
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),
   },
   (table) => [
-    uniqueIndex("message_bookmarks_uq").on(table.userId, table.messageId),
-    index("message_bookmarks_user_created_idx").on(
+    uniqueIndex("message_reminders_uq").on(table.userId, table.messageId),
+    index("message_reminders_user_remind_at_idx").on(
       table.userId,
-      table.createdAt.desc(),
+      table.remindAt,
     ),
-    index("message_bookmarks_message_id_idx").on(table.messageId),
+    index("message_reminders_pending_idx")
+      .on(table.remindAt)
+      .where(sql`${table.firedAt} is null`),
   ],
 );
 
-export const messageBookmarkRelations = relations(
-  messageBookmarksTable,
+export const messageReminderRelations = relations(
+  messageRemindersTable,
   ({ one }) => ({
     user: one(usersTable, {
-      fields: [messageBookmarksTable.userId],
+      fields: [messageRemindersTable.userId],
       references: [usersTable.id],
     }),
     message: one(messagesTable, {
-      fields: [messageBookmarksTable.messageId],
+      fields: [messageRemindersTable.messageId],
       references: [messagesTable.id],
     }),
     channel: one(channelsTable, {
-      fields: [messageBookmarksTable.channelId],
+      fields: [messageRemindersTable.channelId],
       references: [channelsTable.id],
     }),
   }),

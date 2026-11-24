@@ -707,6 +707,76 @@
       "when": 1794707177492,
       "tag": "0100_display_name_style_jsonb",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1795372444288,
+      "tag": "0101_closed_starhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1795372868595,
+      "tag": "0102_sweet_revanche",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1795373728955,
+      "tag": "0103_dear_silvermane",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1795374133526,
+      "tag": "0104_nosy_queen_noir",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1795374153628,
+      "tag": "0105_backfill_message_mentions",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1795374644293,
+      "tag": "0106_magical_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1795374856276,
+      "tag": "0107_enable_pg_trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1795374884938,
+      "tag": "0108_stale_purifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1795467186263,
+      "tag": "0109_cultured_blonde_phantom",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1795467372931,
+      "tag": "0110_sweet_weapon_omega",
+      "breakpoints": true
     }
   ],
   "version": "7"

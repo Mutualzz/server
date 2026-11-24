@@ -1,48 +1,53 @@
 import { LRUCache } from "lru-cache";
 
 export const avatarCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
+  max: 300,
+  ttl: 1000 * 60 * 60 * 24, // 1 day
 });
 
 export const defaultAvatarCache = new LRUCache<string, Uint8Array>({
-    max: 10,
-    ttl: 1000 * 60 * 60 * 24 * 365, // 1 year (because we barely update this, unless we change default avatars)
+  max: 10,
+  ttl: 1000 * 60 * 60 * 24 * 365, // 1 year (because we barely update this, unless we change default avatars)
 });
 
 export const spaceIconCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
+  max: 300,
+  ttl: 1000 * 60 * 60 * 24, // 1 day
 });
 
 export const channelIconCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
+  max: 300,
+  ttl: 1000 * 60 * 60 * 24, // 1 day
 });
 
 export const expressionsCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
+  max: 300,
+  ttl: 1000 * 60 * 60 * 24, // 1 day
 });
 
 export const profileImageCache = new LRUCache<string, Uint8Array>({
-    max: 300,
-    ttl: 1000 * 60 * 60 * 24, // 1 day
+  max: 300,
+  ttl: 1000 * 60 * 60 * 24, // 1 day
 });
 
 export const themeBackgroundCache = new LRUCache<string, Uint8Array>({
-    max: 200,
-    ttl: 1000 * 60 * 60 * 24,
+  max: 200,
+  ttl: 1000 * 60 * 60 * 24,
 });
 
 export const externalImageCache = new LRUCache<string, Uint8Array>({
-    max: 500,
-    maxSize: 64 * 1024 * 1024,
-    sizeCalculation: (value) => value.byteLength || 1,
-    ttl: 1000 * 60 * 60 * 6,
+  max: 500,
+  maxSize: 64 * 1024 * 1024,
+  sizeCalculation: (value) => value.byteLength || 1,
+  ttl: 1000 * 60 * 60 * 6,
+});
+
+export const badgeCache = new LRUCache<string, Uint8Array>({
+  max: 100,
+  ttl: 1000 * 60 * 10,
 });
 
 export const appIconCache = new LRUCache<string, Uint8Array>({
-    max: 500,
-    ttl: 1000 * 60 * 60 * 24 * 365,
+  max: 500,
+  ttl: 1000 * 60 * 60 * 24 * 365,
 });

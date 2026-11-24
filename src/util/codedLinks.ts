@@ -43,7 +43,9 @@ export function stripInviteUrlsFromContent(
     result = result.replace(codePattern, "");
   }
 
-  result = result.replace(/\s{2,}/g, " ").trim();
+  if (result === content) return content;
+
+  result = result.replace(/[^\S\r\n]{2,}/g, " ").trim();
   return result.length > 0 ? result : null;
 }
 

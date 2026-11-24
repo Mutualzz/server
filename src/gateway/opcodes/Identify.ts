@@ -23,6 +23,7 @@ import type { WebSocket } from "../util/WebSocket";
 import { PresenceService } from "../presence/Presence.service.ts";
 import { VoiceStateService } from "@mutualzz/gateway/voice/VoiceState.service.ts";
 import { CallService } from "../call/Call.service";
+import { touchLastSeen } from "../util/LastSeen.ts";
 
 export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   if (this.userId) return;
@@ -80,6 +81,7 @@ export async function onIdentify(this: WebSocket, data: GatewayPayload) {
   setHeartbeat(this);
 
   await PresenceService.onSocketAuthenticated(this);
+  void touchLastSeen(this.userId);
 
   const readyData = await prepareReadyData(user);
 

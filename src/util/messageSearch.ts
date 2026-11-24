@@ -1,4 +1,4 @@
-import { messagesTable } from "@mutualzz/database";
+import { db, messageMentionsTable, messagesTable } from "@mutualzz/database";
 import type { APIChannel } from "@mutualzz/types";
 import {
   isMessageSearchQueryReady,
@@ -10,6 +10,7 @@ import customParseFormat from "dayjs/plugin/customParseFormat";
 import {
   and,
   eq,
+  exists,
   gte,
   ilike,
   inArray,
@@ -20,19 +21,23 @@ import {
 } from "drizzle-orm";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import { isSnowflakeIdentifier, resolveUserIdentifier } from "./Helpers";
+import { Snowflake } from "./Snowflake";
 
 dayjs.extend(customParseFormat);
+
+function snowflakeToDate(snowflake: string): Date {
+  return new Date(Number(BigInt(snowflake) >> 22n) + Snowflake.EPOCH);
+}
+
+function escapeLikePattern(text: string): string {
+  return text.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
 
 function parseSearchDate(value: string): Date | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  if (isSnowflakeIdentifier(trimmed)) {
-    const timestamp = Number((BigInt(trimmed) >> 22n) + 1420070400000n);
-    if (Number.isFinite(timestamp)) {
-      return new Date(timestamp);
-    }
-  }
+  if (isSnowflakeIdentifier(trimmed)) return snowflakeToDate(trimmed);
 
   const formats = ["YYYY-MM-DD", "YYYY/MM/DD", "M/D/YYYY", "MM/DD/YYYY"];
   for (const format of formats) {
@@ -50,12 +55,7 @@ function parseSearchDateStart(value: string): Date | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  if (isSnowflakeIdentifier(trimmed)) {
-    const timestamp = Number((BigInt(trimmed) >> 22n) + 1420070400000n);
-    if (Number.isFinite(timestamp)) {
-      return new Date(timestamp);
-    }
-  }
+  if (isSnowflakeIdentifier(trimmed)) return snowflakeToDate(trimmed);
 
   const formats = ["YYYY-MM-DD", "YYYY/MM/DD", "M/D/YYYY", "MM/DD/YYYY"];
   for (const format of formats) {
@@ -96,10 +96,18 @@ function hasFilterCondition(filter: MessageSearchHasFilter): SQL {
 }
 
 function mentionsUserCondition(userId: bigint): SQL {
-  return sql`exists (
-    select 1 from jsonb_array_elements(${messagesTable.mentions}) elem
-    where elem->>'id' = ${userId.toString()} and elem->>'type' = 'user'
-  )`;
+  return exists(
+    db
+      .select({ messageId: messageMentionsTable.messageId })
+      .from(messageMentionsTable)
+      .where(
+        and(
+          eq(messageMentionsTable.targetId, userId),
+          eq(messageMentionsTable.messageId, messagesTable.id),
+          eq(messageMentionsTable.type, "user"),
+        ),
+      ),
+  );
 }
 
 function resolveChannelByName(
@@ -159,13 +167,24 @@ export async function buildMessageSearchWhere(
   }
 
   if (parsed.text.trim()) {
-    conditions.push(ilike(messagesTable.content, `%${parsed.text.trim()}%`));
+    conditions.push(
+      ilike(
+        messagesTable.content,
+        `%${escapeLikePattern(parsed.text.trim())}%`,
+      ),
+    );
   }
 
   if (parsed.from) {
-    const authorId = await resolveSearchUserId(parsed.from, options.currentUserId);
+    const authorId = await resolveSearchUserId(
+      parsed.from,
+      options.currentUserId,
+    );
     if (!authorId) {
-      throw new HttpException(HttpStatusCode.BadRequest, "Unknown user in from:");
+      throw new HttpException(
+        HttpStatusCode.BadRequest,
+        "Unknown user in from:",
+      );
     }
     conditions.push(eq(messagesTable.authorId, authorId));
   }
@@ -194,7 +213,10 @@ export async function buildMessageSearchWhere(
 
     const channelId = resolveChannelByName(parsed.in, options.visibleChannels);
     if (!channelId) {
-      throw new HttpException(HttpStatusCode.BadRequest, "Unknown channel in in:");
+      throw new HttpException(
+        HttpStatusCode.BadRequest,
+        "Unknown channel in in:",
+      );
     }
     conditions.push(eq(messagesTable.channelId, channelId));
   }
@@ -206,7 +228,10 @@ export async function buildMessageSearchWhere(
   if (parsed.before) {
     const before = parseSearchDate(parsed.before);
     if (!before) {
-      throw new HttpException(HttpStatusCode.BadRequest, "Invalid before: date");
+      throw new HttpException(
+        HttpStatusCode.BadRequest,
+        "Invalid before: date",
+      );
     }
     conditions.push(lte(messagesTable.createdAt, before));
   }

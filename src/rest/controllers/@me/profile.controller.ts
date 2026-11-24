@@ -16,6 +16,7 @@ import type {
   APIUserProfile,
   APIUserProfileSnapshot,
   APIUserProfileVersion,
+  APIBadgeSettings,
 } from "@mutualzz/types";
 import { HttpException, HttpStatusCode } from "@mutualzz/types";
 import {
@@ -26,7 +27,6 @@ import {
   markProfileAssetPending,
   ensureProfileImage,
   profileFontKey,
-  lookupDeezerTrack,
   lookupItunesTrack,
   emitEvent,
   emitUserUpdate,
@@ -38,10 +38,7 @@ import {
   s3Client,
   hydrateUserProfileMusicPreviews,
   resolveSearchTrackPreviewUrl,
-  searchDeezerTracks,
   searchItunesTracks,
-  toDeezerMusicSearchTrack,
-  toProfileMusicFromDeezerTrack,
   toProfileMusicFromItunesTrack,
   toMusicSearchTrack,
   assertUserVisible,
@@ -71,6 +68,7 @@ import {
   areFriends,
   assertCanViewUserProfile,
 } from "@mutualzz/util/privacy.ts";
+import { normalizeBadgeSettings } from "@mutualzz/bitfield";
 
 const FONT_CONTENT_TYPES: Record<"woff2" | "woff" | "ttf" | "otf", string> = {
   woff2: "font/woff2",
@@ -117,6 +115,7 @@ const toProfileSnapshot = (
     pageFontFamily: profile.pageFontFamily,
     theme: profile.theme,
     displayNameStyle: profile.displayNameStyle,
+    badgeSettings: profile.badgeSettings,
     profileMusic: profile.profileMusic,
     blocks: profile.blocks,
     mobileBlocks: profile.mobileBlocks,
@@ -185,6 +184,7 @@ const emptyProfile = (
   pageFontFamily: null,
   theme: null,
   displayNameStyle: null,
+  badgeSettings: null,
   profileMusic: null,
   blocks: [],
   mobileBlocks: [],
@@ -196,21 +196,11 @@ const isConfigured = isProfileConfigured;
 const resolveProfileMusic = async (input: {
   profileMusicUrl?: string | null;
   profileMusicTrackId?: string | null;
-  profileMusicTrackSource?: "itunes" | "deezer" | null;
+  profileMusicTrackSource?: "itunes" | null;
   profileMusicTitle?: string | null;
   profileMusicAuthorName?: string | null;
 }): Promise<APIProfileMusic | null> => {
   if (input.profileMusicTrackId) {
-    const source = input.profileMusicTrackSource ?? "itunes";
-
-    if (source === "deezer") {
-      const track = await lookupDeezerTrack(input.profileMusicTrackId);
-      if (!track) {
-        throw new HttpException(HttpStatusCode.BadRequest, "Track not found");
-      }
-      return toProfileMusicFromDeezerTrack(track);
-    }
-
     const track = await lookupItunesTrack(input.profileMusicTrackId).catch(
       () => null,
     );
@@ -343,14 +333,6 @@ export default class ProfileController {
       const { user } = req;
       const body = validateProfileUpdate.parse(req.body);
 
-      const profileMusic = await resolveProfileMusic({
-        profileMusicUrl: body.profileMusicUrl,
-        profileMusicTrackId: body.profileMusicTrackId,
-        profileMusicTrackSource: body.profileMusicTrackSource ?? null,
-        profileMusicTitle: body.profileMusicTitle ?? null,
-        profileMusicAuthorName: body.profileMusicAuthorName ?? null,
-      });
-
       const existing = await execNormalized<
         typeof userProfilesTable.$inferSelect | null
       >(
@@ -358,6 +340,20 @@ export default class ProfileController {
           where: eq(userProfilesTable.userId, BigInt(user.id)),
         }),
       );
+
+      const profileMusicSent =
+        body.profileMusicUrl !== undefined ||
+        body.profileMusicTrackId !== undefined;
+
+      const profileMusic = profileMusicSent
+        ? await resolveProfileMusic({
+            profileMusicUrl: body.profileMusicUrl,
+            profileMusicTrackId: body.profileMusicTrackId,
+            profileMusicTrackSource: body.profileMusicTrackSource ?? null,
+            profileMusicTitle: body.profileMusicTitle ?? null,
+            profileMusicAuthorName: body.profileMusicAuthorName ?? null,
+          })
+        : (existing?.profileMusic ?? null);
 
       const normalizedBlocks = body.blocks.map((block) => {
         if (block.type === "draw") {
@@ -385,20 +381,33 @@ export default class ProfileController {
         return block;
       });
 
-      const pronouns = body.pronouns ?? null;
+      const pronouns =
+        body.pronouns === undefined ? (user.pronouns ?? null) : body.pronouns;
+
+      const backgroundImageFit =
+        body.backgroundImageFit === undefined
+          ? (existing?.backgroundImageFit ?? null)
+          : body.backgroundImageFit;
 
       const payload = {
         backgroundColor: body.backgroundColor ?? null,
         backgroundImage: body.backgroundImage ?? null,
-        backgroundImageFit: body.backgroundImage
-          ? (body.backgroundImageFit ?? null)
-          : null,
+        backgroundImageFit: body.backgroundImage ? backgroundImageFit : null,
         banner: body.banner ?? null,
         bio: body.bio ?? null,
         pageFontFamily: body.pageFontFamily ?? null,
-        theme: (body.theme ?? null) as APIProfileTheme | null,
-        displayNameStyle: (body.displayNameStyle ??
-          null) as APIDisplayNameStyle | null,
+        theme:
+          body.theme === undefined
+            ? (existing?.theme ?? null)
+            : (body.theme as APIProfileTheme | null),
+        displayNameStyle:
+          body.displayNameStyle === undefined
+            ? (existing?.displayNameStyle ?? null)
+            : (body.displayNameStyle as APIDisplayNameStyle | null),
+        badgeSettings:
+          body.badgeSettings === undefined
+            ? (existing?.badgeSettings ?? null)
+            : normalizeBadgeSettings(body.badgeSettings),
         profileMusic,
         blocks: normalizedBlocks,
         mobileBlocks: normalizedMobileBlocks,
@@ -461,6 +470,7 @@ export default class ProfileController {
           .set({
             pronouns,
             displayNameStyle: payload.displayNameStyle,
+            badgeSettings: payload.badgeSettings,
           })
           .where(eq(usersTable.id, BigInt(user.id)))
           .returning()
@@ -586,23 +596,12 @@ export default class ProfileController {
 
   static async searchMusic(req: Request, res: Response, next: NextFunction) {
     try {
-      const { q, limit, source } = validateProfileMusicSearch.parse(req.query);
+      const { q, limit } = validateProfileMusicSearch.parse(req.query);
       const searchLimit = Math.min(limit, 10);
 
-      const itunes =
-        source === "itunes" || source === "all"
-          ? (await searchItunesTracks(q, searchLimit)).map(toMusicSearchTrack)
-          : [];
-
-      const deezer =
-        source === "deezer" || source === "all"
-          ? (await searchDeezerTracks(q, searchLimit)).map(
-              toDeezerMusicSearchTrack,
-            )
-          : [];
-
-      const merged = [...itunes, ...deezer];
-      const tracks = merged.slice(0, searchLimit);
+      const tracks = (await searchItunesTracks(q, searchLimit)).map(
+        toMusicSearchTrack,
+      );
 
       return res.status(HttpStatusCode.Success).json({ tracks });
     } catch (err) {

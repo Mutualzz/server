@@ -38,6 +38,7 @@ import {
 import {
   appIconCache,
   avatarCache,
+  badgeCache,
   channelIconCache,
   defaultAvatarCache,
   expressionsCache,
@@ -57,6 +58,7 @@ export const caches = {
   profileImage: profileImageCache,
   themeBackground: themeBackgroundCache,
   appIcon: appIconCache,
+  badge: badgeCache,
   externalImage: externalImageCache,
 
   // REST

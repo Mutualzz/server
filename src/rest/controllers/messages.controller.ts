@@ -349,18 +349,16 @@ export default class MessagesController {
         const right = await execNormalizedMany<APIMessage>(
           db.query.messagesTable.findMany({
             with: {
-              channel: true,
               author: {
                 columns: publicUserColumns,
               },
               repliedTo: true,
-              space: true,
             },
             where: and(
               eq(messagesTable.channelId, BigInt(channelId)),
               lt(messagesTable.id, BigInt(around)),
             ),
-            orderBy: desc(messagesTable.createdAt),
+            orderBy: desc(messagesTable.id),
             limit: halfLimit,
           }),
         );
@@ -368,42 +366,40 @@ export default class MessagesController {
         const left = await execNormalizedMany<APIMessage>(
           db.query.messagesTable.findMany({
             with: {
-              channel: true,
               author: {
                 columns: publicUserColumns,
               },
               repliedTo: true,
-              space: true,
             },
             where: and(
               eq(messagesTable.channelId, BigInt(channelId)),
               gte(messagesTable.id, BigInt(around)),
             ),
-            orderBy: asc(messagesTable.createdAt),
+            orderBy: asc(messagesTable.id),
             limit: afterLimit,
           }),
         );
 
-        messages = [...left, ...right].sort(
-          (a, b) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        );
+        messages = [...left, ...right].sort((first, second) => {
+          const firstId = BigInt(first.id);
+          const secondId = BigInt(second.id);
+          if (firstId === secondId) return 0;
+          return firstId < secondId ? -1 : 1;
+        });
       } else if (before) {
         messages = await execNormalizedMany<APIMessage>(
           db.query.messagesTable.findMany({
             with: {
-              channel: true,
               author: {
                 columns: publicUserColumns,
               },
               repliedTo: true,
-              space: true,
             },
             where: and(
               eq(messagesTable.channelId, BigInt(channelId)),
               lt(messagesTable.id, BigInt(before)),
             ),
-            orderBy: desc(messagesTable.createdAt),
+            orderBy: desc(messagesTable.id),
             limit,
           }),
         );
@@ -411,17 +407,16 @@ export default class MessagesController {
         messages = await execNormalizedMany<APIMessage>(
           db.query.messagesTable.findMany({
             with: {
-              channel: true,
               author: {
                 columns: publicUserColumns,
               },
-              space: true,
+              repliedTo: true,
             },
             where: and(
               eq(messagesTable.channelId, BigInt(channelId)),
               gte(messagesTable.id, BigInt(after)),
             ),
-            orderBy: asc(messagesTable.createdAt),
+            orderBy: asc(messagesTable.id),
             limit,
           }),
         );
@@ -429,15 +424,13 @@ export default class MessagesController {
         messages = await execNormalizedMany<APIMessage>(
           db.query.messagesTable.findMany({
             with: {
-              channel: true,
               author: {
                 columns: publicUserColumns,
               },
               repliedTo: true,
-              space: true,
             },
             where: eq(messagesTable.channelId, BigInt(channelId)),
-            orderBy: desc(messagesTable.createdAt),
+            orderBy: desc(messagesTable.id),
             limit,
           }),
         );
@@ -1182,7 +1175,7 @@ export default class MessagesController {
       const rows = await execNormalizedMany<APIMessage>(
         db.query.messagesTable.findMany({
           where,
-          orderBy: desc(messagesTable.createdAt),
+          orderBy: desc(messagesTable.id),
           limit: 25,
           with: {
             author: {
@@ -1246,7 +1239,7 @@ export default class MessagesController {
       const rows = await execNormalizedMany<APIMessage>(
         db.query.messagesTable.findMany({
           where,
-          orderBy: desc(messagesTable.createdAt),
+          orderBy: desc(messagesTable.id),
           limit: 50,
           with: {
             author: {

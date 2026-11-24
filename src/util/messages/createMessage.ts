@@ -6,6 +6,7 @@ import {
   postsTable,
   spaceMembersTable,
   spaceMemberRolesTable,
+  messageMentionsTable,
 } from "@mutualzz/database";
 import {
   type APIAttachment,
@@ -77,6 +78,8 @@ export interface CreateMessageInput extends Pick<
   spoilers?: boolean[];
   preparedAttachments?: APIAttachment[];
 }
+
+const MAX_POSTGRES_BIGINT = 9223372036854775807n;
 
 export async function createMessage(input: CreateMessageInput) {
   const user = input.author;
@@ -481,10 +484,46 @@ export async function createMessage(input: CreateMessageInput) {
       label: "readState:mentions",
       run: async () => {
         if (uniqueMentions.length > 0) {
-          await db
-            .update(messagesTable)
-            .set({ mentions: uniqueMentions })
-            .where(eq(messagesTable.id, BigInt(newMessage.id)));
+          const mentionContext = {
+            messageId: BigInt(newMessage.id),
+            channelId: BigInt(channel.id),
+            spaceId: channel.spaceId ? BigInt(channel.spaceId) : null,
+            authorId: BigInt(user.id),
+          };
+
+          const mentionRows = uniqueMentions.flatMap(
+            (mention): (typeof messageMentionsTable.$inferInsert)[] => {
+              if (mention.type === "here") return [];
+
+              if (mention.type === "everyone") {
+                if (!channel.spaceId) return [];
+                return [
+                  {
+                    ...mentionContext,
+                    targetId: BigInt(channel.spaceId),
+                    type: mention.type,
+                  },
+                ];
+              }
+
+              const targetId = BigInt(mention.id);
+              if (targetId > MAX_POSTGRES_BIGINT) return [];
+              return [{ ...mentionContext, targetId, type: mention.type }];
+            },
+          );
+
+          await db.transaction(async (transaction) => {
+            await transaction
+              .update(messagesTable)
+              .set({ mentions: uniqueMentions })
+              .where(eq(messagesTable.id, BigInt(newMessage.id)));
+
+            if (mentionRows.length > 0)
+              await transaction
+                .insert(messageMentionsTable)
+                .values(mentionRows)
+                .onConflictDoNothing();
+          });
 
           const userMentionIds = userMentionMatches.map((m) => m.id.toString());
           const roleMentionIds = roleMentionMatches.map((m) => m.id.toString());

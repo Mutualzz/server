@@ -137,7 +137,14 @@ export default class StaffController {
       if (!user)
         throw new HttpException(HttpStatusCode.NotFound, "User not found");
 
-      res.status(HttpStatusCode.Success).json(user);
+      const seen = await db.query.usersTable.findFirst({
+        columns: { lastSeenAt: true },
+        where: eq(usersTable.id, BigInt(user.id)),
+      });
+
+      res
+        .status(HttpStatusCode.Success)
+        .json({ ...user, lastSeenAt: seen?.lastSeenAt ?? null });
     } catch (err) {
       next(err);
     }

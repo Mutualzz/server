@@ -14,6 +14,7 @@ import type {
   APIProfileTheme,
   APIDisplayNameStyle,
   ProfileBackgroundImageFit,
+  APIBadgeSettings,
 } from "@mutualzz/types";
 import { usersTable } from "./User";
 
@@ -35,6 +36,7 @@ export const userProfilesTable = pgTable("user_profiles", {
   pageFontFamily: text(),
   theme: jsonb().$type<APIProfileTheme | null>(),
   displayNameStyle: jsonb().$type<APIDisplayNameStyle | null>(),
+  badgeSettings: jsonb().$type<APIBadgeSettings | null>(),
 
   profileMusic: jsonb().$type<APIProfileMusic | null>(),
 

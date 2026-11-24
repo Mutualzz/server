@@ -9,11 +9,7 @@ export * from "./Theme";
 export * from "./Invite";
 
 // Message
-export * from "./Message";
-export * from "./MessageReaction";
-export * from "./MessageBookmark";
-export * from "./MessageReminder";
-export * from "./ScheduledMessage";
+export * from "./message";
 export * from "./Notification";
 export * from "./MentionDismissal";
 

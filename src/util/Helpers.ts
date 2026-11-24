@@ -234,6 +234,7 @@ export const publicUserColumns = {
   dateOfBirth: false,
   previousAvatars: false,
   email: false,
+  lastSeenAt: false,
 } as const;
 
 export async function isChannelRecipient(channelId: string, userId: string) {

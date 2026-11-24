@@ -5,10 +5,9 @@ import type {
   APIProfileMusicSearchTrack,
   APIUserProfile,
 } from "@mutualzz/types";
-import { lookupDeezerTrack } from "./deezerMusic";
 import { lookupItunesTrack } from "./itunesMusic";
 
-type MusicSource = "itunes" | "deezer";
+type MusicSource = "itunes";
 
 interface PreviewCacheEntry {
   url: string;
@@ -16,22 +15,9 @@ interface PreviewCacheEntry {
 }
 
 const previewCache = new Map<string, PreviewCacheEntry>();
-const DEEZER_CACHE_SKEW_MS = 60_000;
 const ITUNES_CACHE_TTL_MS = 24 * 60 * 60_000;
-const DEEZER_FALLBACK_TTL_MS = 10 * 60_000;
 
 const cacheKey = (source: MusicSource, id: string) => `${source}:${id}`;
-
-const deezerExpiryMs = (previewUrl: string) => {
-  try {
-    const hdnea = new URL(previewUrl).searchParams.get("hdnea");
-    const match = hdnea?.match(/(?:^|~)exp=(\d+)/);
-    if (!match?.[1]) return Date.now() + DEEZER_FALLBACK_TTL_MS;
-    return Number(match[1]) * 1000 - DEEZER_CACHE_SKEW_MS;
-  } catch {
-    return Date.now() + DEEZER_FALLBACK_TTL_MS;
-  }
-};
 
 export const resolveSearchTrackPreviewUrl = async (
   source: MusicSource,
@@ -40,17 +26,6 @@ export const resolveSearchTrackPreviewUrl = async (
   const key = cacheKey(source, id);
   const cached = previewCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.url;
-
-  if (source === "deezer") {
-    const track = await lookupDeezerTrack(id).catch(() => null);
-    const url = track?.preview ?? null;
-    if (!url) {
-      previewCache.delete(key);
-      return null;
-    }
-    previewCache.set(key, { url, expiresAt: deezerExpiryMs(url) });
-    return url;
-  }
 
   const track = await lookupItunesTrack(id).catch(() => null);
   const url = track?.previewUrl ?? null;

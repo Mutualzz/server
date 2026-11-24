@@ -11,6 +11,7 @@ import type {
   APIDisplayNameStyle,
   APIUserProfile,
   ProfileBackgroundImageFit,
+  APIBadgeSettings,
 } from "@mutualzz/types";
 import { generateHash } from "./Common";
 import { bucketName, s3Client } from "./S3";
@@ -55,6 +56,7 @@ export interface UserProfileRow {
   pageFontFamily: string | null;
   theme: APIProfileTheme | null;
   displayNameStyle: APIDisplayNameStyle | null;
+  badgeSettings: APIBadgeSettings | null;
   profileMusic: APIProfileMusic | null;
   blocks: APIProfileBlock[];
   mobileBlocks: APIMobileProfileBlock[];
@@ -86,6 +88,7 @@ export function mapUserProfileRow(
     pageFontFamily: row.pageFontFamily,
     theme: row.theme,
     displayNameStyle: row.displayNameStyle,
+    badgeSettings: row.badgeSettings,
     profileMusic: row.profileMusic,
     blocks,
     mobileBlocks: row.mobileBlocks ?? [],

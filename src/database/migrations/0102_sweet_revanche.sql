@@ -1,0 +1,2 @@
+CREATE INDEX "message_space_author_created_at_idx" ON "messages" USING btree ("spaceId","authorId","createdAt");--> statement-breakpoint
+CREATE INDEX "message_channel_nonce_idx" ON "messages" USING btree ("channelId","nonce") WHERE "messages"."nonce" is not null;

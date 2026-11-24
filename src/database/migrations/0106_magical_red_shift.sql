@@ -1,0 +1,1 @@
+DROP INDEX "message_mentions_gin_idx";
